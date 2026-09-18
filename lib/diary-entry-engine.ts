@@ -55,6 +55,10 @@ async function resolveDiaryEntryGeneration(
   const userName = userIdentity?.name ?? "用户";
   const memConfig = loadMemoryConfig();
   const prepared = prepareShortTermContext(character.id, "diary", { history: [] });
+  // 角色写自己的日记只参考角色自己写过的日记，绝不掺进用户手写的「我的日记」——
+  // 否则角色写日记很容易变成回应用户日记，而不是像平常一样正常记录自己的生活。
+  // 用户日记该不该被角色知道，由聊天时的记忆/近期动态注入负责，与这里无关。
+  const ownEntries = entries.filter(entry => entry.authorType !== "user");
 
   const [memories, coreMemories] = await Promise.all([
     retrieveMemoriesForPrompt(character.id, prepared.wbActivationContext, memConfig).catch(() => []),
@@ -75,7 +79,7 @@ async function resolveDiaryEntryGeneration(
     worldBookActivationContext: prepared.wbActivationContext,
     recentBlocks: prepared.recentBlocks,
     unifiedRecentItems: prepared.unifiedRecentItems,
-    diaryEntryContext: formatDiaryEntryContext(entries),
+    diaryEntryContext: formatDiaryEntryContext(ownEntries),
   });
 
   return { character, apiConfig, preset, regexes, messages, userName };

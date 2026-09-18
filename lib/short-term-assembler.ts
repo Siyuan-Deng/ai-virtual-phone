@@ -148,7 +148,11 @@ function formatDiaryEntryForTimeline(entry: DiaryEntry, timeAware: boolean, time
     const markerText = markers.length > 0 ? `（${markers.join(" / ")}）` : "";
     const title = entry.title.trim() || "未命名日记";
     const text = clipTimelineText(body || title, 900);
-    return `${formatPromptEventLabel("日记", entry.createdAt, timeAware, timestampOptions)} ${entry.characterName}写了一篇日记《${title}》${markerText}：${text}`;
+    const signaturePart = entry.authorType === "user" && entry.signature.trim() ? `（署名：${entry.signature.trim()}）` : "";
+    // 「我的日记」是用户手写给角色看的，不能说成是角色自己写的——那样会让模型误以为
+    // 这是角色自己的日记，读到里面对角色说的话时会自相矛盾。
+    const byline = entry.authorType === "user" ? `用户写了一篇给${entry.characterName}的日记` : `${entry.characterName}写了一篇日记`;
+    return `${formatPromptEventLabel("日记", entry.createdAt, timeAware, timestampOptions)} ${byline}《${title}》${markerText}：${text}${signaturePart}`;
 }
 
 /**
@@ -645,9 +649,14 @@ export function loadNativeTimeline(
     }
 
     // ── Diary entries ──
+    // 角色自己写日记时（appId === "diary"）不能把用户写的「我的日记」混进参考材料——
+    // 否则角色写自己的日记很容易变成回应用户日记，而不是像原来一样正常记录自己的生活。
+    // 其余场景（尤其是聊天）应该看到用户日记，让角色"记得"你写过它，所以只在这一个
+    // appId 上做排除，不是全局排除。
     const diaryEntries = loadDiaryEntries().filter(entry =>
         entry.characterId === characterId
         && (!options?.afterTimestamp || entry.createdAt > options.afterTimestamp)
+        && (options?.appId !== "diary" || entry.authorType !== "user")
     );
     for (const diaryEntry of diaryEntries) {
         entries.push({
