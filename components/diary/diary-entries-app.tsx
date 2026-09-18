@@ -39,8 +39,13 @@ import type {
 import { cancelDiaryReply, scheduleDiaryReply } from "@/lib/diary-reply-service";
 import { getThemeAssetDataUrl, saveThemeAssetFromBlob } from "@/lib/theme-storage";
 
-const DIARY_USER_FONT_FAMILY = "AIPhoneDiaryEntryUserFont";
-const DIARY_USER_FONT_STYLE_ID = "ai-phone-diary-entry-user-font-face";
+// TA的日记和我的日记各自独立一套字体，互不影响，跟以前双日记插件的行为一致。
+function diaryFontFamilyName(kind: DiaryEntryAuthorType): string {
+  return kind === "user" ? "AIPhoneDiaryEntryUserWriterFont" : "AIPhoneDiaryEntryCharacterFont";
+}
+function diaryFontStyleId(kind: DiaryEntryAuthorType): string {
+  return kind === "user" ? "ai-phone-diary-entry-user-writer-font-face" : "ai-phone-diary-entry-character-font-face";
+}
 
 const DIARY_REPLY_MODE_LABELS: Record<DiaryReplyMode, string> = {
   none: "不回应",
@@ -154,9 +159,9 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
   const [deleteCandidateEntry, setDeleteCandidateEntry] = useState<DiaryEntry | null>(null);
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
   const [localGeneratingIds, setGeneratingCharacterIds] = useState<string[]>([]);
-  const [diaryFontAssetId, setDiaryFontAssetId] = useState<string | null>(() => loadDiaryEntryFontAssetId());
+  const [diaryFontAssetId, setDiaryFontAssetId] = useState<string | null>(() => loadDiaryEntryFontAssetId(kind));
   const [diaryFontDataUrl, setDiaryFontDataUrl] = useState<string | null>(null);
-  const [diaryFontScale, setDiaryFontScale] = useState<number>(() => loadDiaryEntryFontScale());
+  const [diaryFontScale, setDiaryFontScale] = useState<number>(() => loadDiaryEntryFontScale(kind));
   // Merge in the module-level tracker so background generation (timer, or a
   // batch started before leaving the app) is visible again after re-entry.
   const trackedGeneratingIds = useDiaryGenerating();
@@ -194,7 +199,7 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
         setDiaryFontDataUrl(dataUrl);
         return;
       }
-      saveDiaryEntryFontAssetId(null);
+      saveDiaryEntryFontAssetId(null, kind);
       setDiaryFontAssetId(null);
       setDiaryFontDataUrl(null);
       notify("日记字体资源丢失，已恢复默认字体");
@@ -204,19 +209,20 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
       notify("日记字体加载失败，暂时使用默认字体");
     });
     return () => { cancelled = true; };
-  }, [diaryFontAssetId, notify]);
+  }, [diaryFontAssetId, kind, notify]);
 
   useEffect(() => {
-    let node = document.getElementById(DIARY_USER_FONT_STYLE_ID) as HTMLStyleElement | null;
+    const styleId = diaryFontStyleId(kind);
+    let node = document.getElementById(styleId) as HTMLStyleElement | null;
     if (!node) {
       node = document.createElement("style");
-      node.id = DIARY_USER_FONT_STYLE_ID;
+      node.id = styleId;
       document.head.append(node);
     }
     node.textContent = diaryFontDataUrl
-      ? `@font-face{font-family:"${DIARY_USER_FONT_FAMILY}";src:url("${diaryFontDataUrl}");font-display:swap;}`
+      ? `@font-face{font-family:"${diaryFontFamilyName(kind)}";src:url("${diaryFontDataUrl}");font-display:swap;}`
       : "";
-  }, [diaryFontDataUrl]);
+  }, [diaryFontDataUrl, kind]);
 
   const handleDiaryFontUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -229,38 +235,38 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
       if (!dataUrl) {
         throw new Error("字体资源没有保存成功");
       }
-      saveDiaryEntryFontAssetId(assetId);
+      saveDiaryEntryFontAssetId(assetId, kind);
       setDiaryFontAssetId(assetId);
       setDiaryFontDataUrl(dataUrl);
       notify(`日记字体已上传：${file.name}`);
     } catch (error) {
       notify("日记字体上传失败：" + String(error));
     }
-  }, [notify]);
+  }, [kind, notify]);
 
   const handleDiaryFontScaleChange = useCallback((scale: number) => {
     const normalized = Math.min(1.25, Math.max(0.85, scale));
     setDiaryFontScale(normalized);
-    saveDiaryEntryFontScale(normalized);
-  }, []);
+    saveDiaryEntryFontScale(normalized, kind);
+  }, [kind]);
 
   const handleDiaryFontReset = useCallback(() => {
-    saveDiaryEntryFontAssetId(null);
-    saveDiaryEntryFontScale(1);
+    saveDiaryEntryFontAssetId(null, kind);
+    saveDiaryEntryFontScale(1, kind);
     setDiaryFontAssetId(null);
     setDiaryFontDataUrl(null);
     setDiaryFontScale(1);
     notify("已恢复默认日记字体");
-  }, [notify]);
+  }, [kind, notify]);
 
   const diaryEntryStyle = useMemo(() => {
     return {
       ...(diaryFontDataUrl
-        ? { "--diary-entry-font-family": `"${DIARY_USER_FONT_FAMILY}", "NoteWall Ximai", var(--app-font-family)` }
+        ? { "--diary-entry-font-family": `"${diaryFontFamilyName(kind)}", "NoteWall Ximai", var(--app-font-family)` }
         : {}),
       "--diary-entry-font-scale": String(diaryFontScale),
     } as CSSProperties;
-  }, [diaryFontDataUrl, diaryFontScale]);
+  }, [diaryFontDataUrl, diaryFontScale, kind]);
 
   const deleteEntry = useCallback((entry: DiaryEntry) => {
     deleteDiaryEntry(entry.id);

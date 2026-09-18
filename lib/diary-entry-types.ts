@@ -75,10 +75,18 @@ export type DiaryReplyRule = {
   delayHours: number;
 };
 
+/** 角色单独设置：mode 比 DiaryReplyRule 多一个 "inherit"（跟随 default）。
+ *  故意不写成 `DiaryReplyRule & { mode: ... }`——交叉类型会把两个 mode 字段
+ *  取交集，"inherit" 不在 DiaryReplyMode 里，交出来的类型反而丢了 "inherit"。 */
+export type DiaryReplyCharacterRule = {
+  mode: DiaryReplyMode | "inherit";
+  delayHours: number;
+};
+
 export type DiaryReplyRules = {
   default: DiaryReplyRule;
   /** 未出现在这里的角色跟随 default；mode 为 "inherit" 也表示跟随 default */
-  characters: Record<string, DiaryReplyRule & { mode: DiaryReplyMode | "inherit" }>;
+  characters: Record<string, DiaryReplyCharacterRule>;
 };
 
 export const DEFAULT_DIARY_REPLY_RULE: DiaryReplyRule = { mode: "none", delayHours: 24 };

@@ -17,14 +17,28 @@ import {
 const ENTRIES_KEY = "ai_phone_diary_entries_v1";
 const TIMER_KEY = "ai_phone_diary_entry_timer_settings_v1";
 const REPLY_RULES_KEY = "ai_phone_diary_reply_rules_v1";
+// "character" 字体沿用日记还没分裂成两本之前就有的老 key，老用户设置过的字体不会丢；
+// "user" 字体是新加的独立一份，跟角色那份互不影响。
 export const DIARY_ENTRY_FONT_ASSET_KEY = "ai_phone_diary_entry_font_asset_v1";
 export const DIARY_ENTRY_FONT_SCALE_KEY = "ai_phone_diary_entry_font_scale_v1";
+export const DIARY_ENTRY_USER_FONT_ASSET_KEY = "ai_phone_diary_entry_user_font_asset_v1";
+export const DIARY_ENTRY_USER_FONT_SCALE_KEY = "ai_phone_diary_entry_user_font_scale_v1";
 
 registerKvMigration(ENTRIES_KEY);
 registerKvMigration(TIMER_KEY);
 registerKvMigration(REPLY_RULES_KEY);
 registerKvMigration(DIARY_ENTRY_FONT_ASSET_KEY);
 registerKvMigration(DIARY_ENTRY_FONT_SCALE_KEY);
+registerKvMigration(DIARY_ENTRY_USER_FONT_ASSET_KEY);
+registerKvMigration(DIARY_ENTRY_USER_FONT_SCALE_KEY);
+
+function fontAssetKey(kind: DiaryEntryAuthorType): string {
+  return kind === "user" ? DIARY_ENTRY_USER_FONT_ASSET_KEY : DIARY_ENTRY_FONT_ASSET_KEY;
+}
+
+function fontScaleKey(kind: DiaryEntryAuthorType): string {
+  return kind === "user" ? DIARY_ENTRY_USER_FONT_SCALE_KEY : DIARY_ENTRY_FONT_SCALE_KEY;
+}
 
 const DIARY_REPLY_MODES: DiaryReplyMode[] = ["none", "immediate", "delay", "merge"];
 
@@ -151,34 +165,36 @@ function normalizeTrigger(value: unknown): DiaryEntryTrigger {
   return value === "timer" ? "timer" : "manual";
 }
 
-export function loadDiaryEntryFontAssetId(): string | null {
-  const raw = kvGet(DIARY_ENTRY_FONT_ASSET_KEY);
+export function loadDiaryEntryFontAssetId(kind: DiaryEntryAuthorType = "character"): string | null {
+  const raw = kvGet(fontAssetKey(kind));
   const id = typeof raw === "string" ? raw.trim() : "";
   return id || null;
 }
 
-export function saveDiaryEntryFontAssetId(assetId: string | null): void {
+export function saveDiaryEntryFontAssetId(assetId: string | null, kind: DiaryEntryAuthorType = "character"): void {
   const id = typeof assetId === "string" ? assetId.trim() : "";
+  const key = fontAssetKey(kind);
   if (id) {
-    kvSet(DIARY_ENTRY_FONT_ASSET_KEY, id);
+    kvSet(key, id);
   } else {
-    kvRemove(DIARY_ENTRY_FONT_ASSET_KEY);
+    kvRemove(key);
   }
 }
 
-export function loadDiaryEntryFontScale(): number {
-  const raw = Number(kvGet(DIARY_ENTRY_FONT_SCALE_KEY));
+export function loadDiaryEntryFontScale(kind: DiaryEntryAuthorType = "character"): number {
+  const raw = Number(kvGet(fontScaleKey(kind)));
   if (!Number.isFinite(raw)) return 1;
   return Math.min(1.25, Math.max(0.85, Number(raw.toFixed(2))));
 }
 
-export function saveDiaryEntryFontScale(scale: number): void {
+export function saveDiaryEntryFontScale(scale: number, kind: DiaryEntryAuthorType = "character"): void {
   const normalized = Math.min(1.25, Math.max(0.85, Number(scale.toFixed(2))));
+  const key = fontScaleKey(kind);
   if (Math.abs(normalized - 1) < 0.001) {
-    kvRemove(DIARY_ENTRY_FONT_SCALE_KEY);
+    kvRemove(key);
     return;
   }
-  kvSet(DIARY_ENTRY_FONT_SCALE_KEY, String(normalized));
+  kvSet(key, String(normalized));
 }
 
 export function normalizeDiaryEntry(raw: unknown): DiaryEntry | null {
