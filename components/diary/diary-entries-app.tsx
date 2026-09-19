@@ -375,8 +375,11 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
     weather: string;
     tags: string[];
     signature: string;
-    body: string;
+    blocks: DiaryEntryBlock[];
   }, editingId?: string) => {
+    // body 是给"近期日记"这类只读纯文本上下文用的摊平版本；用 blockPlainText 而不是只拼
+    // paragraph/quote，这样 correction/todo/image 这些板块的内容也不会在摊平时丢掉。
+    const body = input.blocks.map(blockPlainText).filter(Boolean).join("\n\n");
     if (!editingId) {
       const character = resolveTargets([input.characterId])[0];
       const created = createDiaryEntry({
@@ -388,8 +391,8 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
         weather: input.weather,
         tags: input.tags,
         signature: input.signature,
-        body: input.body,
-        blocks: [],
+        body,
+        blocks: input.blocks,
         trigger: "manual",
       });
       refreshEntries();
@@ -404,8 +407,8 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
       weather: input.weather,
       tags: input.tags,
       signature: input.signature,
-      body: input.body,
-      blocks: [],
+      body,
+      blocks: input.blocks,
     });
     refreshEntries();
     setComposeTarget(null);
@@ -1283,10 +1286,50 @@ function DiaryComposePickerPanel({ characters, onPick, onClose }: {
   );
 }
 
+type DraftBlock = { localId: string } & DiaryEntryBlock;
+
+function makeLocalId(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return `b_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function toDraftBlocks(blocks: DiaryEntryBlock[]): DraftBlock[] {
+  return blocks.map(block => ({ localId: makeLocalId(), ...block }));
+}
+
+function stripDraftBlocks(blocks: DraftBlock[]): DiaryEntryBlock[] {
+  return blocks.map(({ localId: _localId, ...block }) => block as DiaryEntryBlock);
+}
+
+function makeEmptyBlock(type: DiaryEntryBlock["type"]): DraftBlock {
+  const localId = makeLocalId();
+  if (type === "quote") return { localId, type, text: "" };
+  if (type === "correction") return { localId, type, text: "", replacement: "" };
+  if (type === "todo") return { localId, type, title: "", items: [] };
+  if (type === "image") return { localId, type, caption: "", description: "" };
+  return { localId, type: "paragraph", text: "" };
+}
+
+function draftBlockHasContent(block: DiaryEntryBlock): boolean {
+  if (block.type === "paragraph" || block.type === "quote") return block.text.trim().length > 0;
+  if (block.type === "correction") return block.text.trim().length > 0 || (block.replacement ?? "").trim().length > 0;
+  if (block.type === "image") return block.description.trim().length > 0;
+  if (block.type === "todo") return block.items.some(item => item.text.trim().length > 0);
+  return false;
+}
+
+const DIARY_BLOCK_TYPE_LABELS: Record<DiaryEntryBlock["type"], string> = {
+  paragraph: "段落",
+  quote: "引用",
+  correction: "涂改",
+  todo: "待办",
+  image: "配图",
+};
+
 function DiaryEntryComposeForm({ target, characters, onSave, onClose }: {
   target: ComposeTarget;
   characters: Character[];
-  onSave: (input: { characterId: string; title: string; mood: string; weather: string; tags: string[]; signature: string; body: string }, editingId?: string) => void;
+  onSave: (input: { characterId: string; title: string; mood: string; weather: string; tags: string[]; signature: string; blocks: DiaryEntryBlock[] }, editingId?: string) => void;
   onClose: () => void;
 }) {
   const editingEntry = target.mode === "edit" ? target.entry : null;
@@ -1297,15 +1340,55 @@ function DiaryEntryComposeForm({ target, characters, onSave, onClose }: {
   const [weather, setWeather] = useState(editingEntry?.weather ?? "");
   const [tagsText, setTagsText] = useState(editingEntry?.tags.join("、") ?? "");
   const [signature, setSignature] = useState(editingEntry?.signature ?? "");
-  const [body, setBody] = useState(editingEntry?.blocks.map(blockPlainText).filter(Boolean).join("\n\n") ?? editingEntry?.body ?? "");
+  // 编辑已有日记时直接从它原来的 blocks 起步——引用/涂改/待办/配图这些板块原样保留，
+  // 不会因为编辑就被压平成纯段落。
+  const [draftBlocks, setDraftBlocks] = useState<DraftBlock[]>(() =>
+    editingEntry && editingEntry.blocks.length > 0 ? toDraftBlocks(editingEntry.blocks) : [makeEmptyBlock("paragraph")]
+  );
 
-  const canSave = body.trim().length > 0;
+  const canSave = draftBlocks.some(draftBlockHasContent);
+
+  const updateBlock = useCallback((localId: string, patch: Partial<DiaryEntryBlock>) => {
+    setDraftBlocks(blocks => blocks.map(block => (block.localId === localId ? { ...block, ...patch } as DraftBlock : block)));
+  }, []);
+
+  const removeBlock = useCallback((localId: string) => {
+    setDraftBlocks(blocks => (blocks.length > 1 ? blocks.filter(block => block.localId !== localId) : blocks));
+  }, []);
+
+  const addBlock = useCallback((type: DiaryEntryBlock["type"]) => {
+    setDraftBlocks(blocks => [...blocks, makeEmptyBlock(type)]);
+  }, []);
+
+  const updateTodoItem = useCallback((localId: string, index: number, patch: Partial<{ text: string; done: boolean }>) => {
+    setDraftBlocks(blocks => blocks.map(block => {
+      if (block.localId !== localId || block.type !== "todo") return block;
+      return { ...block, items: block.items.map((item, i) => (i === index ? { ...item, ...patch } : item)) };
+    }));
+  }, []);
+
+  const addTodoItem = useCallback((localId: string) => {
+    setDraftBlocks(blocks => blocks.map(block => (
+      block.localId === localId && block.type === "todo"
+        ? { ...block, items: [...block.items, { text: "", done: false }] }
+        : block
+    )));
+  }, []);
+
+  const removeTodoItem = useCallback((localId: string, index: number) => {
+    setDraftBlocks(blocks => blocks.map(block => (
+      block.localId === localId && block.type === "todo"
+        ? { ...block, items: block.items.filter((_, i) => i !== index) }
+        : block
+    )));
+  }, []);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (!canSave) return;
     const tags = tagsText.split(/[,，、\s]+/).map(tag => tag.trim()).filter(Boolean);
-    onSave({ characterId, title: title.trim(), mood: mood.trim(), weather: weather.trim(), tags, signature: signature.trim(), body }, editingEntry?.id);
+    const blocks = stripDraftBlocks(draftBlocks.filter(draftBlockHasContent));
+    onSave({ characterId, title: title.trim(), mood: mood.trim(), weather: weather.trim(), tags, signature: signature.trim(), blocks }, editingEntry?.id);
   };
 
   return (
@@ -1339,16 +1422,30 @@ function DiaryEntryComposeForm({ target, characters, onSave, onClose }: {
           <span>标签（用顿号或逗号分隔）</span>
           <input type="text" value={tagsText} onChange={event => setTagsText(event.target.value)} placeholder="例如：日常、碎碎念" />
         </label>
-        <label className="diary-compose-field">
-          <span>正文</span>
-          <textarea
-            className="diary-compose-body"
-            value={body}
-            onChange={event => setBody(event.target.value)}
-            placeholder="写下今天想对TA说的话……空一行换一段。"
-            rows={10}
-          />
-        </label>
+
+        <div className="diary-compose-blocks">
+          {draftBlocks.map(block => (
+            <DiaryBlockEditor
+              key={block.localId}
+              block={block}
+              canRemove={draftBlocks.length > 1}
+              onChange={patch => updateBlock(block.localId, patch)}
+              onRemove={() => removeBlock(block.localId)}
+              onAddTodoItem={() => addTodoItem(block.localId)}
+              onUpdateTodoItem={(index, patch) => updateTodoItem(block.localId, index, patch)}
+              onRemoveTodoItem={index => removeTodoItem(block.localId, index)}
+            />
+          ))}
+        </div>
+
+        <div className="diary-compose-add-block">
+          {(["paragraph", "quote", "correction", "todo", "image"] as const).map(type => (
+            <button key={type} type="button" onClick={() => addBlock(type)}>
+              + {DIARY_BLOCK_TYPE_LABELS[type]}
+            </button>
+          ))}
+        </div>
+
         {!editingEntry || editingEntry.authorType === "user" ? (
           <label className="diary-compose-field">
             <span>署名（可选）</span>
@@ -1360,6 +1457,102 @@ function DiaryEntryComposeForm({ target, characters, onSave, onClose }: {
           {editingEntry ? "保存修改" : "保存日记"}
         </button>
       </form>
+    </div>
+  );
+}
+
+function DiaryBlockEditor({ block, canRemove, onChange, onRemove, onAddTodoItem, onUpdateTodoItem, onRemoveTodoItem }: {
+  block: DraftBlock;
+  canRemove: boolean;
+  onChange: (patch: Partial<DiaryEntryBlock>) => void;
+  onRemove: () => void;
+  onAddTodoItem: () => void;
+  onUpdateTodoItem: (index: number, patch: Partial<{ text: string; done: boolean }>) => void;
+  onRemoveTodoItem: (index: number) => void;
+}) {
+  return (
+    <div className="diary-compose-block">
+      <div className="diary-compose-block-head">
+        <span>{DIARY_BLOCK_TYPE_LABELS[block.type]}</span>
+        {canRemove ? (
+          <button type="button" onClick={onRemove} aria-label="删除这个板块">
+            <X size={14} />
+          </button>
+        ) : null}
+      </div>
+
+      {block.type === "paragraph" || block.type === "quote" ? (
+        <textarea
+          className="diary-compose-body"
+          value={block.text}
+          onChange={event => onChange({ text: event.target.value })}
+          placeholder={block.type === "quote" ? "摘一句当天听到或想到的话……" : "写下今天想对TA说的话……"}
+          rows={block.type === "quote" ? 3 : 6}
+        />
+      ) : null}
+
+      {block.type === "correction" ? (
+        <div className="diary-compose-correction">
+          <label>
+            <span>原句</span>
+            <input type="text" value={block.text} onChange={event => onChange({ text: event.target.value })} placeholder="原来写的" />
+          </label>
+          <label>
+            <span>改成</span>
+            <input type="text" value={block.replacement ?? ""} onChange={event => onChange({ replacement: event.target.value })} placeholder="改成这样" />
+          </label>
+        </div>
+      ) : null}
+
+      {block.type === "image" ? (
+        <>
+          <input
+            type="text"
+            value={block.caption ?? ""}
+            onChange={event => onChange({ caption: event.target.value })}
+            placeholder="配图标题（可选）"
+          />
+          <textarea
+            className="diary-compose-body"
+            value={block.description}
+            onChange={event => onChange({ description: event.target.value })}
+            placeholder="描述一下这张想象中的插图……"
+            rows={3}
+          />
+        </>
+      ) : null}
+
+      {block.type === "todo" ? (
+        <div className="diary-compose-todo">
+          <input
+            type="text"
+            value={block.title ?? ""}
+            onChange={event => onChange({ title: event.target.value })}
+            placeholder="清单标题（可选）"
+          />
+          <div className="diary-compose-todo-items">
+            {block.items.map((item, index) => (
+              <div key={index} className="diary-compose-todo-item">
+                <input
+                  type="checkbox"
+                  checked={item.done}
+                  onChange={event => onUpdateTodoItem(index, { done: event.target.checked })}
+                />
+                <input
+                  type="text"
+                  value={item.text}
+                  onChange={event => onUpdateTodoItem(index, { text: event.target.value })}
+                  placeholder="待办事项"
+                />
+                <button type="button" onClick={() => onRemoveTodoItem(index)} aria-label="删除这一项">
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button type="button" className="diary-compose-add-todo-item" onClick={onAddTodoItem}>+ 加一项</button>
+        </div>
+      ) : null}
     </div>
   );
 }

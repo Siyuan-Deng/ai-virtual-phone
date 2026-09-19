@@ -1188,6 +1188,104 @@
   cursor: default;
 }
 
+.diary-compose-blocks {
+  display: grid;
+  gap: 10px;
+}
+
+.diary-compose-block {
+  border: 1px solid rgba(58, 49, 35, 0.14);
+  background: rgba(255, 255, 255, 0.4);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.diary-compose-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: calc(11px*var(--app-text-scale,1));
+  color: rgba(47, 42, 35, 0.5);
+  letter-spacing: 0.02em;
+}
+
+.diary-compose-block-head button {
+  border: 0;
+  background: transparent;
+  color: rgba(47, 42, 35, 0.4);
+  cursor: pointer;
+  padding: 2px;
+}
+
+.diary-compose-correction {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.diary-compose-correction label {
+  display: grid;
+  gap: 4px;
+  font-size: calc(12px*var(--app-text-scale,1));
+  color: rgba(52, 39, 29, 0.62);
+}
+
+.diary-compose-todo {
+  display: grid;
+  gap: 8px;
+}
+
+.diary-compose-todo-items {
+  display: grid;
+  gap: 6px;
+}
+
+.diary-compose-todo-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.diary-compose-todo-item input[type="checkbox"] {
+  accent-color: #2b241c;
+}
+
+.diary-compose-todo-item button {
+  border: 0;
+  background: transparent;
+  color: rgba(47, 42, 35, 0.4);
+  cursor: pointer;
+  padding: 2px;
+}
+
+.diary-compose-add-todo-item {
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  color: rgba(47, 42, 35, 0.58);
+  font: inherit;
+  font-size: calc(12px*var(--app-text-scale,1));
+  cursor: pointer;
+}
+
+.diary-compose-add-block {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.diary-compose-add-block button {
+  border: 1px solid rgba(58, 49, 35, 0.14);
+  background: rgba(255, 255, 255, 0.5);
+  color: rgba(47, 42, 35, 0.68);
+  font: inherit;
+  font-size: calc(12px*var(--app-text-scale,1));
+  padding: 6px 9px;
+  cursor: pointer;
+}
+
 .diary-entry-confirm-btn {
   width: 100%;
   height: 40px;
