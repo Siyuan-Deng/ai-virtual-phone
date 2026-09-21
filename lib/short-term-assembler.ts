@@ -927,6 +927,23 @@ export function filterTimelineByAllowedSources(
  * For history-style appIds, the current feature's block has empty content because
  * the actual content is the history turns (wrapped by the assembler).
  */
+/** 该角色私聊会话的消息，过滤口径与时间线里那批 [私聊] 条目保持一致，
+ *  免得换成真实历史之后反而混进纯 UI 的提示消息。 */
+function loadDirectChatHistoryForPrompt(characterId: string): ChatMessage[] {
+    const session = loadChatSessions().find(s => !s.isGroup && s.contactId === characterId);
+    if (!session) return [];
+    return loadChatMessages(session.id).filter(msg => {
+        if (msg.isRetracted) return false;
+        if (isPromptHiddenChatMessage(msg)) return false;
+        if (msg.role === "system") {
+            if (msg.mediaType === "music_notify") return false;
+            if (msg.mediaType === "tool_notice") return false;
+            if (msg.mediaType === "memory_write_request") return false;
+        }
+        return true;
+    });
+}
+
 export function prepareShortTermContext(
     characterId: string,
     appId: string,
@@ -937,6 +954,10 @@ export function prepareShortTermContext(
         excludeOfflineSessionId?: string;
         includeNativeToolHistory?: boolean;
         includeDirectChatEntries?: boolean;
+        /** 把该角色的私聊会话当成真正的对话历史读入，让 user/char 的发言各自带上
+         *  user / assistant 角色，而不是压成 <shortTermMemory> 里的 [私聊] 文本流水。
+         *  一次性生成类（日记）用；同一批内容会从时间线事件里去掉，避免进两遍。 */
+        chatAsHistory?: boolean;
         timeAware?: boolean;
         promptTimestampOptions?: PromptTimestampOptions;
     },
@@ -962,10 +983,15 @@ export function prepareShortTermContext(
     const wbActivationContext = timeline.slice(-10).map(e => e.content).join("\n");
     const budget = memConfig.shortTermTokenBudget;
     const currentTag = getFeatureTag(appId);
-    const history = options?.history ?? [];
+    const history = options?.history?.length
+        ? options.history
+        : (options?.chatAsHistory ? loadDirectChatHistoryForPrompt(characterId) : []);
     const characterName = loadCharacters().find(c => c.id === characterId)?.name ?? "角色";
-    const wrapsCurrentHistory = appId === "chat" || appId === "group_chat" || appId === "story" || appId === "vn" || appId === "adventure";
-    const skipDirectChatEntries = appId === "chat" && !options?.includeDirectChatEntries;
+    // 拿到了私聊历史才切换表示方式：一条都没读到（没有会话、存储还没 hydrate）时保持
+    // 原样走时间线事件，否则会既跳过事件又没有历史可放，把聊天上下文整段弄丢。
+    const chatAsHistory = options?.chatAsHistory === true && history.length > 0;
+    const wrapsCurrentHistory = appId === "chat" || appId === "group_chat" || appId === "story" || appId === "vn" || appId === "adventure" || chatAsHistory;
+    const skipDirectChatEntries = (appId === "chat" || chatAsHistory) && !options?.includeDirectChatEntries;
 
     // ── Collect non-history entries per block ──
     const raw: { tag: string; order: number; entries: NativeTimelineEntry[] }[] = [];

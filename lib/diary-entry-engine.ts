@@ -54,7 +54,12 @@ async function resolveDiaryEntryGeneration(
   const userIdentity = resolveUserIdentity(character.id, "diary");
   const userName = userIdentity?.name ?? "用户";
   const memConfig = loadMemoryConfig();
-  const prepared = prepareShortTermContext(character.id, "diary", { history: [] });
+  // chatAsHistory：把私聊读成真正的对话历史，user 的发言走 user、角色的发言走
+  // assistant，和聊天/剧情一致；而不是全部压进 <shortTermMemory> 的 system 文本里。
+  const prepared = prepareShortTermContext(character.id, "diary", {
+    userName,
+    chatAsHistory: true,
+  });
   // 角色写自己的日记只参考角色自己写过的日记，绝不掺进用户手写的「我的日记」——
   // 否则角色写日记很容易变成回应用户日记，而不是像平常一样正常记录自己的生活。
   // 用户日记该不该被角色知道，由聊天时的记忆/近期动态注入负责，与这里无关。
@@ -67,7 +72,7 @@ async function resolveDiaryEntryGeneration(
 
   const messages = assemblePromptPayload({
     character,
-    history: [],
+    history: prepared.truncatedHistory,
     preset,
     worldBooks,
     regexes,
