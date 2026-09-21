@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent, type PointerEvent } from "react";
-import { Bot, ChevronLeft, Clock3, NotebookPen, Pencil, Trash2, WandSparkles, X } from "lucide-react";
+import { Bot, ChevronLeft, Clock3, NotebookPen, Trash2, WandSparkles, X } from "lucide-react";
 import { DotsThree } from "@phosphor-icons/react";
 
 import { loadCharacters } from "@/lib/character-storage";
@@ -1181,7 +1181,10 @@ function DiaryReplySettingsPanel({ characters, rules, onChange, onClose }: {
         </header>
 
         <div className="diary-entry-setting-grid">
-          <label className="diary-entry-toggle-row">
+          <label
+            className="diary-entry-toggle-row"
+            style={rules.default.mode !== "delay" ? { gridColumn: "1 / -1" } : undefined}
+          >
             <span>默认回应方式</span>
             <select
               value={rules.default.mode}
@@ -1404,21 +1407,20 @@ function DiaryEntryComposeForm({ target, characters, onSave, onClose }: {
           </button>
         </header>
 
-        <label className="diary-compose-field">
-          <span>标题</span>
+        <label className="diary-compose-field diary-compose-title-field">
           <input type="text" value={title} onChange={event => setTitle(event.target.value)} placeholder="给今天起个标题（留空自动取正文开头）" />
         </label>
         <div className="diary-entry-setting-grid">
-          <label className="diary-compose-field">
+          <label className="diary-compose-field diary-compose-tint-field">
             <span>心情</span>
             <input type="text" value={mood} onChange={event => setMood(event.target.value)} placeholder="例如：平静" />
           </label>
-          <label className="diary-compose-field">
+          <label className="diary-compose-field diary-compose-tint-field">
             <span>天气</span>
             <input type="text" value={weather} onChange={event => setWeather(event.target.value)} placeholder="例如：晴" />
           </label>
         </div>
-        <label className="diary-compose-field">
+        <label className="diary-compose-field diary-compose-tint-field">
           <span>标签（用顿号或逗号分隔）</span>
           <input type="text" value={tagsText} onChange={event => setTagsText(event.target.value)} placeholder="例如：日常、碎碎念" />
         </label>
@@ -1447,7 +1449,7 @@ function DiaryEntryComposeForm({ target, characters, onSave, onClose }: {
         </div>
 
         {!editingEntry || editingEntry.authorType === "user" ? (
-          <label className="diary-compose-field">
+          <label className="diary-compose-field diary-compose-tint-field">
             <span>署名（可选）</span>
             <input type="text" value={signature} onChange={event => setSignature(event.target.value)} placeholder="写在日记末尾的署名" />
           </label>
@@ -1668,15 +1670,15 @@ function DiaryEntryDetail({ entry, onClose, onEdit }: { entry: DiaryEntry; onClo
         </span>
         <div className="diary-entry-detail-scroll">
           <header>
-            <div>
+            <div className="diary-entry-detail-topline">
               <span>日记详情</span>
-              <h2>{entry.title}</h2>
+              <div className="diary-entry-detail-actions">
+                <button type="button" onClick={onEdit}>编辑</button>
+                <button type="button" onClick={onClose}>关闭</button>
+              </div>
             </div>
-            <div className="diary-entry-detail-top">
-              <button type="button" onClick={onEdit} aria-label="编辑">
-                <Pencil size={16} strokeWidth={1.8} />
-              </button>
-              <button type="button" onClick={onClose}>关闭</button>
+            <div className="diary-entry-detail-titleline">
+              <h2>{entry.title}</h2>
               {markers.length > 0 ? (
                 <span className="diary-entry-detail-markers">
                   {markers.map(marker => <span key={marker} className="diary-entry-marker">{marker}</span>)}

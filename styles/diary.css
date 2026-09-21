@@ -1115,7 +1115,8 @@
 
 .diary-entry-settings select,
 .diary-compose-field input,
-.diary-compose-field textarea {
+.diary-compose-field textarea,
+.diary-reply-rule-row input[type="number"] {
   border: 1px solid rgba(71, 58, 37, 0.14);
   border-radius: 0;
   background: rgba(255, 255, 255, 0.8);
@@ -1128,7 +1129,8 @@
 
 .diary-entry-settings select:focus,
 .diary-compose-field input:focus,
-.diary-compose-field textarea:focus {
+.diary-compose-field textarea:focus,
+.diary-reply-rule-row input[type="number"]:focus {
   border-color: rgba(52, 39, 29, 0.4);
 }
 
@@ -1138,6 +1140,7 @@
 
 .diary-reply-rule-row input[type="number"] {
   width: 60px;
+  text-align: center;
 }
 
 .diary-entry-note {
@@ -1150,6 +1153,14 @@
 .diary-compose-form {
   display: grid;
   gap: 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(255, 252, 239, 0.78)),
+    #fffdf4;
+}
+
+.diary-compose-form,
+.diary-compose-form * {
+  font-family: var(--diary-entry-font-family);
 }
 
 .diary-compose-field {
@@ -1163,6 +1174,31 @@
 .diary-compose-field textarea {
   width: 100%;
   box-sizing: border-box;
+}
+
+/* 标题：不再是小方框里的一行，改成大字号、无边框的直接书写，呼应插件旧版的落笔感 */
+.diary-compose-title-field input {
+  border: 0;
+  background: transparent;
+  padding: 2px 0 8px;
+  font-size: calc(21px*var(--app-text-scale,1)*var(--diary-entry-font-scale,1));
+  color: #2d2b28;
+  border-bottom: 1px solid rgba(67, 54, 35, 0.16);
+}
+
+.diary-compose-title-field input:focus {
+  border-color: rgba(52, 39, 29, 0.4);
+}
+
+/* 心情/天气/标签/署名：改成暖色块+无边框，贴近日记纸张而不是设置弹窗里的白框输入框 */
+.diary-compose-tint-field input {
+  border: 0;
+  background: rgba(233, 213, 149, 0.22);
+  padding: 8px 9px;
+}
+
+.diary-compose-tint-field input:focus {
+  background: rgba(233, 213, 149, 0.34);
 }
 
 .diary-compose-body {
@@ -1258,6 +1294,25 @@
   color: rgba(47, 42, 35, 0.4);
   cursor: pointer;
   padding: 2px;
+}
+
+/* 板块内的裸文本框（涂改原句/改成、配图标题、待办标题/事项）统一套暖色块，
+   不然就是没样式的浏览器默认输入框，和旁边刚改过的字段风格对不上。 */
+.diary-compose-block input[type="text"] {
+  border: 0;
+  border-radius: 0;
+  background: rgba(233, 213, 149, 0.22);
+  color: #332c24;
+  font: inherit;
+  font-size: calc(14px*var(--app-text-scale,1));
+  padding: 7px 8px;
+  outline: none;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.diary-compose-block input[type="text"]:focus {
+  background: rgba(233, 213, 149, 0.34);
 }
 
 .diary-compose-add-todo-item {
@@ -1380,32 +1435,41 @@
 
 .diary-entry-detail-scroll > header {
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.diary-entry-detail-topline {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 14px;
-  margin-bottom: 18px;
 }
 
-.diary-entry-detail-scroll > header > div:first-child {
+.diary-entry-detail-topline > span {
   min-width: 0;
-}
-
-.diary-entry-detail-scroll > header > div:first-child > span {
-  display: block;
-  margin-bottom: 18px;
   font-size: calc(13px*var(--app-text-scale,1));
   color: rgba(52, 46, 35, 0.5);
 }
 
 .diary-entry-detail-paper h2 {
   margin: 0;
+  min-width: 0;
   font-size: calc(25px*var(--app-text-scale,1)*var(--diary-entry-font-scale,1));
   line-height: 1.3;
   font-weight: 400;
   color: #2d2b28;
 }
 
-.diary-entry-detail-scroll > header button {
+.diary-entry-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 0 0 auto;
+}
+
+.diary-entry-detail-actions button {
   flex: 0 0 auto;
   border: 0;
   background: transparent;
@@ -1414,22 +1478,24 @@
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
+  padding: 0;
 }
 
-.diary-entry-detail-top {
+.diary-entry-detail-titleline {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 30px;
-  flex: 0 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
 }
 
 .diary-entry-detail-markers {
   max-width: 132px;
+  flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 4px 7px;
+  padding-top: 6px;
   font-size: calc(13px*var(--app-text-scale,1));
   line-height: 1.2;
   color: rgba(45, 40, 31, 0.78);
