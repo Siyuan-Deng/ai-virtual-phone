@@ -1,7 +1,7 @@
 import { loadCharacters } from "./character-storage";
 import type { Character } from "./character-types";
 import { previewMessagesForApi, sendLLMRequest, ChatEngineError } from "./chat-engine";
-import { assemblePromptPayload, type LLMMessage } from "./llm-prompt-assembler";
+import { assemblePromptPayload, ensureTrailingUserTurn, type LLMMessage } from "./llm-prompt-assembler";
 import { loadBindingConfig, loadApiConfigs, loadPresets, loadWorldBooks, loadRegexes, resolveBinding, resolveUserIdentity } from "./settings-storage";
 import type { ApiConfig, PresetConfig, RegexConfig, WorldBookConfig } from "./settings-types";
 import { loadMemoryConfig } from "./memory-storage";
@@ -81,6 +81,8 @@ async function resolveDiaryEntryGeneration(
     unifiedRecentItems: prepared.unifiedRecentItems,
     diaryEntryContext: formatDiaryEntryContext(ownEntries),
   });
+
+  ensureTrailingUserTurn(messages, "请按以上设定和规则，开始写这篇日记。");
 
   return { character, apiConfig, preset, regexes, messages, userName };
 }

@@ -6,7 +6,7 @@ import type { PresetConfig } from "./settings-types";
 import { getCheckPhonePromptTags } from "./checkphone-config";
 
 export const BUILTIN_PRESET_ID = "builtin_default_v1";
-export const BUILTIN_PRESET_VERSION = 265; // 升版本会用出厂内容重写用户的内置预设副本（自定义会丢），非必要不升
+export const BUILTIN_PRESET_VERSION = 266; // 升版本会用出厂内容重写用户的内置预设副本（自定义会丢），非必要不升
 
 export function createBuiltinPreset(): PresetConfig {
     const now = Date.now();
@@ -75,11 +75,8 @@ export function createBuiltinPreset(): PresetConfig {
             { identifier: "group_spectator_context", enabled: true },
             { identifier: "calendar_plan_generation", enabled: true },
             { identifier: "diary_entry_generation", enabled: true },
-            { identifier: "diary_entry_generation_trigger", enabled: true },
             { identifier: "diary_notewall_generation", enabled: true },
-            { identifier: "diary_notewall_generation_trigger", enabled: true },
             { identifier: "diary_notewall_reply", enabled: true },
-            { identifier: "diary_notewall_reply_trigger", enabled: true },
             { identifier: "xiaohongshu_bilingual_text", enabled: true },
             { identifier: "xiaohongshu_character_activity", enabled: true },
             { identifier: "xiaohongshu_user_post_reaction", enabled: true },
@@ -1392,21 +1389,6 @@ export function createBuiltinPreset(): PresetConfig {
                 tags: ["diary", "entries"],
             },
             {
-                // 日记生成没有对话历史可用来隔开连续的 system 段——assemblePromptPayload
-                // 会把它们合并成一条，供应商适配层再把"没有 user 消息"的请求硬转成 user
-                // 角色，导致提示词查看器和实际请求里整段人设/规则都显示成一条 USER 消息。
-                // 补一条独立的 user 轮次收尾，既保留了 system 段的正确角色，也让请求符合
-                // 大多数 API 需要以 user 收尾的约定。
-                identifier: "diary_entry_generation_trigger",
-                name: "▸ 手记 · 日记生成触发",
-                role: "user",
-                content: "请按以上设定和规则，开始写这篇日记。",
-                injection_position: 0,
-                injection_depth: 0,
-                enabled: true,
-                tags: ["diary", "entries"],
-            },
-            {
                 identifier: "diary_notewall_generation",
                 name: "▸ 手记 · 便签墙生成",
                 role: "system",
@@ -1451,16 +1433,6 @@ export function createBuiltinPreset(): PresetConfig {
                 tags: ["diary", "notewall"],
             },
             {
-                identifier: "diary_notewall_generation_trigger",
-                name: "▸ 手记 · 便签墙生成触发",
-                role: "user",
-                content: "请按以上设定和规则，写一张便签。",
-                injection_position: 0,
-                injection_depth: 0,
-                enabled: true,
-                tags: ["diary", "notewall"],
-            },
-            {
                 identifier: "diary_notewall_reply",
                 name: "▸ 手记 · 便签墙回复",
                 role: "system",
@@ -1494,16 +1466,6 @@ export function createBuiltinPreset(): PresetConfig {
                     '[执行动作:发送便签评论({"noteId":"候选 noteId","authorName":"落款名","body":"回复内容，20-160字","isAnonymous":false})]',
                     "</diary_notewall_reply_instruction>",
                 ].join("\n"),
-                injection_position: 0,
-                injection_depth: 0,
-                enabled: true,
-                tags: ["diary", "notewall_reply"],
-            },
-            {
-                identifier: "diary_notewall_reply_trigger",
-                name: "▸ 手记 · 便签墙回复触发",
-                role: "user",
-                content: "请按以上设定和规则，选择便签并回复。",
                 injection_position: 0,
                 injection_depth: 0,
                 enabled: true,
