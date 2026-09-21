@@ -1205,6 +1205,20 @@
   resize: vertical;
   line-height: 1.65;
   min-height: 160px;
+  border: 0;
+  border-radius: 0;
+  background: rgba(233, 213, 149, 0.22);
+  color: #332c24;
+  font: inherit;
+  font-size: calc(14px*var(--app-text-scale,1));
+  padding: 8px 9px;
+  outline: none;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.diary-compose-body:focus {
+  background: rgba(233, 213, 149, 0.34);
 }
 
 .diary-save-btn {
