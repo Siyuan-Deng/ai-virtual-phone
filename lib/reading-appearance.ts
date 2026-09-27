@@ -114,97 +114,86 @@ export function saveReadingAppearance(appearance: ReadingAppearance): ReadingApp
     return normalized;
 }
 
+function ensureBackgroundStore(db: IDBDatabase): void {
+    if (!db.objectStoreNames.contains(BG_STORE_NAME)) db.createObjectStore(BG_STORE_NAME);
+}
+
 async function openBackgroundDb(): Promise<IDBDatabase> {
     // Open at >= 1: a backup restore may have bumped the stored version higher,
     // and opening at a fixed lower version would throw a VersionError.
-    return openIndexedDbAtLeast(BG_DB_NAME, 1, (db) => {
-        if (!db.objectStoreNames.contains(BG_STORE_NAME)) db.createObjectStore(BG_STORE_NAME);
+    const db = await openIndexedDbAtLeast(BG_DB_NAME, 1, ensureBackgroundStore);
+    if (db.objectStoreNames.contains(BG_STORE_NAME)) return db;
+
+    // 库已存在但没有这个 store：这个库注册在备份模块里（data-management/modules.ts），
+    // 恢复时会按 spec 建库并抬高版本号。若恢复时快照里没有 assets，就会留下一个
+    // 版本号高于 1、却缺 store 的库——此时 openIndexedDbAtLeast 走的是「以现有版本
+    // 直接打开」那条分支，upgradeneeded 不触发，store 永远补不上，之后每次
+    // transaction 都抛 "One of the specified object stores was not found."。
+    // 显式升一个版本把 store 补建出来。
+    const nextVersion = db.version + 1;
+    db.close();
+    return openIndexedDbAtLeast(BG_DB_NAME, nextVersion, ensureBackgroundStore);
+}
+
+/** 统一收口资源库的读写：无论成功失败都关闭连接。
+ *  连接泄漏会让后续需要升版本补建 store 的修复被自己 block 住。 */
+async function withBackgroundDb<T>(run: (db: IDBDatabase) => Promise<T>): Promise<T> {
+    const db = await openBackgroundDb();
+    try {
+        return await run(db);
+    } finally {
+        db.close();
+    }
+}
+
+function putAsset(db: IDBDatabase, key: string, blob: Blob | null): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(BG_STORE_NAME, "readwrite");
+        const store = tx.objectStore(BG_STORE_NAME);
+        if (blob) store.put(blob, key);
+        else store.delete(key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
     });
+}
+
+function getAsset(db: IDBDatabase, key: string): Promise<Blob | null> {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(BG_STORE_NAME, "readonly");
+        const req = tx.objectStore(BG_STORE_NAME).get(key);
+        req.onsuccess = () => resolve((req.result as Blob) || null);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function loadAsset(key: string): Promise<Blob | null> {
+    try {
+        return await withBackgroundDb((db) => getAsset(db, key));
+    } catch {
+        return null;
+    }
 }
 
 export async function saveReadingBackground(blob: Blob | null): Promise<void> {
-    const db = await openBackgroundDb();
-    await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(BG_STORE_NAME, "readwrite");
-        const store = tx.objectStore(BG_STORE_NAME);
-        if (blob) store.put(blob, BG_KEY);
-        else store.delete(BG_KEY);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
-    db.close();
+    await withBackgroundDb((db) => putAsset(db, BG_KEY, blob));
 }
 
 export async function loadReadingBackground(): Promise<Blob | null> {
-    try {
-        const db = await openBackgroundDb();
-        const blob = await new Promise<Blob | null>((resolve, reject) => {
-            const tx = db.transaction(BG_STORE_NAME, "readonly");
-            const req = tx.objectStore(BG_STORE_NAME).get(BG_KEY);
-            req.onsuccess = () => resolve((req.result as Blob) || null);
-            req.onerror = () => reject(req.error);
-        });
-        db.close();
-        return blob;
-    } catch {
-        return null;
-    }
+    return loadAsset(BG_KEY);
 }
 
 export async function saveReadingCustomFont(blob: Blob | null): Promise<void> {
-    const db = await openBackgroundDb();
-    await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(BG_STORE_NAME, "readwrite");
-        const store = tx.objectStore(BG_STORE_NAME);
-        if (blob) store.put(blob, FONT_KEY);
-        else store.delete(FONT_KEY);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
-    db.close();
+    await withBackgroundDb((db) => putAsset(db, FONT_KEY, blob));
 }
 
 export async function loadReadingCustomFont(): Promise<Blob | null> {
-    try {
-        const db = await openBackgroundDb();
-        const blob = await new Promise<Blob | null>((resolve, reject) => {
-            const tx = db.transaction(BG_STORE_NAME, "readonly");
-            const req = tx.objectStore(BG_STORE_NAME).get(FONT_KEY);
-            req.onsuccess = () => resolve((req.result as Blob) || null);
-            req.onerror = () => reject(req.error);
-        });
-        db.close();
-        return blob;
-    } catch {
-        return null;
-    }
+    return loadAsset(FONT_KEY);
 }
 
 export async function saveReadingAnnotationFont(blob: Blob | null): Promise<void> {
-    const db = await openBackgroundDb();
-    await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(BG_STORE_NAME, "readwrite");
-        const store = tx.objectStore(BG_STORE_NAME);
-        if (blob) store.put(blob, ANNOTATION_FONT_KEY);
-        else store.delete(ANNOTATION_FONT_KEY);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
-    db.close();
+    await withBackgroundDb((db) => putAsset(db, ANNOTATION_FONT_KEY, blob));
 }
 
 export async function loadReadingAnnotationFont(): Promise<Blob | null> {
-    try {
-        const db = await openBackgroundDb();
-        const blob = await new Promise<Blob | null>((resolve, reject) => {
-            const tx = db.transaction(BG_STORE_NAME, "readonly");
-            const req = tx.objectStore(BG_STORE_NAME).get(ANNOTATION_FONT_KEY);
-            req.onsuccess = () => resolve((req.result as Blob) || null);
-            req.onerror = () => reject(req.error);
-        });
-        db.close();
-        return blob;
-    } catch {
-        return null;
-    }
+    return loadAsset(ANNOTATION_FONT_KEY);
 }

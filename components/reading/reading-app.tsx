@@ -80,15 +80,14 @@ export default function ReadingApp({ onClose }: Props) {
     useEffect(() => {
         hydrateReadingStorage().then(() => setReady(true));
         setAppearance(loadReadingAppearance());
-        void loadReadingBackground().then((blob) => {
-            updateBackgroundUrl(blob ? URL.createObjectURL(blob) : null);
-        });
-        void loadReadingCustomFont().then((blob) => {
-            void loadCustomFontFace(blob);
-        });
-        void loadReadingAnnotationFont().then((blob) => {
-            void loadAnnotationFontFace(blob);
-        });
+        // 串行读取：三者共用同一个 IndexedDB。并发打开时，若库缺 store 需要升版本补建，
+        // 会被其它尚未关闭的连接 block 掉。顺序执行可以保证同一时刻只有一个连接。
+        void (async () => {
+            const background = await loadReadingBackground();
+            updateBackgroundUrl(background ? URL.createObjectURL(background) : null);
+            await loadCustomFontFace(await loadReadingCustomFont());
+            await loadAnnotationFontFace(await loadReadingAnnotationFont());
+        })();
         return () => {
             if (backgroundUrlRef.current) URL.revokeObjectURL(backgroundUrlRef.current);
             if (customFontUrlRef.current) URL.revokeObjectURL(customFontUrlRef.current);
