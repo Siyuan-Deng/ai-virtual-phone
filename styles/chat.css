@@ -7362,6 +7362,40 @@
 .reading-mark[data-style="underline"] {
   border-bottom: 2px solid rgba(190, 140, 60, 0.85);
 }
+/* 批注面板里按章折叠：长书里一屏列不完，当前章展开、其余收起 */
+.reading-fold {
+  border: 1px solid rgba(45, 35, 28, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.45);
+}
+.reading-fold-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  list-style: none;
+  font-size: calc(12.5px*var(--app-text-scale,1));
+  color: var(--reading-warm-ink-secondary, #666);
+}
+.reading-fold-summary::-webkit-details-marker { display: none; }
+.reading-fold-count {
+  flex: 0 0 auto;
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(45, 35, 28, 0.07);
+  font-size: calc(11px*var(--app-text-scale,1));
+  text-align: center;
+}
+.reading-fold-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 12px 12px;
+}
 .reading-mark-row {
   display: flex;
   align-items: center;

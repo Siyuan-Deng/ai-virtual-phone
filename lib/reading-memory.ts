@@ -19,6 +19,8 @@ export type ReadingAnnotationMemo = {
     /** 区间总结用：人读的范围描述，例如「第3章—第5章」 */
     rangeLabel?: string;
     characterId: string;
+    /** 老数据没有这个字段，按书筛选时退回书名比对 */
+    bookId?: string;
     bookTitle: string;
     chapterIndex: number;
     chapterTitle: string;
@@ -52,6 +54,14 @@ export function appendReadingAnnotationMemos(memos: ReadingAnnotationMemo[]): vo
     persist([...existing, ...added]);
 }
 
+/** 某本书里已存的区间摘要，最新的在前 */
+export function loadReadingSummaryMemos(bookId: string, bookTitle: string): ReadingAnnotationMemo[] {
+    return loadReadingAnnotationMemos()
+        .filter(memo => memo.kind === "summary")
+        .filter(memo => (memo.bookId ? memo.bookId === bookId : memo.bookTitle === bookTitle))
+        .reverse();
+}
+
 export function deleteReadingAnnotationMemo(annotationId: string): void {
     if (typeof window === "undefined") return;
     const existing = loadReadingAnnotationMemos();
@@ -73,7 +83,8 @@ export function formatReadingAnnotationMemo(
     const chapter = memo.chapterTitle.trim() || `第${memo.chapterIndex + 1}章`;
     if (memo.kind === "summary") {
         const range = memo.rangeLabel?.trim() || chapter;
-        return `[共读摘要]《${memo.bookTitle}》${range}：${memo.content}`;
+        // 带上「谁读了什么」：否则记忆区里突然冒出一段小说情节，读起来莫名其妙
+        return `[共读摘要]${params.userName}和${params.characterName}读了《${memo.bookTitle}》${range}：${memo.content}`;
     }
     const who = memo.authorType === "user" ? params.userName : params.characterName;
     const where = memo.quote ? `在「${memo.quote}」旁` : "";

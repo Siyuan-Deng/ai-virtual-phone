@@ -19,7 +19,12 @@ import {
 } from "@/lib/reading-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { loadReadingMarks, saveReadingMark, deleteReadingMark } from "@/lib/reading-marks";
-import { appendReadingAnnotationMemos, deleteReadingAnnotationMemo, type ReadingAnnotationMemo } from "@/lib/reading-memory";
+import {
+    appendReadingAnnotationMemos,
+    deleteReadingAnnotationMemo,
+    loadReadingSummaryMemos,
+    type ReadingAnnotationMemo,
+} from "@/lib/reading-memory";
 import { annotationExportFileName, buildAnnotationMarkdown } from "@/lib/reading-export";
 import { downloadFile } from "@/lib/download-utils";
 import { textOffsetWithin } from "./reading-selection";
@@ -290,6 +295,9 @@ export function ReadingViewer({ book, onBack }: Props) {
     const [showCharAnnotationMenu, setShowCharAnnotationMenu] = useState(false);
     const [showMyMarksPanel, setShowMyMarksPanel] = useState(false);
     const [exportNote, setExportNote] = useState("");
+    /** 面板里按章折叠要看全书；页面渲染用的 annotations 只覆盖读过的章节，两者分开 */
+    const [panelAnnotations, setPanelAnnotations] = useState<ReadingAnnotation[]>([]);
+    const [summaryMemos, setSummaryMemos] = useState<ReadingAnnotationMemo[]>([]);
     const [showRangeSummary, setShowRangeSummary] = useState(false);
     const [summaryRange, setSummaryRange] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
     const [summaryDraft, setSummaryDraft] = useState("");
@@ -574,6 +582,7 @@ export function ReadingViewer({ book, onBack }: Props) {
             .map(annotation => ({
                 id: annotation.id,
                 characterId: annotation.characterId,
+                bookId: book.id,
                 bookTitle: book.title,
                 chapterIndex: annotation.chapterIndex,
                 chapterTitle: chapters.find(chapter => chapter.index === annotation.chapterIndex)?.title || "",
@@ -582,6 +591,29 @@ export function ReadingViewer({ book, onBack }: Props) {
                 content: annotation.content,
                 createdAt: annotation.createdAt,
             }));
+
+    /** 按章折叠的列表壳。当前章默认展开，其余收起，长书里才好找。 */
+    const renderChapterFoldList = (
+        sections: Array<{ index: number; count: number; rows: React.ReactNode }>,
+        emptyText: string,
+    ) => {
+        if (sections.length === 0) {
+            return <div className="reading-settings-inline-note"><span>{emptyText}</span></div>;
+        }
+        return (
+            <>
+                {sections.map(section => (
+                    <details key={section.index} className="reading-fold" open={section.index === chapterIndex}>
+                        <summary className="reading-fold-summary">
+                            <span>{chapters.find(chapter => chapter.index === section.index)?.title?.trim() || `第${section.index + 1}章`}</span>
+                            <span className="reading-fold-count">{section.count}</span>
+                        </summary>
+                        <div className="reading-fold-body">{section.rows}</div>
+                    </details>
+                ))}
+            </>
+        );
+    };
 
     /** 导出全书批注。state 里的 annotations 只覆盖读过的章节，这里重新按章全量取一遍。 */
     const exportAnnotations = async () => {
@@ -2380,6 +2412,7 @@ export function ReadingViewer({ book, onBack }: Props) {
 
     /** PDF 渲染设置先在弹窗内暂存，确认时只重建一次，避免拖动滑块期间连续重渲染整本 PDF。 */
     const openRangeSummary = () => {
+        setSummaryMemos(loadReadingSummaryMemos(book.id, book.title));
         setSummaryRange({ start: chapterIndex, end: chapterIndex });
         setSummaryDraft("");
         setSummaryLabel("");
@@ -2407,6 +2440,29 @@ export function ReadingViewer({ book, onBack }: Props) {
         }
     };
 
+    const loadPanelAnnotations = async () => {
+        const groups = await Promise.all(chapters.map(chapter => loadAnnotations(book.id, chapter.index)));
+        setPanelAnnotations(groups.flat());
+    };
+
+    const openMyAnnotationsPanel = () => {
+        setExportNote("");
+        setShowMyMarksPanel(true);
+        void loadPanelAnnotations();
+    };
+
+    const openCharAnnotationsPanel = () => {
+        setShowCharAnnotationMenu(true);
+        void loadPanelAnnotations();
+    };
+
+    const removeAnnotationEverywhere = async (annotationId: string) => {
+        await deleteAnnotation(annotationId);
+        deleteReadingAnnotationMemo(annotationId);
+        setAnnotations(prev => prev.filter(item => item.id !== annotationId));
+        setPanelAnnotations(prev => prev.filter(item => item.id !== annotationId));
+    };
+
     const saveRangeSummary = () => {
         const content = summaryDraft.trim();
         if (!content || !companionId) return;
@@ -2414,6 +2470,7 @@ export function ReadingViewer({ book, onBack }: Props) {
         appendReadingAnnotationMemos([{
             id: `rsum_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             characterId: companionId,
+            bookId: book.id,
             bookTitle: book.title,
             chapterIndex: from,
             chapterTitle: chapters.find(chapter => chapter.index === from)?.title || "",
@@ -2423,7 +2480,8 @@ export function ReadingViewer({ book, onBack }: Props) {
             kind: "summary",
             rangeLabel: summaryLabel,
         }]);
-        setShowRangeSummary(false);
+        setSummaryDraft("");
+        setSummaryMemos(loadReadingSummaryMemos(book.id, book.title));
     };
 
     const openReadingSettings = () => {
@@ -2684,8 +2742,7 @@ export function ReadingViewer({ book, onBack }: Props) {
                         <button
                             type="button"
                             className={`reading-footer-icon-btn ${autoAnnotate ? "is-active" : ""}`}
-                            onClick={() => setShowCharAnnotationMenu(true)}
-                            disabled={!companionId}
+                            onClick={openCharAnnotationsPanel}
                         >
                             <Highlighter size={22} strokeWidth={1.7} />
                             <span>TA的批注</span>
@@ -2693,7 +2750,7 @@ export function ReadingViewer({ book, onBack }: Props) {
                         <button
                             type="button"
                             className="reading-footer-icon-btn"
-                            onClick={() => setShowMyMarksPanel(true)}
+                            onClick={openMyAnnotationsPanel}
                         >
                             <Highlighter size={22} strokeWidth={1.7} />
                             <span>我的批注</span>
@@ -3042,59 +3099,33 @@ export function ReadingViewer({ book, onBack }: Props) {
                     onCancel={() => setShowCharAnnotationMenu(false)}
                 >
                     <div className="reading-settings-grid">
-                        <button
-                            type="button"
-                            className="ui-btn ui-btn-outline"
-                            onClick={() => { setShowCharAnnotationMenu(false); openAnnotationDialog("manual"); }}
-                            disabled={generating || !companionId}
-                        >
-                            现在批注
-                        </button>
-                        <button
-                            type="button"
-                            className="ui-btn ui-btn-outline"
-                            onClick={() => { setShowCharAnnotationMenu(false); openAnnotationDialog("auto"); }}
-                        >
-                            {autoAnnotate ? "自动批注：已开启" : "自动批注：已关闭"}
-                        </button>
-                        <button
-                            type="button"
-                            className="ui-btn ui-btn-outline"
-                            onClick={() => { setShowCharAnnotationMenu(false); openRangeSummary(); }}
-                            disabled={!companionId}
-                        >
-                            总结读过的内容
-                        </button>
-                        <div className="reading-settings-inline-note">
-                            <span>批注密度</span>
-                            <span className="reading-interval-row">
-                                每
-                                <input
-                                    className="reading-interval-input"
-                                    type="number"
-                                    min={0}
-                                    max={999}
-                                    step={1}
-                                    inputMode="numeric"
-                                    value={readingConfig.annotationInterval}
-                                    onChange={(e) => {
-                                        const parsed = Math.floor(Number(e.target.value));
-                                        const next = {
-                                            ...readingConfig,
-                                            annotationInterval: Number.isFinite(parsed) ? Math.min(999, Math.max(0, parsed)) : 0,
-                                        };
-                                        setReadingConfig(next);
-                                        saveReadingInteractionConfig(next);
-                                    }}
-                                />
-                                段 1 条
-                            </span>
-                        </div>
-                        <div className="reading-settings-inline-note">
-                            <span>说明</span>
-                            <span>填 0 表示不限，由角色自己决定写多少</span>
-                        </div>
-
+                        {(() => {
+                            const theirs = panelAnnotations.filter(a => !isUserAnnotation(a));
+                            const indexes = Array.from(new Set(theirs.map(a => a.chapterIndex))).sort((a, b) => a - b);
+                            const sections = indexes.map(index => {
+                                const rows = theirs
+                                    .filter(a => a.chapterIndex === index)
+                                    .sort((a, b) => a.paragraphIndex - b.paragraphIndex);
+                                return {
+                                    index,
+                                    count: rows.length,
+                                    rows: (
+                                        <>
+                                            {rows.map(annotation => (
+                                                <div key={annotation.id} className="reading-mark-row">
+                                                    <span className="reading-my-annotation-row-body">
+                                                        {annotation.quote && <span className="reading-my-annotation-row-quote">{annotation.quote.slice(0, 40)}</span>}
+                                                        <span>{annotation.content}</span>
+                                                    </span>
+                                                    <button type="button" onClick={() => { void removeAnnotationEverywhere(annotation.id); }}>删除</button>
+                                                </div>
+                                            ))}
+                                        </>
+                                    ),
+                                };
+                            });
+                            return renderChapterFoldList(sections, "TA 还没有在这本书上写批注");
+                        })()}
                     </div>
                 </ContentDialog>
             )}
@@ -3118,41 +3149,50 @@ export function ReadingViewer({ book, onBack }: Props) {
                             <div className="reading-settings-inline-note"><span>{exportNote}</span></div>
                         )}
                         {(() => {
-                            const myAnnotations = annotations.filter(a => a.chapterIndex === chapterIndex && isUserAnnotation(a));
-                            // 已经写了批注的标记不再单独列一条：批注那条里就带着这段原文
-                            const annotated = new Set(myAnnotations.map(a => `${a.paragraphIndex}:${a.quote ?? ""}`));
-                            const chapterMarks = marks.filter(m =>
-                                m.chapterIndex === chapterIndex && !annotated.has(`${m.paragraphIndex}:${m.text}`));
-                            if (chapterMarks.length === 0 && myAnnotations.length === 0) {
-                                return <div className="reading-settings-inline-note"><span>本章暂无标记</span></div>;
-                            }
-                            return (
-                                <>
-                                    {myAnnotations.map(annotation => (
-                                        <div key={annotation.id} className="reading-mark-row">
-                                            <span className="reading-my-annotation-row-body">
-                                                {annotation.quote && <span className="reading-my-annotation-row-quote">{annotation.quote.slice(0, 40)}</span>}
-                                                <span>{annotation.content}</span>
-                                            </span>
-                                            <button type="button" onClick={() => {
-                                                void deleteAnnotation(annotation.id);
-                                                deleteReadingAnnotationMemo(annotation.id);
-                                                setAnnotations(prev => prev.filter(item => item.id !== annotation.id));
-                                            }}>删除</button>
-                                        </div>
-                                    ))}
-                                    {chapterMarks.map(mark => (
-                                        <div key={mark.id} className="reading-mark-row">
-                                            <span className="reading-mark" data-style={mark.style}>{mark.text.slice(0, 40)}</span>
-                                            <button type="button" onClick={() => {
-                                                deleteReadingMark(book.id, mark.id);
-                                                setMarks(prev => prev.filter(item => item.id !== mark.id));
-                                            }}>删除</button>
-                                        </div>
-                                    ))}
-                                </>
-                            );
-                        })()}
+                            const indexes = Array.from(new Set([
+                                ...panelAnnotations.filter(isUserAnnotation).map(a => a.chapterIndex),
+                                ...marks.map(m => m.chapterIndex),
+                            ])).sort((a, b) => a - b);
+
+                            const sections = indexes.map(index => {
+                                const mine = panelAnnotations
+                                    .filter(a => a.chapterIndex === index && isUserAnnotation(a))
+                                    .sort((a, b) => a.paragraphIndex - b.paragraphIndex);
+                                // 已经写了批注的标记不再单独列一条：批注那条里就带着这段原文
+                                const annotated = new Set(mine.map(a => `${a.paragraphIndex}:${a.quote ?? ""}`));
+                                const chapterMarks = marks
+                                    .filter(m => m.chapterIndex === index && !annotated.has(`${m.paragraphIndex}:${m.text}`))
+                                    .sort((a, b) => a.paragraphIndex - b.paragraphIndex || a.start - b.start);
+                                return {
+                                    index,
+                                    count: mine.length + chapterMarks.length,
+                                    rows: (
+                                        <>
+                                            {mine.map(annotation => (
+                                                <div key={annotation.id} className="reading-mark-row">
+                                                    <span className="reading-my-annotation-row-body">
+                                                        {annotation.quote && <span className="reading-my-annotation-row-quote">{annotation.quote.slice(0, 40)}</span>}
+                                                        <span>{annotation.content}</span>
+                                                    </span>
+                                                    <button type="button" onClick={() => { void removeAnnotationEverywhere(annotation.id); }}>删除</button>
+                                                </div>
+                                            ))}
+                                            {chapterMarks.map(mark => (
+                                                <div key={mark.id} className="reading-mark-row">
+                                                    <span className="reading-mark" data-style={mark.style}>{mark.text.slice(0, 40)}</span>
+                                                    <button type="button" onClick={() => {
+                                                        deleteReadingMark(book.id, mark.id);
+                                                        setMarks(prev => prev.filter(item => item.id !== mark.id));
+                                                    }}>删除</button>
+                                                </div>
+                                            ))}
+                                        </>
+                                    ),
+                                };
+                            }).filter(section => section.count > 0);
+
+                            return renderChapterFoldList(sections, "这本书还没有你的批注或标记");
+                                                })()}
                     </div>
                 </ContentDialog>
             )}
@@ -3178,7 +3218,7 @@ export function ReadingViewer({ book, onBack }: Props) {
             )}
             {showRangeSummary && (
                 <ContentDialog
-                    title="总结读过的内容"
+                    title="总结内容"
                     confirmLabel={summaryDraft.trim() ? "存进记忆" : "关闭"}
                     cancelLabel="取消"
                     onConfirm={() => { if (summaryDraft.trim()) saveRangeSummary(); else setShowRangeSummary(false); }}
@@ -3230,6 +3270,26 @@ export function ReadingViewer({ book, onBack }: Props) {
                         {summaryNote && (
                             <div className="reading-settings-inline-note"><span>{summaryNote}</span></div>
                         )}
+                        {summaryMemos.length > 0 && (
+                            <>
+                                <div className="reading-settings-inline-note">
+                                    <span>已存的摘要</span>
+                                    <span>删掉这里的条目，记忆区里也会跟着没有</span>
+                                </div>
+                                {summaryMemos.map(memo => (
+                                    <div key={memo.id} className="reading-mark-row">
+                                        <span className="reading-my-annotation-row-body">
+                                            <span className="reading-my-annotation-row-quote">{memo.rangeLabel || memo.chapterTitle}</span>
+                                            <span>{memo.content}</span>
+                                        </span>
+                                        <button type="button" onClick={() => {
+                                            deleteReadingAnnotationMemo(memo.id);
+                                            setSummaryMemos(prev => prev.filter(item => item.id !== memo.id));
+                                        }}>删除</button>
+                                    </div>
+                                ))}
+                            </>
+                        )}
                     </div>
                 </ContentDialog>
             )}
@@ -3242,6 +3302,58 @@ export function ReadingViewer({ book, onBack }: Props) {
                     onCancel={() => setShowReadingSettings(false)}
                 >
                     <div className="reading-settings-grid">
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => { setShowReadingSettings(false); openAnnotationDialog("manual"); }}
+                            disabled={generating || !companionId}
+                        >
+                            现在批注
+                        </button>
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => { setShowReadingSettings(false); openAnnotationDialog("auto"); }}
+                        >
+                            {autoAnnotate ? "自动批注：已开启" : "自动批注：已关闭"}
+                        </button>
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => { setShowReadingSettings(false); openRangeSummary(); }}
+                            disabled={!companionId}
+                        >
+                            总结内容
+                        </button>
+                        <div className="reading-settings-inline-note">
+                            <span>批注密度</span>
+                            <span className="reading-interval-row">
+                                每
+                                <input
+                                    className="reading-interval-input"
+                                    type="number"
+                                    min={0}
+                                    max={999}
+                                    step={1}
+                                    inputMode="numeric"
+                                    value={readingConfig.annotationInterval}
+                                    onChange={(e) => {
+                                        const parsed = Math.floor(Number(e.target.value));
+                                        const next = {
+                                            ...readingConfig,
+                                            annotationInterval: Number.isFinite(parsed) ? Math.min(999, Math.max(0, parsed)) : 0,
+                                        };
+                                        setReadingConfig(next);
+                                        saveReadingInteractionConfig(next);
+                                    }}
+                                />
+                                段 1 条
+                            </span>
+                        </div>
+                        <div className="reading-settings-inline-note">
+                            <span>说明</span>
+                            <span>批注密度填 0 表示不限，由角色自己决定写多少</span>
+                        </div>
                         <div className="reading-settings-inline-note">
                             <span>启用阅读双语翻译</span>
                             <Toggle
