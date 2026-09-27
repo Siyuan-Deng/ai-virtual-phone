@@ -40,21 +40,19 @@ type TxtPageItem =
     | { kind: "gap"; chapterIndex: number; paragraphIndex: number }
     | { kind: "annotation"; annotation: ReadingAnnotation; chapterIndex: number; paragraphIndex: number };
 
-/** 选字菜单自身高度 + 与选区的间距，用来判断选区上方放不放得下 */
-const SELECTION_MENU_CLEARANCE = 52;
-/** 菜单半宽，避免贴着选区中心算出来的位置把菜单顶出屏幕 */
+/** 菜单半宽，避免贴着某个点算出来的位置把菜单顶出屏幕 */
 const MENU_HALF_WIDTH = 96;
 
 function clampMenuX(centerX: number, width: number): number {
     return Math.min(Math.max(centerX, MENU_HALF_WIDTH), Math.max(MENU_HALF_WIDTH, width - MENU_HALF_WIDTH));
 }
 
-/** iOS 的 Copy / Look Up 条永远贴在选区下方，我们就走选区上方；
- *  上方塞不下（选到了页面最顶上）才退回页脚上方——那里一定不会被压住。 */
-function selectionMenuStyle(anchorTop: number, anchorX: number, footerHeight: number): React.CSSProperties {
-    if (anchorTop >= SELECTION_MENU_CLEARANCE) {
-        return { top: `${anchorTop - 10}px`, left: `${anchorX}px`, transform: "translate(-50%, -100%)" };
-    }
+/** iOS 的 Copy / Look Up 条出现在选区上方还是下方，UIKit 没有公开规则，
+ *  实测同一本书里两种都出现过，跟着选区放就一定有撞上的时候。
+ *  但它永远「紧贴选区」，所以我们去离选区最远的那一端：
+ *  选区在上半屏就把菜单钉在页脚上方，在下半屏就钉在页眉下方，两者不可能重合。 */
+function selectionMenuStyle(placeAtTop: boolean, topOffset: number, footerHeight: number): React.CSSProperties {
+    if (placeAtTop) return { top: `${topOffset}px`, left: "50%", transform: "translateX(-50%)" };
     return { bottom: `${footerHeight + 12}px`, left: "50%", transform: "translateX(-50%)" };
 }
 
@@ -274,14 +272,15 @@ export function ReadingViewer({ book, onBack }: Props) {
     const [selectionInfo, setSelectionInfo] = useState<
         {
             text: string; chapterIndex: number; paragraphIndex: number; start: number; end: number;
-            /** 选区外框，相对阅读页左上角 */
-            anchorX: number; anchorTop: number;
+            /** 菜单落点：系统菜单永远紧贴选区，所以我们去屏幕另一端 */
+            placeAtTop: boolean; topOffset: number;
         } | null
     >(null);
     /** 点到已有的荧光笔/划线时弹出的删除菜单 */
     const [markMenu, setMarkMenu] = useState<{ mark: ReadingMark; x: number; y: number } | null>(null);
     /** 选字菜单要停在页脚正上方，页脚高度随安全区/字号变，量出来最稳 */
     const footerRef = useRef<HTMLElement | null>(null);
+    const headerRef = useRef<HTMLElement | null>(null);
     const surfaceRef = useRef<HTMLDivElement | null>(null);
     const [footerHeight, setFooterHeight] = useState(96);
     const [showMyAnnotation, setShowMyAnnotation] = useState(false);
@@ -495,14 +494,14 @@ export function ReadingViewer({ book, onBack }: Props) {
 
         const surfaceRect = surfaceRef.current?.getBoundingClientRect();
         const rect = range.getBoundingClientRect();
-        const originX = surfaceRect?.left ?? 0;
         const originY = surfaceRect?.top ?? 0;
-        const surfaceWidth = surfaceRect?.width ?? (typeof window !== "undefined" ? window.innerWidth : 375);
-        const centerX = rect.left + rect.width / 2 - originX;
+        const surfaceHeight = surfaceRect?.height ?? (typeof window !== "undefined" ? window.innerHeight : 812);
+        const headerRect = headerRef.current?.getBoundingClientRect();
+        const selectionCenterY = (rect.top + rect.bottom) / 2 - originY;
         setSelectionInfo({
             text, chapterIndex: lineChapter, paragraphIndex, start: startOffset, end,
-            anchorX: clampMenuX(centerX, surfaceWidth),
-            anchorTop: rect.top - originY,
+            placeAtTop: selectionCenterY > surfaceHeight / 2,
+            topOffset: (headerRect ? headerRect.bottom - originY : 56) + 12,
         });
     }, []);
 
@@ -605,7 +604,6 @@ export function ReadingViewer({ book, onBack }: Props) {
             <span className="reading-annotation-name">
                 {annotation.authorType === "user" ? userDisplayName : annotation.characterName}
             </span>
-            {annotation.quote && <span className="reading-annotation-quote">{annotation.quote}</span>}
             <ReadingAnnotationContent
                 text={annotation.content}
                 bilingualEnabled={bilingualTranslationEnabled}
@@ -693,7 +691,6 @@ export function ReadingViewer({ book, onBack }: Props) {
                             <span className="reading-annotation-name">
                                 {item.annotation.authorType === "user" ? userDisplayName : item.annotation.characterName}
                             </span>
-                            {item.annotation.quote && <span className="reading-annotation-quote">{item.annotation.quote}</span>}
                             <span className="reading-annotation-text">{item.annotation.content}</span>
                         </div>
                         : <p key={i} className={`reading-line${item.indent ? " reading-line-indent" : ""}${item.segEnd ? " reading-line-seg-end" : ""}`}>{item.text}</p>
@@ -1958,14 +1955,13 @@ export function ReadingViewer({ book, onBack }: Props) {
         const annotationMeasure = txtMeasureAnnotationRef.current;
         const annotationNameEl = annotationMeasure.querySelector(".reading-annotation-name") as HTMLElement | null;
         const annotationTextEl = annotationMeasure.querySelector(".reading-annotation-text") as HTMLElement | null;
-        const annotationQuoteEl = annotationMeasure.querySelector(".reading-annotation-quote") as HTMLElement | null;
         const annotationMeasureStyle = window.getComputedStyle(annotationMeasure);
         const annotationMarginY =
             parseFloat(annotationMeasureStyle.marginTop || "0") +
             parseFloat(annotationMeasureStyle.marginBottom || "0");
         const chapterAnnotations = annotations.filter((annotation) => annotation.chapterIndex === chapterIndex);
         const annotationSignature = chapterAnnotations
-            .map((annotation) => `${annotation.id}:${annotation.content.length}:${annotation.quote?.length ?? 0}:${isAnnotationTranslationExpanded(annotation.id) ? 1 : 0}`)
+            .map((annotation) => `${annotation.id}:${annotation.content.length}:${isAnnotationTranslationExpanded(annotation.id) ? 1 : 0}`)
             .join("|");
         const paragraphCharCount = currentChapter.paragraphs.reduce((sum, paragraph) => sum + paragraph.length, 0);
         const paginationSignature = [
@@ -1990,10 +1986,6 @@ export function ReadingViewer({ book, onBack }: Props) {
         const measureAnnotationHeight = (annotation: ReadingAnnotation) => {
             if (!annotationNameEl || !annotationTextEl) return lineHeight * 2;
             annotationNameEl.textContent = annotation.characterName;
-            if (annotationQuoteEl) {
-                annotationQuoteEl.textContent = annotation.quote || "";
-                annotationQuoteEl.style.display = annotation.quote ? "" : "none";
-            }
             const bilingual = bilingualTranslationEnabled ? splitBilingualText(annotation.content) : null;
             if (!bilingual) {
                 annotationTextEl.textContent = annotation.content;
@@ -2372,7 +2364,7 @@ export function ReadingViewer({ book, onBack }: Props) {
             )}
 
             {/* Header — chapter name + page info */}
-            <header className={`reading-header ${immersive ? "reading-header--immersive" : "reading-header--revealed"}`} data-ui="header">
+            <header ref={headerRef} className={`reading-header ${immersive ? "reading-header--immersive" : "reading-header--revealed"}`} data-ui="header">
                 <div className="reading-header-top">
                     <button onClick={onBack} className="page-back-btn reading-header-back">
                         <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
@@ -2531,7 +2523,6 @@ export function ReadingViewer({ book, onBack }: Props) {
                             <div ref={txtMeasureGapRef} className="reading-line-gap" />
                             <div ref={txtMeasureAnnotationRef} className="reading-annotation">
                                 <span className="reading-annotation-name">角色</span>
-                                <span className="reading-annotation-quote">原文片段</span>
                                 <span className="reading-annotation-text">批注内容</span>
                             </div>
                         </div>
@@ -2913,7 +2904,7 @@ export function ReadingViewer({ book, onBack }: Props) {
             {selectionInfo && (
                 <div
                     className="reading-selection-menu"
-                    style={selectionMenuStyle(selectionInfo.anchorTop, selectionInfo.anchorX, footerHeight)}
+                    style={selectionMenuStyle(selectionInfo.placeAtTop, selectionInfo.topOffset, footerHeight)}
                     onPointerDown={(e) => e.stopPropagation()}
                 >
                     <button type="button" onClick={() => addMark("highlight")}>荧光笔</button>
@@ -2978,13 +2969,12 @@ export function ReadingViewer({ book, onBack }: Props) {
                     onCancel={() => setShowMyMarksPanel(false)}
                 >
                     <div className="reading-settings-grid">
-                        <div className="reading-settings-inline-note">
-                            <span>怎么用</span>
-                            <span>长按正文选中一段，松手后选「荧光笔 / 划线」；再点一下标出来的字，可以「批注 / 删除」</span>
-                        </div>
                         {(() => {
-                            const chapterMarks = marks.filter(m => m.chapterIndex === chapterIndex);
                             const myAnnotations = annotations.filter(a => a.chapterIndex === chapterIndex && isUserAnnotation(a));
+                            // 已经写了批注的标记不再单独列一条：批注那条里就带着这段原文
+                            const annotated = new Set(myAnnotations.map(a => `${a.paragraphIndex}:${a.quote ?? ""}`));
+                            const chapterMarks = marks.filter(m =>
+                                m.chapterIndex === chapterIndex && !annotated.has(`${m.paragraphIndex}:${m.text}`));
                             if (chapterMarks.length === 0 && myAnnotations.length === 0) {
                                 return <div className="reading-settings-inline-note"><span>本章暂无标记</span></div>;
                             }
