@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from "react";
-import { Bot, ChevronDown, ChevronRight, Highlighter, Languages, Menu, Minus, PenLine, Rocket, SendHorizontal, X, ZoomIn } from "lucide-react";
+import { ChevronDown, ChevronRight, Highlighter, Languages, Menu, Minus, PenLine, Rocket, SendHorizontal, X, ZoomIn } from "lucide-react";
 import {
     loadChapters,
     loadProgress,
@@ -574,18 +574,17 @@ export function ReadingViewer({ book, onBack }: Props) {
     const marksByParagraph = useMemo(() => {
         const map = new Map<string, ReadingMark[]>();
         for (const mark of marks) {
-            if (mark.chapterIndex !== chapterIndex) continue;
-            const key = String(mark.paragraphIndex);
+            const key = `${mark.chapterIndex}:${mark.paragraphIndex}`;
             map.set(key, [...(map.get(key) || []), mark]);
         }
         return map;
-    }, [marks, chapterIndex]);
+    }, [marks]);
 
     /** 把落在本行区间内的荧光笔/划线切成 <mark>/<u> 片段 */
     const renderLineContent = (item: Extract<TxtPageItem, { kind: "line" }>) => {
         const lineStart = item.charStart ?? 0;
         const lineEnd = lineStart + item.text.length;
-        const hits = (marksByParagraph.get(String(item.paragraphIndex)) || [])
+        const hits = (marksByParagraph.get(`${item.chapterIndex}:${item.paragraphIndex}`) || [])
             .filter(mark => mark.start < lineEnd && mark.end > lineStart)
             .sort((a, b) => a.start - b.start);
         if (hits.length === 0) return item.text;
@@ -2251,6 +2250,9 @@ export function ReadingViewer({ book, onBack }: Props) {
     };
 
     const handleTouchEnd = (e: React.TouchEvent) => {
+        // 拖动选区手柄同样会走到这里：有活动选区就别翻页，否则刚选好就被翻走
+        const sel = typeof window !== "undefined" ? window.getSelection() : null;
+        if (sel && !sel.isCollapsed) return;
         const dx = e.changedTouches[0].clientX - touchStartRef.current.x;
         const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
         if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
@@ -2419,14 +2421,22 @@ export function ReadingViewer({ book, onBack }: Props) {
                                     );
                                     return (
                                         <div key={pIndex} className="reading-scroll-block">
-                                            {paragraph.split("\n").map((segment, sIndex) => (
-                                                <p
-                                                    key={sIndex}
-                                                    className={`reading-line reading-line-indent${sIndex === segmentCount - 1 ? " reading-line-seg-end" : ""}`}
-                                                >
-                                                    {segment}
-                                                </p>
-                                            ))}
+                                            {(() => {
+                                                let charCursor = 0;
+                                                return paragraph.split("\n").map((segment, sIndex) => {
+                                                    const charStart = charCursor;
+                                                    charCursor += segment.length + 1; // 被拆掉的 \n 也占一个字符
+                                                    return renderLine({
+                                                        kind: "line",
+                                                        text: segment,
+                                                        chapterIndex: chapter.index,
+                                                        paragraphIndex: pIndex,
+                                                        indent: true,
+                                                        segEnd: sIndex === segmentCount - 1,
+                                                        charStart,
+                                                    }, sIndex);
+                                                });
+                                            })()}
                                             {paragraphAnnotations.map((annotation) => renderAnnotationItem(annotation))}
                                         </div>
                                     );
@@ -2516,7 +2526,7 @@ export function ReadingViewer({ book, onBack }: Props) {
                             onClick={() => setShowCharAnnotationMenu(true)}
                             disabled={!companionId}
                         >
-                            <Bot size={22} strokeWidth={1.7} />
+                            <Highlighter size={22} strokeWidth={1.7} />
                             <span>TA的批注</span>
                         </button>
                         <button
@@ -2866,7 +2876,7 @@ export function ReadingViewer({ book, onBack }: Props) {
                             onClick={() => { setShowCharAnnotationMenu(false); openAnnotationDialog("manual"); }}
                             disabled={generating || !companionId}
                         >
-                            让 TA 现在批注这一段
+                            现在批注
                         </button>
                         <button
                             type="button"

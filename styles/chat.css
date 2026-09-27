@@ -4591,6 +4591,15 @@
   font-weight: 400;
 }
 
+/* 外层 .phone-workspace 统一关掉了 user-select（桌面端图标拖拽需要），
+   正文必须显式恢复，否则 iOS 上长按选不中任何文字。
+   -webkit-touch-callout 继续继承 none：用自己的浮动菜单代替系统菜单。 */
+.reading-line,
+.reading-line * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 .reading-line {
   font-family: var(--reading-font-family, var(--app-font-family));
   font-size: calc(var(--reading-font-size,16px)*0.9*var(--app-text-scale,1));
