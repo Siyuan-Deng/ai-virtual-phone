@@ -51,6 +51,24 @@ export type ReadingAnnotation = {
     /** 批注作者。缺省即角色批注——存量数据没有这个字段，读出来仍按角色处理。
      *  用户批注沿用 characterId/characterName 记录「这条是写给哪个角色看的」。 */
     authorType?: "user" | "character";
+    /** 用户批注锚定的原文片段（选中的那一段文字）。角色批注不填。 */
+    quote?: string;
+};
+
+/** 荧光笔 / 划线。按「段落内字符区间」锚定；纯阅读标记，不进记忆。 */
+export type ReadingMarkStyle = "highlight" | "underline";
+
+export type ReadingMark = {
+    id: string;
+    bookId: string;
+    chapterIndex: number;
+    paragraphIndex: number;
+    /** 段落内的字符区间（含头不含尾） */
+    start: number;
+    end: number;
+    text: string;
+    style: ReadingMarkStyle;
+    createdAt: string;
 };
 
 export function isUserAnnotation(annotation: Pick<ReadingAnnotation, "authorType">): boolean {

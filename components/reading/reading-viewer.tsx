@@ -18,6 +18,9 @@ import {
     DEFAULT_READING_INTERACTION_CONFIG,
 } from "@/lib/reading-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
+import { loadReadingMarks, saveReadingMark, deleteReadingMark } from "@/lib/reading-marks";
+import { textOffsetWithin } from "./reading-selection";
+import type { ReadingMark, ReadingMarkStyle } from "@/lib/reading-types";
 import { generateAnnotationBatch, generateReadingChat, parseReadingDiscussResponse, type ReadingDiscussAction, type ReadingDiscussContext } from "@/lib/reading-engine";
 import { loadChatMessages, pushChatMessage, deleteChatMessage, editChatMessage, loadChatContacts, createOrGetSession, isReadingDiscussMessage } from "@/lib/chat-storage";
 import type { ChatMessage, ChatSession } from "@/lib/chat-storage";
@@ -33,7 +36,7 @@ import type { Character } from "@/lib/character-types";
 import { splitBilingualText } from "@/lib/bilingual-text";
 
 type TxtPageItem =
-    | { kind: "line"; text: string; chapterIndex: number; paragraphIndex: number; indent?: boolean; segEnd?: boolean }
+    | { kind: "line"; text: string; chapterIndex: number; paragraphIndex: number; indent?: boolean; segEnd?: boolean; charStart?: number }
     | { kind: "gap"; chapterIndex: number; paragraphIndex: number }
     | { kind: "annotation"; annotation: ReadingAnnotation; chapterIndex: number; paragraphIndex: number };
 
@@ -249,8 +252,16 @@ export function ReadingViewer({ book, onBack }: Props) {
     const [annotations, setAnnotations] = useState<ReadingAnnotation[]>([]);
     const [generating, setGenerating] = useState(false);
     const [companionId, setCompanionId] = useState<string | null>(null);
+    const [marks, setMarks] = useState<ReadingMark[]>([]);
+    const [selectionInfo, setSelectionInfo] = useState<
+        { text: string; chapterIndex: number; paragraphIndex: number; start: number; end: number; x: number; y: number } | null
+    >(null);
     const [showMyAnnotation, setShowMyAnnotation] = useState(false);
-    const [myAnnotationParagraph, setMyAnnotationParagraph] = useState(0);
+    const [showCharAnnotationMenu, setShowCharAnnotationMenu] = useState(false);
+    const [showMyMarksPanel, setShowMyMarksPanel] = useState(false);
+    const [pendingQuote, setPendingQuote] = useState<
+        { text: string; chapterIndex: number; paragraphIndex: number } | null
+    >(null);
     const [myAnnotationText, setMyAnnotationText] = useState("");
     const [immersive, setImmersive] = useState(true);
     const [showCharPicker, setShowCharPicker] = useState(false);
@@ -411,31 +422,101 @@ export function ReadingViewer({ book, onBack }: Props) {
                         ? <div key={i} className="reading-line-gap" />
                         : item.kind === "annotation"
                             ? renderAnnotationItem(item.annotation)
-                            : <p key={i} className={`reading-line${item.indent ? " reading-line-indent" : ""}${item.segEnd ? " reading-line-seg-end" : ""}`}>{item.text}</p>
+                            : renderLine(item, i)
                 ))}
             </div>
         );
     };
 
+    useEffect(() => { setMarks(loadReadingMarks(book.id)); }, [book.id]);
+
+
+    /** 松手后读取选区：定位到所属段落，换算成段落内字符区间 */
+    const captureSelection = useCallback(() => {
+        const sel = typeof window !== "undefined" ? window.getSelection() : null;
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) { setSelectionInfo(null); return; }
+        const text = sel.toString().trim();
+        if (text.length < 2) { setSelectionInfo(null); return; }
+
+        const range = sel.getRangeAt(0);
+        const startLine = (range.startContainer.nodeType === 1 ? range.startContainer as Element : range.startContainer.parentElement)
+            ?.closest<HTMLElement>("[data-paragraph]");
+        const endLine = (range.endContainer.nodeType === 1 ? range.endContainer as Element : range.endContainer.parentElement)
+            ?.closest<HTMLElement>("[data-paragraph]");
+        if (!startLine || !endLine) { setSelectionInfo(null); return; }
+        // 跨段选取暂不支持：锚点无法落在单一段落上
+        if (startLine.dataset.paragraph !== endLine.dataset.paragraph) { setSelectionInfo(null); return; }
+
+        const paragraphIndex = Number(startLine.dataset.paragraph);
+        const lineChapter = Number(startLine.dataset.chapter);
+        const lineStart = Number(startLine.dataset.charstart || 0);
+        const endLineStart = Number(endLine.dataset.charstart || 0);
+        const startOffset = lineStart + textOffsetWithin(startLine, range.startContainer, range.startOffset);
+        const end = endLineStart + textOffsetWithin(endLine, range.endContainer, range.endOffset);
+        if (!(end > startOffset)) { setSelectionInfo(null); return; }
+
+        const rect = range.getBoundingClientRect();
+        setSelectionInfo({
+            text, chapterIndex: lineChapter, paragraphIndex,
+            start: startOffset, end,
+            x: rect.left + rect.width / 2, y: rect.bottom,
+        });
+    }, []);
+
+    const addMark = (style: ReadingMarkStyle) => {
+        if (!selectionInfo) return;
+        const mark: ReadingMark = {
+            id: `mk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            bookId: book.id,
+            chapterIndex: selectionInfo.chapterIndex,
+            paragraphIndex: selectionInfo.paragraphIndex,
+            start: selectionInfo.start,
+            end: selectionInfo.end,
+            text: selectionInfo.text,
+            style,
+            createdAt: new Date().toISOString(),
+        };
+        saveReadingMark(mark);
+        setMarks(prev => [...prev, mark]);
+        clearSelection();
+    };
+
+    const clearSelection = () => {
+        setSelectionInfo(null);
+        try { window.getSelection()?.removeAllRanges(); } catch { /* ignore */ }
+    };
+
+    useEffect(() => {
+        const onUp = () => { window.setTimeout(captureSelection, 10); };
+        document.addEventListener("pointerup", onUp);
+        document.addEventListener("selectionchange", onUp);
+        return () => {
+            document.removeEventListener("pointerup", onUp);
+            document.removeEventListener("selectionchange", onUp);
+        };
+    }, [captureSelection]);
+
     const saveMyAnnotation = async () => {
         const text = myAnnotationText.trim();
-        if (!text || !currentChapter) return;
+        if (!text || !pendingQuote) return;
         const annotation: ReadingAnnotation = {
             id: `ann_user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             bookId: book.id,
-            chapterIndex,
-            paragraphIndex: myAnnotationParagraph,
+            chapterIndex: pendingQuote.chapterIndex,
+            paragraphIndex: pendingQuote.paragraphIndex,
             // 用户批注仍记录当前共读的角色，便于「这条是写给谁看的」
             characterId: companionId || "",
             characterName: "",
             content: text,
             createdAt: new Date().toISOString(),
             authorType: "user",
+            quote: pendingQuote.text,
         };
         await saveAnnotation(annotation);
         setAnnotations(prev => [...prev, annotation]);
         setShowMyAnnotation(false);
         setMyAnnotationText("");
+        setPendingQuote(null);
     };
 
     // 批注块（翻页与滚动模式共用）：长按呼出 复制/删除 菜单
@@ -488,6 +569,56 @@ export function ReadingViewer({ book, onBack }: Props) {
                 </div>
             )}
         </div>
+    );
+
+    const marksByParagraph = useMemo(() => {
+        const map = new Map<string, ReadingMark[]>();
+        for (const mark of marks) {
+            if (mark.chapterIndex !== chapterIndex) continue;
+            const key = String(mark.paragraphIndex);
+            map.set(key, [...(map.get(key) || []), mark]);
+        }
+        return map;
+    }, [marks, chapterIndex]);
+
+    /** 把落在本行区间内的荧光笔/划线切成 <mark>/<u> 片段 */
+    const renderLineContent = (item: Extract<TxtPageItem, { kind: "line" }>) => {
+        const lineStart = item.charStart ?? 0;
+        const lineEnd = lineStart + item.text.length;
+        const hits = (marksByParagraph.get(String(item.paragraphIndex)) || [])
+            .filter(mark => mark.start < lineEnd && mark.end > lineStart)
+            .sort((a, b) => a.start - b.start);
+        if (hits.length === 0) return item.text;
+
+        const nodes: React.ReactNode[] = [];
+        let cursor = lineStart;
+        hits.forEach((mark, i) => {
+            const from = Math.max(cursor, mark.start);
+            const to = Math.min(lineEnd, mark.end);
+            if (from > cursor) nodes.push(item.text.slice(cursor - lineStart, from - lineStart));
+            if (to > from) {
+                nodes.push(
+                    <span key={`${mark.id}-${i}`} className="reading-mark" data-style={mark.style}>
+                        {item.text.slice(from - lineStart, to - lineStart)}
+                    </span>,
+                );
+                cursor = to;
+            }
+        });
+        if (cursor < lineEnd) nodes.push(item.text.slice(cursor - lineStart));
+        return nodes;
+    };
+
+    const renderLine = (item: Extract<TxtPageItem, { kind: "line" }>, key: number) => (
+        <p
+            key={key}
+            className={`reading-line${item.indent ? " reading-line-indent" : ""}${item.segEnd ? " reading-line-seg-end" : ""}`}
+            data-chapter={item.chapterIndex}
+            data-paragraph={item.paragraphIndex}
+            data-charstart={item.charStart ?? 0}
+        >
+            {renderLineContent(item)}
+        </p>
     );
 
     const renderStaticPage = (items: TxtPageItem[]) => (
@@ -1826,12 +1957,17 @@ export function ReadingViewer({ book, onBack }: Props) {
 
         currentChapter.paragraphs.forEach((paragraph, index) => {
             const segments = paragraph.split("\n");
+            // 段落内的字符游标：wrapTextToLines 不裁剪字符，各行拼接等于原段落，
+            // 所以逐行累加长度就能得到每行在段落中的起始偏移（荧光笔/划线按此定位）。
+            let charCursor = 0;
             segments.forEach((segment, segmentIndex) => {
                 const shouldIndent = segmentIndex === 0;
                 const wrappedLines = wrapTextToLines(segment, maxWidth, ctx, shouldIndent ? indentWidth : 0);
                 wrappedLines.forEach((line, lineIndex) => {
-                    tokens.push({ kind: "line", text: line, chapterIndex, paragraphIndex: index, indent: shouldIndent && lineIndex === 0, segEnd: lineIndex === wrappedLines.length - 1 });
+                    tokens.push({ kind: "line", text: line, chapterIndex, paragraphIndex: index, indent: shouldIndent && lineIndex === 0, segEnd: lineIndex === wrappedLines.length - 1, charStart: charCursor });
+                    charCursor += line.length;
                 });
+                if (segmentIndex < segments.length - 1) charCursor += 1; // 被 split 掉的 \n
                 if (segmentIndex < segments.length - 1) tokens.push({ kind: "gap", chapterIndex, paragraphIndex: index });
             });
             const paragraphAnnotations = annotationMap.get(index) || [];
@@ -1897,6 +2033,10 @@ export function ReadingViewer({ book, onBack }: Props) {
 
     const navigateWithFlip = useCallback((direction: 'forward' | 'backward') => {
         if (flipAnim || isPdf) return;
+        // 正在选字时不要翻页，否则一松手就跳走
+        if (selectionInfo) return;
+        const sel = typeof window !== "undefined" ? window.getSelection() : null;
+        if (sel && !sel.isCollapsed) return;
         // 拿不到当前页（分页尚未算完、或 txtPage 暂时越界）只说明没法放翻页动画，
         // 不该把跳章也一起吞掉——否则读到章末会「翻不动」，只能手动点下一章。
         const currentItems = txtPages[txtPage];
@@ -1915,7 +2055,7 @@ export function ReadingViewer({ book, onBack }: Props) {
             if (txtPage > 0) setTxtPage(p => p - 1);
             else goToChapter(chapterIndex - 1, true);
         }
-    }, [flipAnim, isPdf, txtPages, txtPage, txtTotalPages, chapterIndex, chapters.length]);
+    }, [flipAnim, isPdf, txtPages, txtPage, txtTotalPages, chapterIndex, chapters.length, selectionInfo]);
 
     const txtDisplayedPage = Math.min(txtPage + 1, txtTotalPages);
     const currentPageCount = isPdf ? Math.max(1, pdfTotalPages || 1) : Math.max(1, txtTotalPages);
@@ -2373,29 +2513,16 @@ export function ReadingViewer({ book, onBack }: Props) {
                         <button
                             type="button"
                             className={`reading-footer-icon-btn ${autoAnnotate ? "is-active" : ""}`}
-                            onClick={() => openAnnotationDialog("auto")}
+                            onClick={() => setShowCharAnnotationMenu(true)}
+                            disabled={!companionId}
                         >
                             <Bot size={22} strokeWidth={1.7} />
-                            <span>自动批注</span>
+                            <span>TA的批注</span>
                         </button>
                         <button
                             type="button"
                             className="reading-footer-icon-btn"
-                            onClick={() => openAnnotationDialog("manual")}
-                            disabled={generating || !companionId}
-                        >
-                            <PenLine size={22} strokeWidth={1.7} />
-                            <span>写批注</span>
-                        </button>
-                        <button
-                            type="button"
-                            className="reading-footer-icon-btn"
-                            onClick={() => {
-                                setMyAnnotationParagraph(0);
-                                setMyAnnotationText("");
-                                setShowMyAnnotation(true);
-                            }}
-                            disabled={!currentChapter || currentChapter.paragraphs.length === 0}
+                            onClick={() => setShowMyMarksPanel(true)}
                         >
                             <Highlighter size={22} strokeWidth={1.7} />
                             <span>我的批注</span>
@@ -2703,32 +2830,91 @@ export function ReadingViewer({ book, onBack }: Props) {
                     </div>
                 </ContentDialog>
             )}
-            {showMyAnnotation && currentChapter && (
+            {selectionInfo && (
+                <div
+                    className="reading-selection-menu"
+                    style={{ left: selectionInfo.x, top: selectionInfo.y + 8 }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                >
+                    <button type="button" onClick={() => {
+                        setPendingQuote({
+                            text: selectionInfo.text,
+                            chapterIndex: selectionInfo.chapterIndex,
+                            paragraphIndex: selectionInfo.paragraphIndex,
+                        });
+                        setMyAnnotationText("");
+                        setShowMyAnnotation(true);
+                        clearSelection();
+                    }}>写批注</button>
+                    <button type="button" onClick={() => addMark("highlight")}>荧光笔</button>
+                    <button type="button" onClick={() => addMark("underline")}>划线</button>
+                    <button type="button" onClick={clearSelection}>取消</button>
+                </div>
+            )}
+            {showCharAnnotationMenu && (
+                <ContentDialog
+                    title="TA的批注"
+                    confirmLabel="关闭"
+                    cancelLabel=""
+                    onConfirm={() => setShowCharAnnotationMenu(false)}
+                    onCancel={() => setShowCharAnnotationMenu(false)}
+                >
+                    <div className="reading-settings-grid">
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => { setShowCharAnnotationMenu(false); openAnnotationDialog("manual"); }}
+                            disabled={generating || !companionId}
+                        >
+                            让 TA 现在批注这一段
+                        </button>
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => { setShowCharAnnotationMenu(false); openAnnotationDialog("auto"); }}
+                        >
+                            {autoAnnotate ? "自动批注：已开启" : "自动批注：已关闭"}
+                        </button>
+                    </div>
+                </ContentDialog>
+            )}
+            {showMyMarksPanel && (
+                <ContentDialog
+                    title="我的批注"
+                    confirmLabel="关闭"
+                    cancelLabel=""
+                    onConfirm={() => setShowMyMarksPanel(false)}
+                    onCancel={() => setShowMyMarksPanel(false)}
+                >
+                    <div className="reading-settings-grid">
+                        <div className="reading-settings-inline-note">
+                            <span>怎么用</span>
+                            <span>长按正文选中一段文字，松手后选「写批注 / 荧光笔 / 划线」</span>
+                        </div>
+                        {marks.filter(m => m.chapterIndex === chapterIndex).length === 0 ? (
+                            <div className="reading-settings-inline-note"><span>本章暂无标记</span></div>
+                        ) : marks.filter(m => m.chapterIndex === chapterIndex).map(mark => (
+                            <div key={mark.id} className="reading-mark-row">
+                                <span className="reading-mark" data-style={mark.style}>{mark.text.slice(0, 40)}</span>
+                                <button type="button" onClick={() => {
+                                    deleteReadingMark(book.id, mark.id);
+                                    setMarks(prev => prev.filter(item => item.id !== mark.id));
+                                }}>删除</button>
+                            </div>
+                        ))}
+                    </div>
+                </ContentDialog>
+            )}
+            {showMyAnnotation && pendingQuote && (
                 <ContentDialog
                     title="我的批注"
                     confirmLabel="保存"
                     cancelLabel="取消"
                     onConfirm={() => { void saveMyAnnotation(); }}
-                    onCancel={() => setShowMyAnnotation(false)}
+                    onCancel={() => { setShowMyAnnotation(false); setPendingQuote(null); }}
                 >
                     <div className="reading-settings-grid">
-                        <label className="reading-settings-label">
-                            <span>批注哪一段</span>
-                            <select
-                                className="reading-my-annotation-select"
-                                value={myAnnotationParagraph}
-                                onChange={(e) => setMyAnnotationParagraph(Number(e.target.value))}
-                            >
-                                {currentChapter.paragraphs.map((text, index) => (
-                                    <option key={index} value={index}>
-                                        {`${index + 1}. ${text.slice(0, 24)}${text.length > 24 ? "…" : ""}`}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
-                        <div className="reading-my-annotation-quote">
-                            {currentChapter.paragraphs[myAnnotationParagraph] || ""}
-                        </div>
+                        <div className="reading-my-annotation-quote">{pendingQuote.text}</div>
                         <textarea
                             className="reading-my-annotation-input"
                             value={myAnnotationText}

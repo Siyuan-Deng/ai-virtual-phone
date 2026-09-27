@@ -7296,3 +7296,50 @@
   background: currentColor;
   animation: chat-stream-cursor-blink 1s steps(2, start) infinite;
 }
+
+/* ── 阅读：选区菜单 / 荧光笔 / 划线 ── */
+.reading-selection-menu {
+  position: fixed;
+  z-index: 60;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(38, 32, 24, 0.94);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+}
+.reading-selection-menu button {
+  border: 0;
+  background: transparent;
+  color: #fdf8ee;
+  font: inherit;
+  font-size: calc(12.5px*var(--app-text-scale,1));
+  padding: 6px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.reading-selection-menu button:active { background: rgba(255, 255, 255, 0.16); }
+.reading-mark[data-style="highlight"] {
+  background: rgba(255, 226, 120, 0.72);
+  border-radius: 2px;
+}
+.reading-mark[data-style="underline"] {
+  border-bottom: 2px solid rgba(190, 140, 60, 0.85);
+}
+.reading-mark-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: calc(12.5px*var(--app-text-scale,1));
+}
+.reading-mark-row button {
+  border: 0;
+  background: transparent;
+  color: rgba(150, 60, 50, 0.9);
+  font: inherit;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
