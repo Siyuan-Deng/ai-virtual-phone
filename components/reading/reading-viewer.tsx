@@ -22,14 +22,14 @@ import { loadReadingMarks, saveReadingMark, deleteReadingMark } from "@/lib/read
 import { appendReadingAnnotationMemos, deleteReadingAnnotationMemo, type ReadingAnnotationMemo } from "@/lib/reading-memory";
 import { textOffsetWithin } from "./reading-selection";
 import { isUserAnnotation, type ReadingMark, type ReadingMarkStyle } from "@/lib/reading-types";
-import { generateAnnotationBatch, generateReadingChat, parseReadingDiscussResponse, type ReadingDiscussAction, type ReadingDiscussContext } from "@/lib/reading-engine";
+import { generateAnnotationBatch, generateReadingChat, parseReadingDiscussResponse, summarizeReadingRange, type ReadingDiscussAction, type ReadingDiscussContext } from "@/lib/reading-engine";
 import { loadChatMessages, pushChatMessage, deleteChatMessage, editChatMessage, loadChatContacts, createOrGetSession, isReadingDiscussMessage } from "@/lib/chat-storage";
 import type { ChatMessage, ChatSession } from "@/lib/chat-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import { parseAIResponse } from "@/lib/rich-message-parser";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { ContentDialog } from "@/components/ui/modal";
-import { Toggle } from "@/components/ui/form";
+import { Select, Toggle } from "@/components/ui/form";
 import { PdfPageRenderer } from "./reading-pdf-viewer";
 import { decodeTxtArrayBuffer, parsePdfPageRange, PDF_PAGES_PER_CHAPTER, parseTxtContent, parseEpubFile } from "@/lib/reading-parser";
 import type { Book, BookChapter, ReadingAnnotation, ReadingProgress } from "@/lib/reading-types";
@@ -287,6 +287,12 @@ export function ReadingViewer({ book, onBack }: Props) {
     const [showMyAnnotation, setShowMyAnnotation] = useState(false);
     const [showCharAnnotationMenu, setShowCharAnnotationMenu] = useState(false);
     const [showMyMarksPanel, setShowMyMarksPanel] = useState(false);
+    const [showRangeSummary, setShowRangeSummary] = useState(false);
+    const [summaryRange, setSummaryRange] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
+    const [summaryDraft, setSummaryDraft] = useState("");
+    const [summaryLabel, setSummaryLabel] = useState("");
+    const [summaryBusy, setSummaryBusy] = useState(false);
+    const [summaryNote, setSummaryNote] = useState("");
     const [pendingQuote, setPendingQuote] = useState<
         { text: string; chapterIndex: number; paragraphIndex: number } | null
     >(null);
@@ -2346,6 +2352,53 @@ export function ReadingViewer({ book, onBack }: Props) {
         : null;
 
     /** PDF 渲染设置先在弹窗内暂存，确认时只重建一次，避免拖动滑块期间连续重渲染整本 PDF。 */
+    const openRangeSummary = () => {
+        setSummaryRange({ start: chapterIndex, end: chapterIndex });
+        setSummaryDraft("");
+        setSummaryLabel("");
+        setSummaryNote("");
+        setShowRangeSummary(true);
+    };
+
+    const runRangeSummary = async () => {
+        if (!companionId) return;
+        const from = Math.min(summaryRange.start, summaryRange.end);
+        const to = Math.max(summaryRange.start, summaryRange.end);
+        const picked = chapters.filter(chapter => chapter.index >= from && chapter.index <= to);
+        if (picked.length === 0) { setSummaryNote("这个范围里没有章节"); return; }
+        setSummaryBusy(true);
+        setSummaryNote("");
+        try {
+            const result = await summarizeReadingRange(book, picked, companionId);
+            setSummaryDraft(result.summary);
+            setSummaryLabel(result.rangeLabel);
+            setSummaryNote(result.truncated ? "正文过长，已截断后再总结" : "");
+        } catch (err) {
+            setSummaryNote(err instanceof Error ? err.message : "总结失败");
+        } finally {
+            setSummaryBusy(false);
+        }
+    };
+
+    const saveRangeSummary = () => {
+        const content = summaryDraft.trim();
+        if (!content || !companionId) return;
+        const from = Math.min(summaryRange.start, summaryRange.end);
+        appendReadingAnnotationMemos([{
+            id: `rsum_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            characterId: companionId,
+            bookTitle: book.title,
+            chapterIndex: from,
+            chapterTitle: chapters.find(chapter => chapter.index === from)?.title || "",
+            authorType: "character",
+            content,
+            createdAt: new Date().toISOString(),
+            kind: "summary",
+            rangeLabel: summaryLabel,
+        }]);
+        setShowRangeSummary(false);
+    };
+
     const openReadingSettings = () => {
         setPdfRenderDraft({
             pdfZoom: readingConfig.pdfZoom ?? 1,
@@ -2977,6 +3030,14 @@ export function ReadingViewer({ book, onBack }: Props) {
                         >
                             {autoAnnotate ? "自动批注：已开启" : "自动批注：已关闭"}
                         </button>
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => { setShowCharAnnotationMenu(false); openRangeSummary(); }}
+                            disabled={!companionId}
+                        >
+                            总结读过的内容
+                        </button>
                     </div>
                 </ContentDialog>
             )}
@@ -3045,6 +3106,63 @@ export function ReadingViewer({ book, onBack }: Props) {
                             placeholder="写下你对这一段的想法……"
                             rows={4}
                         />
+                    </div>
+                </ContentDialog>
+            )}
+            {showRangeSummary && (
+                <ContentDialog
+                    title="总结读过的内容"
+                    confirmLabel={summaryDraft.trim() ? "存进记忆" : "关闭"}
+                    cancelLabel="取消"
+                    onConfirm={() => { if (summaryDraft.trim()) saveRangeSummary(); else setShowRangeSummary(false); }}
+                    onCancel={() => setShowRangeSummary(false)}
+                >
+                    <div className="reading-settings-grid">
+                        <label className="reading-settings-label">
+                            <span>从</span>
+                            <Select
+                                value={String(summaryRange.start)}
+                                onChange={(e) => setSummaryRange(prev => ({ ...prev, start: Number(e.target.value) }))}
+                            >
+                                {chapters.map(chapter => (
+                                    <option key={chapter.id} value={chapter.index}>
+                                        {chapter.title?.trim() || `第${chapter.index + 1}章`}
+                                    </option>
+                                ))}
+                            </Select>
+                        </label>
+                        <label className="reading-settings-label">
+                            <span>到</span>
+                            <Select
+                                value={String(summaryRange.end)}
+                                onChange={(e) => setSummaryRange(prev => ({ ...prev, end: Number(e.target.value) }))}
+                            >
+                                {chapters.map(chapter => (
+                                    <option key={chapter.id} value={chapter.index}>
+                                        {chapter.title?.trim() || `第${chapter.index + 1}章`}
+                                    </option>
+                                ))}
+                            </Select>
+                        </label>
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => { void runRangeSummary(); }}
+                            disabled={summaryBusy || !companionId}
+                        >
+                            {summaryBusy ? "总结中…" : summaryDraft ? "重新总结" : "生成总结"}
+                        </button>
+                        {summaryDraft && (
+                            <textarea
+                                className="reading-my-annotation-input"
+                                value={summaryDraft}
+                                onChange={(e) => setSummaryDraft(e.target.value)}
+                                rows={4}
+                            />
+                        )}
+                        {summaryNote && (
+                            <div className="reading-settings-inline-note"><span>{summaryNote}</span></div>
+                        )}
                     </div>
                 </ContentDialog>
             )}

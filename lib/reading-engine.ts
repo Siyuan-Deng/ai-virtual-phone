@@ -17,6 +17,7 @@ import {
 } from "./settings-storage";
 import {
     assemblePromptPayload,
+    ensureTrailingUserTurn,
     type AssemblerInput,
     type LLMMessage,
 } from "./llm-prompt-assembler";
@@ -343,6 +344,91 @@ export async function generateAnnotations(
         existingAnnotations,
         characterId,
     );
+}
+
+/** 区间总结一次最多送多少字的正文。够长到覆盖几章，又不至于把整本书塞进上下文。 */
+const SUMMARY_MAX_CHARS = 12000;
+
+export type ReadingRangeSummaryResult = {
+    /** 大约 50 字的总结正文 */
+    summary: string;
+    /** 人读的范围描述，直接进记忆区那一行 */
+    rangeLabel: string;
+    /** 正文是否因为超长被截断 */
+    truncated: boolean;
+};
+
+function buildRangeText(chapters: BookChapter[]): { text: string; truncated: boolean } {
+    const pieces: string[] = [];
+    let used = 0;
+    let truncated = false;
+    for (const chapter of chapters) {
+        const body = chapter.paragraphs.join("\n");
+        const head = `【${chapter.title || `第${chapter.index + 1}章`}】\n`;
+        // 拼接时章节之间还会插一个 "\n\n"，这两个字符也要算进预算，否则会超出上限
+        const separator = pieces.length > 0 ? 2 : 0;
+        const remaining = SUMMARY_MAX_CHARS - used - head.length - separator;
+        if (remaining <= 0) { truncated = true; break; }
+        const slice = body.length > remaining ? body.slice(0, remaining) : body;
+        if (slice.length < body.length) truncated = true;
+        pieces.push(head + slice);
+        used += separator + head.length + slice.length;
+    }
+    return { text: pieces.join("\n\n"), truncated };
+}
+
+/** 手动触发的区间总结。指令拼在 chapterContent 里从引擎侧下发，不写进预设：
+ *  预设属于用户数据，克隆过预设的人拿不到预设侧的改动。 */
+export async function summarizeReadingRange(
+    book: Book,
+    chapters: BookChapter[],
+    characterId: string,
+): Promise<ReadingRangeSummaryResult> {
+    const character = loadCharacters().find(c => c.id === characterId);
+    if (!character) throw new Error("角色不存在");
+    if (chapters.length === 0) throw new Error("没有可总结的章节");
+
+    const first = chapters[0];
+    const last = chapters[chapters.length - 1];
+    const nameOf = (chapter: BookChapter) => chapter.title?.trim() || `第${chapter.index + 1}章`;
+    const rangeLabel = chapters.length === 1 ? nameOf(first) : `${nameOf(first)}—${nameOf(last)}`;
+
+    const { text, truncated } = buildRangeText(chapters);
+    const chapterContent = [
+        text,
+        "",
+        "<range_summary>",
+        `以上是《${book.title}》${rangeLabel}的正文${truncated ? "（过长已截断）" : ""}。`,
+        "请把这段内容概括成一段 50 字左右的中文摘要，说清楚发生了什么、谁做了什么。",
+        "只输出摘要本身：不要加标题、不要分点、不要写批注、不要加任何前后缀。",
+        "</range_summary>",
+    ].join("\n");
+
+    const resolved = await resolveReadingInput(characterId, ["reading", "summarize"], {
+        bookTitle: book.title,
+        chapterTitle: rangeLabel,
+        chapterContent,
+        annotationHistory: "（本次只做区间总结，不需要批注历史）",
+    });
+    if (!resolved) throw new Error("未找到 API 配置，请在设置中绑定 API");
+
+    const { input, apiConfig, preset } = resolved;
+    const llmMessages = assemblePromptPayload(input);
+    // 没有对话历史时预设可能一条 user 消息都没有，补一条兜底的，避免请求体畸形
+    ensureTrailingUserTurn(llmMessages, `请总结《${book.title}》${rangeLabel}的内容。`);
+
+    const responseText = await callReadingLLM(
+        apiConfig!,
+        preset,
+        llmMessages,
+        character.name,
+        input.regexes,
+        input.appTags,
+        input.userIdentity?.name,
+    );
+    const summary = responseText.trim();
+    if (!summary) throw new Error("API 返回空内容");
+    return { summary, rangeLabel, truncated };
 }
 
 export async function generateAnnotationBatch(

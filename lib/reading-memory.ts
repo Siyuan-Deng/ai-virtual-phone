@@ -12,8 +12,12 @@ registerKvMigration(MEMO_KEY);
 const MEMO_LIMIT = 300;
 
 export type ReadingAnnotationMemo = {
-    /** 与 ReadingAnnotation.id 一致，删批注时按它删日志 */
+    /** 批注条目与 ReadingAnnotation.id 一致，删批注时按它删日志 */
     id: string;
+    /** 缺省即批注——老数据没有这个字段，读出来仍按批注处理 */
+    kind?: "annotation" | "summary";
+    /** 区间总结用：人读的范围描述，例如「第3章—第5章」 */
+    rangeLabel?: string;
     characterId: string;
     bookTitle: string;
     chapterIndex: number;
@@ -55,14 +59,23 @@ export function deleteReadingAnnotationMemo(annotationId: string): void {
     if (next.length !== existing.length) persist(next);
 }
 
-/** 记忆区里那一行，带 [批注] 头交给 formatStoredPromptEventContent 补时间。
+/** 记忆区里的标签，交给 formatStoredPromptEventContent 补时间戳 */
+export function readingMemoLabel(memo: ReadingAnnotationMemo): string {
+    return memo.kind === "summary" ? "共读摘要" : "批注";
+}
+
+/** 记忆区里那一行，带 [标签] 头交给 formatStoredPromptEventContent 补时间。
  *  角色名和用户名一律由调用方传进来，不在这里写死。 */
 export function formatReadingAnnotationMemo(
     memo: ReadingAnnotationMemo,
     params: { userName: string; characterName: string },
 ): string {
-    const who = memo.authorType === "user" ? params.userName : params.characterName;
     const chapter = memo.chapterTitle.trim() || `第${memo.chapterIndex + 1}章`;
+    if (memo.kind === "summary") {
+        const range = memo.rangeLabel?.trim() || chapter;
+        return `[共读摘要]《${memo.bookTitle}》${range}：${memo.content}`;
+    }
+    const who = memo.authorType === "user" ? params.userName : params.characterName;
     const where = memo.quote ? `在「${memo.quote}」旁` : "";
     return `[批注]《${memo.bookTitle}》${chapter} ${who}${where}写道：${memo.content}`;
 }
