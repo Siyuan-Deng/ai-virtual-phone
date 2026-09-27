@@ -4,7 +4,7 @@ export type Book = {
     id: string;
     title: string;
     author?: string;
-    format: "txt" | "epub" | "pdf";
+    format: "txt" | "epub" | "pdf" | "mobi";
     totalChapters: number;
     createdAt: string;
 };

@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { ChevronLeft, Palette, Settings } from "lucide-react";
 import { loadBooks, addBook, deleteBook, saveChapters, loadProgress, saveRawFile } from "@/lib/reading-storage";
-import { decodeTxtArrayBuffer, parseTxtContent, parseEpubFile, PDF_PAGES_PER_CHAPTER } from "@/lib/reading-parser";
+import { decodeTxtArrayBuffer, parseTxtContent, parseEpubFile, parseMobiFile, PDF_PAGES_PER_CHAPTER } from "@/lib/reading-parser";
 import { loadReadingInteractionConfig } from "@/lib/reading-storage";
 import type { Book, BookChapter } from "@/lib/reading-types";
 import type { ReadingAppearance } from "@/lib/reading-appearance";
@@ -184,7 +184,8 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
         setImportStatus("正在准备导入…");
         let importStage = "准备导入";
         const ext = file.name.split(".").pop()?.toLowerCase();
-        const detectedFormat = ext === "pdf" ? "pdf" : ext === "epub" ? "epub" : "txt";
+        const isMobiExt = ext === "mobi" || ext === "azw3" || ext === "azw" || ext === "prc";
+        const detectedFormat = ext === "pdf" ? "pdf" : ext === "epub" ? "epub" : isMobiExt ? "mobi" : "txt";
         persistImportDiagnostic({
             status: "running",
             stage: importStage,
@@ -238,6 +239,30 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
                 });
                 parsed = await parseEpubFile(buffer, file.name);
                 format = "epub";
+            } else if (isMobiExt) {
+                importStage = "读取 MOBI 文件";
+                setImportStatus("正在读取 MOBI 文件…");
+                persistImportDiagnostic({
+                    status: "running",
+                    stage: importStage,
+                    fileName: file.name,
+                    fileSize: file.size,
+                    format: "mobi",
+                    updatedAt: new Date().toISOString(),
+                });
+                const buffer = await file.arrayBuffer();
+                importStage = "解析 MOBI 内容";
+                setImportStatus("正在解析 MOBI 内容…");
+                persistImportDiagnostic({
+                    status: "running",
+                    stage: importStage,
+                    fileName: file.name,
+                    fileSize: file.size,
+                    format: "mobi",
+                    updatedAt: new Date().toISOString(),
+                });
+                parsed = await parseMobiFile(buffer, file.name);
+                format = "mobi";
             } else if (ext === "pdf") {
                 rawFile = file;
                 importStage = "创建 PDF 导入记录";
@@ -384,7 +409,7 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
                             <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M12 5v14M5 12h14" />
                             </svg>
-                            <input ref={fileRef} type="file" accept=".txt,.epub,.pdf" onChange={handleFileUpload} className="hidden" disabled={importing} />
+                            <input ref={fileRef} type="file" accept=".txt,.epub,.mobi,.azw3,.prc,.pdf" onChange={handleFileUpload} className="hidden" disabled={importing} />
                         </label>
                     </div>
                 </div>

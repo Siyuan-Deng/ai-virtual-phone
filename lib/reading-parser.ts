@@ -435,6 +435,39 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
     return { title: bookTitle, author, chapters };
 }
 
+/** MOBI 里章节之间是 <mbp:pagebreak/>。切开后每一块当一章，走和 EPUB 相同的取文路径。 */
+export async function parseMobiFile(arrayBuffer: ArrayBuffer, fileName?: string): Promise<ParsedBook> {
+    const { parseMobiDocument } = await import("./reading-mobi");
+    const { html, title } = parseMobiDocument(arrayBuffer);
+    const bookTitle = title || fileName?.replace(/\.(mobi|azw3?|prc)$/i, "") || "未命名";
+
+    const pieces = html
+        .split(/<mbp:pagebreak[^>]*>/i)
+        .map(piece => piece.trim())
+        .filter(Boolean);
+
+    const chapters: ParsedChapter[] = [];
+    for (const piece of pieces) {
+        const { title: pieceTitle, paragraphs } = extractTextFromHtml(piece);
+        if (paragraphs.length === 0) continue;
+        chapters.push({ title: pieceTitle || `第${chapters.length + 1}章`, paragraphs });
+    }
+
+    // 没有分页符（或只切出一块）时退回 TXT 那套标题启发式，别让整本书挤成一章
+    if (chapters.length <= 1) {
+        const { paragraphs } = extractTextFromHtml(html);
+        if (paragraphs.length > 0) {
+            const parsed = parseTxtContent(paragraphs.join("\n\n"), fileName);
+            return { title: bookTitle, chapters: parsed.chapters };
+        }
+    }
+
+    if (chapters.length === 0) {
+        return { title: bookTitle, chapters: [{ title: "全文", paragraphs: ["（MOBI 解析失败，未找到文本内容）"] }] };
+    }
+    return { title: bookTitle, chapters };
+}
+
 const BLOCK_TAGS = new Set([
     "P", "DIV", "LI", "BLOCKQUOTE", "TD", "TH", "DD", "DT", "PRE", "SECTION", "ARTICLE", "FIGCAPTION",
     "H1", "H2", "H3", "H4", "H5", "H6",

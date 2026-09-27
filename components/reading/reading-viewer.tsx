@@ -31,7 +31,7 @@ import { MessageBubble } from "@/components/chat/message-bubble";
 import { ContentDialog } from "@/components/ui/modal";
 import { Select, Toggle } from "@/components/ui/form";
 import { PdfPageRenderer } from "./reading-pdf-viewer";
-import { decodeTxtArrayBuffer, parsePdfPageRange, PDF_PAGES_PER_CHAPTER, parseTxtContent, parseEpubFile } from "@/lib/reading-parser";
+import { decodeTxtArrayBuffer, parsePdfPageRange, PDF_PAGES_PER_CHAPTER, parseTxtContent, parseEpubFile, parseMobiFile } from "@/lib/reading-parser";
 import type { Book, BookChapter, ReadingAnnotation, ReadingProgress } from "@/lib/reading-types";
 import type { Character } from "@/lib/character-types";
 import { splitBilingualText } from "@/lib/bilingual-text";
@@ -805,7 +805,9 @@ export function ReadingViewer({ book, onBack }: Props) {
                     try {
                         const parsed = book.format === "txt"
                             ? parseTxtContent(decodeTxtArrayBuffer(await rawFile.arrayBuffer(), loadReadingInteractionConfig().txtEncoding).text, book.title)
-                            : await parseEpubFile(await rawFile.arrayBuffer(), book.title);
+                            : book.format === "mobi"
+                                ? await parseMobiFile(await rawFile.arrayBuffer(), book.title)
+                                : await parseEpubFile(await rawFile.arrayBuffer(), book.title);
                         const rebuiltChapters: BookChapter[] = parsed.chapters.map((chapter, index) => ({
                             id: `${book.id}_ch${index}`,
                             bookId: book.id,
