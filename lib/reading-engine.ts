@@ -14,6 +14,7 @@ import {
     loadWorldBooks,
     loadRegexes,
     resolveUserIdentity,
+    resolveAuxiliaryApiConfig,
 } from "./settings-storage";
 import {
     assemblePromptPayload,
@@ -28,6 +29,7 @@ import { formatCoreMemories, formatLongTermMemories } from "./memory-injector";
 import { prepareShortTermContext } from "./short-term-assembler";
 import { previewMessagesForApi, sendLLMRequest } from "./chat-engine";
 import { DEFAULT_READING_BILINGUAL_PROMPT, resolveBilingualPrompt } from "./bilingual-prompt-defaults";
+import { simpleLLMCall } from "./api-helpers";
 
 export type ReadingDiscussAction =
     | { type: "add_annotation"; paragraphIndex: number; content: string }
@@ -346,8 +348,9 @@ export async function generateAnnotations(
     );
 }
 
-/** 区间总结一次最多送多少字的正文。够长到覆盖几章，又不至于把整本书塞进上下文。 */
-const SUMMARY_MAX_CHARS = 12000;
+/** 区间总结一次最多送多少字的正文。请求里只有正文和一句指令，没有人设/世界书/记忆，
+ *  所以上限可以给得比走预设时宽松；再多就该分几次总结了。 */
+const SUMMARY_MAX_CHARS = 30000;
 
 export type ReadingRangeSummaryResult = {
     /** 大约 50 字的总结正文 */
@@ -377,16 +380,17 @@ function buildRangeText(chapters: BookChapter[]): { text: string; truncated: boo
     return { text: pieces.join("\n\n"), truncated };
 }
 
-/** 手动触发的区间总结。指令拼在 chapterContent 里从引擎侧下发，不写进预设：
- *  预设属于用户数据，克隆过预设的人拿不到预设侧的改动。 */
+/** 手动触发的区间总结。
+ *  走「辅助 API 绑定 → 记忆总结 API」，不走阅读绑定的预设：
+ *  总结要的是客观清楚，代入角色语气反而会走形；不带人设/世界书/记忆也省掉大把 token。 */
 export async function summarizeReadingRange(
     book: Book,
     chapters: BookChapter[],
-    characterId: string,
 ): Promise<ReadingRangeSummaryResult> {
-    const character = loadCharacters().find(c => c.id === characterId);
-    if (!character) throw new Error("角色不存在");
     if (chapters.length === 0) throw new Error("没有可总结的章节");
+
+    const apiConfig = resolveAuxiliaryApiConfig("memorySummaryApiConfigId");
+    if (!apiConfig) throw new Error("未配置记忆总结 API（设置 → 绑定管理 → 辅助 API 绑定）");
 
     const first = chapters[0];
     const last = chapters[chapters.length - 1];
@@ -394,40 +398,19 @@ export async function summarizeReadingRange(
     const rangeLabel = chapters.length === 1 ? nameOf(first) : `${nameOf(first)}—${nameOf(last)}`;
 
     const { text, truncated } = buildRangeText(chapters);
-    const chapterContent = [
-        text,
-        "",
-        "<range_summary>",
-        `以上是《${book.title}》${rangeLabel}的正文${truncated ? "（过长已截断）" : ""}。`,
-        "请把这段内容概括成一段 50 字左右的中文摘要，说清楚发生了什么、谁做了什么。",
-        "只输出摘要本身：不要加标题、不要分点、不要写批注、不要加任何前后缀。",
-        "</range_summary>",
+    const instruction = [
+        `以下是《${book.title}》${rangeLabel}的正文。`,
+        "请用中文把它概括成 50 字左右的一段话，说清楚发生了什么、谁做了什么。",
+        "保持客观陈述，不要评论、不要代入任何人的口吻、不要分点、不要加标题或前后缀，只输出摘要本身。",
     ].join("\n");
 
-    const resolved = await resolveReadingInput(characterId, ["reading", "summarize"], {
-        bookTitle: book.title,
-        chapterTitle: rangeLabel,
-        chapterContent,
-        annotationHistory: "（本次只做区间总结，不需要批注历史）",
-    });
-    if (!resolved) throw new Error("未找到 API 配置，请在设置中绑定 API");
-
-    const { input, apiConfig, preset } = resolved;
-    const llmMessages = assemblePromptPayload(input);
-    // 没有对话历史时预设可能一条 user 消息都没有，补一条兜底的，避免请求体畸形
-    ensureTrailingUserTurn(llmMessages, `请总结《${book.title}》${rangeLabel}的内容。`);
-
-    const responseText = await callReadingLLM(
-        apiConfig!,
-        preset,
-        llmMessages,
-        character.name,
-        input.regexes,
-        input.appTags,
-        input.userIdentity?.name,
+    const result = await simpleLLMCall(
+        apiConfig,
+        [{ role: "user", content: `${instruction}\n\n${text}` }],
+        { temperature: 0.3, label: `阅读区间总结·${book.title}` },
     );
-    const summary = responseText.trim();
-    if (!summary) throw new Error("API 返回空内容");
+    const summary = result.content?.trim();
+    if (!summary) throw new Error(result.error || "API 返回空内容");
     return { summary, rangeLabel, truncated };
 }
 

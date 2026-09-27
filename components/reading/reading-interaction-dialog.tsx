@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { BookOpenText, Highlighter, LocateFixed, Minus, Plus, Repeat2, Rocket, RotateCcw, Settings } from "lucide-react";
+import { BookOpenText, LocateFixed, Minus, Plus, Repeat2, Rocket, RotateCcw, Settings } from "lucide-react";
 import { ContentDialog } from "@/components/ui/modal";
 import { Toggle } from "@/components/ui/form";
 import {
@@ -139,36 +139,6 @@ export function ReadingInteractionDialog({ onClose }: Props) {
                                 <span className="reading-option-card-desc">{opt.desc}</span>
                             </button>
                         ))}
-                    </div>
-                </section>
-
-                <section className="reading-settings-group">
-                    <div className="reading-settings-heading">
-                        <Highlighter size={15} />
-                        <span>批注密度</span>
-                    </div>
-                    <p className="reading-settings-inline-note">
-                        <span>大约每多少段写 1 条批注。填 0 表示不限，由角色自己决定写多少（默认）。</span>
-                    </p>
-                    <div className="reading-interval-row">
-                        <span>每</span>
-                        <input
-                            className="reading-interval-input"
-                            type="number"
-                            min={0}
-                            max={999}
-                            step={1}
-                            inputMode="numeric"
-                            value={config.annotationInterval}
-                            onChange={(e) => {
-                                const next = Math.floor(Number(e.target.value));
-                                setConfig((prev) => ({
-                                    ...prev,
-                                    annotationInterval: Number.isFinite(next) ? Math.min(999, Math.max(0, next)) : 0,
-                                }));
-                            }}
-                        />
-                        <span>段写 1 条</span>
                     </div>
                 </section>
 

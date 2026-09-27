@@ -2363,7 +2363,6 @@ export function ReadingViewer({ book, onBack }: Props) {
     };
 
     const runRangeSummary = async () => {
-        if (!companionId) return;
         const from = Math.min(summaryRange.start, summaryRange.end);
         const to = Math.max(summaryRange.start, summaryRange.end);
         const picked = chapters.filter(chapter => chapter.index >= from && chapter.index <= to);
@@ -2371,10 +2370,11 @@ export function ReadingViewer({ book, onBack }: Props) {
         setSummaryBusy(true);
         setSummaryNote("");
         try {
-            const result = await summarizeReadingRange(book, picked, companionId);
+            const result = await summarizeReadingRange(book, picked);
             setSummaryDraft(result.summary);
             setSummaryLabel(result.rangeLabel);
-            setSummaryNote(result.truncated ? "正文过长，已截断后再总结" : "");
+            // 截断是真会漏内容的（只总结了前面一部分），不能不说，但要说清楚是怎么回事
+            setSummaryNote(result.truncated ? "选的范围太长，只总结了前面一部分，建议分几次总结" : "");
         } catch (err) {
             setSummaryNote(err instanceof Error ? err.message : "总结失败");
         } finally {
@@ -3040,6 +3040,36 @@ export function ReadingViewer({ book, onBack }: Props) {
                         >
                             总结读过的内容
                         </button>
+                        <div className="reading-settings-inline-note">
+                            <span>批注密度</span>
+                            <span className="reading-interval-row">
+                                每
+                                <input
+                                    className="reading-interval-input"
+                                    type="number"
+                                    min={0}
+                                    max={999}
+                                    step={1}
+                                    inputMode="numeric"
+                                    value={readingConfig.annotationInterval}
+                                    onChange={(e) => {
+                                        const parsed = Math.floor(Number(e.target.value));
+                                        const next = {
+                                            ...readingConfig,
+                                            annotationInterval: Number.isFinite(parsed) ? Math.min(999, Math.max(0, parsed)) : 0,
+                                        };
+                                        setReadingConfig(next);
+                                        saveReadingInteractionConfig(next);
+                                    }}
+                                />
+                                段 1 条
+                            </span>
+                        </div>
+                        <div className="reading-settings-inline-note">
+                            <span>说明</span>
+                            <span>填 0 表示不限，由角色自己决定写多少</span>
+                        </div>
+
                     </div>
                 </ContentDialog>
             )}
@@ -3177,35 +3207,6 @@ export function ReadingViewer({ book, onBack }: Props) {
                     onCancel={() => setShowReadingSettings(false)}
                 >
                     <div className="reading-settings-grid">
-                        <div className="reading-settings-inline-note">
-                            <span>批注密度</span>
-                            <span className="reading-interval-row">
-                                每
-                                <input
-                                    className="reading-interval-input"
-                                    type="number"
-                                    min={0}
-                                    max={999}
-                                    step={1}
-                                    inputMode="numeric"
-                                    value={readingConfig.annotationInterval}
-                                    onChange={(e) => {
-                                        const parsed = Math.floor(Number(e.target.value));
-                                        const next = {
-                                            ...readingConfig,
-                                            annotationInterval: Number.isFinite(parsed) ? Math.min(999, Math.max(0, parsed)) : 0,
-                                        };
-                                        setReadingConfig(next);
-                                        saveReadingInteractionConfig(next);
-                                    }}
-                                />
-                                段 1 条
-                            </span>
-                        </div>
-                        <div className="reading-settings-inline-note">
-                            <span>说明</span>
-                            <span>填 0 表示不限，由角色自己决定写多少</span>
-                        </div>
                         <div className="reading-settings-inline-note">
                             <span>启用阅读双语翻译</span>
                             <Toggle
