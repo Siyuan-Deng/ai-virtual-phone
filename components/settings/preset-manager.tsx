@@ -141,6 +141,41 @@ type PromptRenderItem =
     | { type: "collapsed"; prompts: Prompt[]; groupKey: string; label: string }
     | { type: "collapse-header"; groupKey: string; label: string; count: number };
 
+/**
+ * 拖拽落点是「折叠行」或「展开组标题」时，换算成完整顺序里的目标下标。
+ * 这两种行不是条目本身：折叠行代表一整组条目，组标题下方紧跟的 count 行才是组内条目。
+ * 往下拖越过折叠行 → 落在这组之后；往上拖，或落在组标题上 → 落在这组第一条之前。
+ * 返回值沿用条目拖拽的约定：目标在拖动条目之后表示落在它后面，在之前表示落在它前面。
+ * 组内没有可作为落点的条目时返回 -1。
+ */
+function resolveGroupRowDropIndex(
+    renderItems: PromptRenderItem[],
+    fromRenderIndex: number,
+    toRenderIndex: number,
+    displayed: Prompt[],
+    fromIndex: number,
+    isMoving: (prompt: Prompt) => boolean,
+): number {
+    const target = renderItems[toRenderIndex];
+    if (!target || target.type === "item") return -1;
+    const members = target.type === "collapsed"
+        ? target.prompts
+        : renderItems
+            .slice(toRenderIndex + 1, toRenderIndex + 1 + target.count)
+            .flatMap(item => (item.type === "item" ? [item.prompt] : []));
+    const memberIndices = members
+        .filter(prompt => !isMoving(prompt))
+        .map(prompt => displayed.findIndex(entry => entry.identifier === prompt.identifier))
+        .filter(index => index >= 0);
+    if (memberIndices.length === 0) return -1;
+    if (target.type === "collapsed" && toRenderIndex > fromRenderIndex) {
+        const last = Math.max(...memberIndices);
+        return last > fromIndex ? last : last + 1;
+    }
+    const first = Math.min(...memberIndices);
+    return first < fromIndex ? first : first - 1;
+}
+
 function buildPromptRenderItems(
     preset: PresetConfig,
     tagGroups: TagGroupProfile[],
@@ -716,19 +751,30 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
         if (!preset) return;
         const fromRenderItem = promptRenderItems[fromRenderIndex];
         const toRenderItem = promptRenderItems[toRenderIndex];
-        if (fromRenderItem?.type !== "item" || toRenderItem?.type !== "item") return;
+        if (fromRenderItem?.type !== "item" || !toRenderItem) return;
 
         // DOM 索引来自当前筛选/折叠视图；先按 identifier 映射回完整顺序，避免拖错条目。
         const displayed = buildDisplayedPrompts(preset);
         const fromIndex = displayed.findIndex(prompt => prompt.identifier === fromRenderItem.prompt.identifier);
-        const toIndex = displayed.findIndex(prompt => prompt.identifier === toRenderItem.prompt.identifier);
-        if (fromIndex < 0 || toIndex < 0) return;
+        if (fromIndex < 0) return;
         const dragged = displayed[fromIndex];
-
-        let newDisplayed: Prompt[];
         const isBulk = selectMode
             && actionableSelectedIds.size > 1
             && actionableSelectedIds.has(dragged.identifier);
+        // 落在折叠行 / 展开组标题上时，它们不是条目，要换算成完整顺序里的位置，否则这次拖拽会被丢弃。
+        const toIndex = toRenderItem.type === "item"
+            ? displayed.findIndex(prompt => prompt.identifier === toRenderItem.prompt.identifier)
+            : resolveGroupRowDropIndex(
+                promptRenderItems,
+                fromRenderIndex,
+                toRenderIndex,
+                displayed,
+                fromIndex,
+                prompt => (isBulk ? actionableSelectedIds.has(prompt.identifier) : prompt.identifier === dragged.identifier),
+            );
+        if (toIndex < 0) return;
+
+        let newDisplayed: Prompt[];
         if (isBulk) {
             // 整组选中条目一起移动（选中集内部相对顺序保持不变）
             const selected = displayed.filter(p => actionableSelectedIds.has(p.identifier));

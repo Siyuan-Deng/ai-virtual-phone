@@ -271,6 +271,43 @@
 .dw-tab-action:disabled { opacity: 0.35; cursor: default; }
 .dw-tab-action-danger { color: #c98a8e; border-color: rgba(180, 90, 95, 0.45); }
 
+/* ── 一键探索：批量进度条 ── */
+.dw-batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  color: var(--dw-dim);
+  font-size: calc(11.5px*var(--app-text-scale,1));
+  letter-spacing: 1px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 16;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(10, 10, 13, 0.42);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+.dw-batch-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dw-batch-cancel {
+  background: transparent;
+  border: 1px solid var(--dw-line);
+  border-radius: 999px;
+  color: var(--dw-ink);
+  padding: 2px 10px;
+  font-size: calc(11px*var(--app-text-scale,1));
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.dw-batch-cancel:disabled { opacity: 0.4; cursor: default; }
+
 /* ══ Stage view（全屏铺底，玻璃栏浮在其上） ══ */
 .dw2-stage {
   position: absolute;
