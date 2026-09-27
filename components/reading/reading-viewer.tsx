@@ -1835,17 +1835,43 @@ export function ReadingViewer({ book, onBack }: Props) {
 
     const txtTotalPages = txtPagesReadyForCurrentChapter ? txtPages.length : 1;
 
+    // 全书进度按字数加权：章节长度差距很大（几十字的版权页 vs 一万多字的正文章），
+    // 用「第几章 / 总章数」会让进度条和实际读了多少完全对不上。
+    const chapterCharStats = useMemo(() => {
+        const lengths = chapters.map(ch => ch.paragraphs.reduce((sum, p) => sum + p.length, 0));
+        const offsets: number[] = [];
+        let acc = 0;
+        for (const len of lengths) {
+            offsets.push(acc);
+            acc += len;
+        }
+        return { lengths, offsets, total: acc };
+    }, [chapters]);
+
+    /** 章内比例 → 全书比例。字数统计不可用时回退到按章数平均，保持旧行为。 */
+    const toBookFraction = useCallback((targetChapterIndex: number, withinChapter: number) => {
+        const within = Math.min(1, Math.max(0, withinChapter));
+        const { lengths, offsets, total } = chapterCharStats;
+        const chapterLength = lengths[targetChapterIndex];
+        if (total > 0 && chapterLength !== undefined) {
+            const read = (offsets[targetChapterIndex] ?? 0) + chapterLength * within;
+            return Math.min(1, Math.max(0, read / total));
+        }
+        return Math.min(1, Math.max(0, (targetChapterIndex + within) / Math.max(1, chapters.length)));
+    }, [chapterCharStats, chapters.length]);
+
     const navigateWithFlip = useCallback((direction: 'forward' | 'backward') => {
         if (flipAnim || isPdf) return;
+        // 拿不到当前页（分页尚未算完、或 txtPage 暂时越界）只说明没法放翻页动画，
+        // 不该把跳章也一起吞掉——否则读到章末会「翻不动」，只能手动点下一章。
         const currentItems = txtPages[txtPage];
-        if (!currentItems || currentItems.length === 0) return;
 
         const canForward = txtPage < txtTotalPages - 1 || chapterIndex < chapters.length - 1;
         const canBackward = txtPage > 0 || chapterIndex > 0;
         if (direction === 'forward' && !canForward) return;
         if (direction === 'backward' && !canBackward) return;
 
-        setFlipAnim({ direction, items: currentItems });
+        if (currentItems && currentItems.length > 0) setFlipAnim({ direction, items: currentItems });
 
         if (direction === 'forward') {
             if (txtPage < txtTotalPages - 1) setTxtPage(p => p + 1);
@@ -1893,7 +1919,7 @@ export function ReadingViewer({ book, onBack }: Props) {
         } else if (isScrollMode) {
             const fraction = Math.max(0, Math.min(1, scrollFraction));
             scrollPosition = fraction;
-            progressFraction = Math.min(1, Math.max(0, (chapterIndex + fraction) / Math.max(1, chapters.length)));
+            progressFraction = toBookFraction(chapterIndex, fraction);
             progressCurrent = Math.max(1, Math.round(fraction * 100));
             progressTotal = 100;
             progressScope = "chapter";
@@ -1901,7 +1927,7 @@ export function ReadingViewer({ book, onBack }: Props) {
             const chapterPageCurrent = Math.max(1, txtPage + 1);
             const chapterPageTotal = Math.max(1, txtTotalPages);
             scrollPosition = txtPage;
-            progressFraction = Math.min(1, Math.max(0, (chapterIndex + chapterPageCurrent / chapterPageTotal) / Math.max(1, chapters.length)));
+            progressFraction = toBookFraction(chapterIndex, chapterPageCurrent / chapterPageTotal);
             progressCurrent = chapterPageCurrent;
             progressTotal = chapterPageTotal;
             progressScope = "chapter";
@@ -1920,7 +1946,7 @@ export function ReadingViewer({ book, onBack }: Props) {
             lastReadAt: new Date().toISOString(),
         };
         saveProgress(progress);
-    }, [book.id, chapterIndex, chapters.length, chaptersLoaded, companionId, isPdf, isScrollMode, pdfCurrentPage, pdfTotalPages, scrollFraction, txtPage, txtTotalPages]);
+    }, [book.id, chapterIndex, chapters.length, chaptersLoaded, companionId, isPdf, isScrollMode, pdfCurrentPage, pdfTotalPages, scrollFraction, toBookFraction, txtPage, txtTotalPages]);
 
     useEffect(() => {
         setTxtPage((prev) => Math.min(prev, Math.max(0, txtTotalPages - 1)));
@@ -2638,6 +2664,35 @@ export function ReadingViewer({ book, onBack }: Props) {
                     onCancel={() => setShowReadingSettings(false)}
                 >
                     <div className="reading-settings-grid">
+                        <div className="reading-settings-inline-note">
+                            <span>批注密度</span>
+                            <span className="reading-interval-row">
+                                每
+                                <input
+                                    className="reading-interval-input"
+                                    type="number"
+                                    min={0}
+                                    max={999}
+                                    step={1}
+                                    inputMode="numeric"
+                                    value={readingConfig.annotationInterval}
+                                    onChange={(e) => {
+                                        const parsed = Math.floor(Number(e.target.value));
+                                        const next = {
+                                            ...readingConfig,
+                                            annotationInterval: Number.isFinite(parsed) ? Math.min(999, Math.max(0, parsed)) : 0,
+                                        };
+                                        setReadingConfig(next);
+                                        saveReadingInteractionConfig(next);
+                                    }}
+                                />
+                                段 1 条
+                            </span>
+                        </div>
+                        <div className="reading-settings-inline-note">
+                            <span>说明</span>
+                            <span>填 0 表示不限，由角色自己决定写多少</span>
+                        </div>
                         <div className="reading-settings-inline-note">
                             <span>启用阅读双语翻译</span>
                             <Toggle
