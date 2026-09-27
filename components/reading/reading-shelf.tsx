@@ -18,7 +18,14 @@ type Props = {
     backgroundUrl: string | null;
     onSaveAppearance: (
         appearance: ReadingAppearance,
-        options: { backgroundFile: File | null; clearBackground: boolean; customFontFile: File | null; clearCustomFont: boolean }
+        options: {
+            backgroundFile: File | null;
+            clearBackground: boolean;
+            customFontFile: File | null;
+            clearCustomFont: boolean;
+            annotationFontFile: File | null;
+            clearAnnotationFont: boolean;
+        }
     ) => Promise<void>;
 };
 

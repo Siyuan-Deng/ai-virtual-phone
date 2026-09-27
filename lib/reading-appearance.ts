@@ -5,12 +5,18 @@ import { openIndexedDbAtLeast } from "./idb-open";
 
 export type ReadingFontFamilyId = "system" | "song" | "serif" | "sans" | "custom";
 
+/** 批注字体可以单独指定，也可以跟随正文（默认）。 */
+export type ReadingAnnotationFontFamilyId = "inherit" | ReadingFontFamilyId;
+
 export type ReadingAppearance = {
     fontFamily: ReadingFontFamilyId;
     fontSize: number;
     textColor: string;
     lineHeight: number;
     customFontName?: string;
+    /** 缺省即「跟随正文」，老配置读出来就是这个，行为与改动前一致。 */
+    annotationFontFamily?: ReadingAnnotationFontFamilyId;
+    annotationCustomFontName?: string;
 };
 
 export const READING_FONT_OPTIONS: Array<{ id: ReadingFontFamilyId; label: string; cssValue: string }> = [
@@ -21,12 +27,18 @@ export const READING_FONT_OPTIONS: Array<{ id: ReadingFontFamilyId; label: strin
     { id: "custom", label: "自定义上传", cssValue: "var(--app-font-family)" },
 ];
 
+export const READING_ANNOTATION_FONT_OPTIONS: Array<{ id: ReadingAnnotationFontFamilyId; label: string }> = [
+    { id: "inherit", label: "跟随正文" },
+    ...READING_FONT_OPTIONS.map((option) => ({ id: option.id as ReadingAnnotationFontFamilyId, label: option.label })),
+];
+
 const APPEARANCE_STORAGE_KEY = "ai_phone_reading_appearance_v1";
 registerKvMigration(APPEARANCE_STORAGE_KEY);
 const BG_DB_NAME = "reading-appearance-assets";
 const BG_STORE_NAME = "assets";
 const BG_KEY = "shared-background";
 const FONT_KEY = "custom-font";
+const ANNOTATION_FONT_KEY = "custom-font-annotation";
 
 export const DEFAULT_READING_APPEARANCE: ReadingAppearance = {
     fontFamily: "system",
@@ -55,13 +67,30 @@ function normalizeAppearance(raw: Partial<ReadingAppearance> | null | undefined)
     const customFontName = typeof raw?.customFontName === "string" && raw.customFontName.trim()
         ? raw.customFontName.trim()
         : undefined;
+    const annotationFontFamily = READING_ANNOTATION_FONT_OPTIONS.some((option) => option.id === raw?.annotationFontFamily)
+        ? raw!.annotationFontFamily!
+        : undefined;
+    const annotationCustomFontName = typeof raw?.annotationCustomFontName === "string" && raw.annotationCustomFontName.trim()
+        ? raw.annotationCustomFontName.trim()
+        : undefined;
 
-    return { fontFamily, fontSize, textColor, lineHeight, customFontName };
+    return { fontFamily, fontSize, textColor, lineHeight, customFontName, annotationFontFamily, annotationCustomFontName };
 }
 
 export function resolveReadingFontFamily(fontFamily: ReadingFontFamilyId, customFontFamily?: string): string {
     if (fontFamily === "custom" && customFontFamily) return customFontFamily;
     return READING_FONT_OPTIONS.find((option) => option.id === fontFamily)?.cssValue || READING_FONT_OPTIONS[0].cssValue;
+}
+
+/** 批注字体的 CSS 值；跟随正文（或没配）时返回 undefined，调用方据此不下发变量，
+ *  让 CSS 自己回退到正文字体——与改动前的表现完全一致。 */
+export function resolveReadingAnnotationFontFamily(
+    annotationFontFamily: ReadingAnnotationFontFamilyId | undefined,
+    annotationCustomFontFamily?: string,
+): string | undefined {
+    if (!annotationFontFamily || annotationFontFamily === "inherit") return undefined;
+    if (annotationFontFamily === "custom") return annotationCustomFontFamily || undefined;
+    return READING_FONT_OPTIONS.find((option) => option.id === annotationFontFamily)?.cssValue;
 }
 
 export function loadReadingAppearance(): ReadingAppearance {
@@ -141,6 +170,35 @@ export async function loadReadingCustomFont(): Promise<Blob | null> {
         const blob = await new Promise<Blob | null>((resolve, reject) => {
             const tx = db.transaction(BG_STORE_NAME, "readonly");
             const req = tx.objectStore(BG_STORE_NAME).get(FONT_KEY);
+            req.onsuccess = () => resolve((req.result as Blob) || null);
+            req.onerror = () => reject(req.error);
+        });
+        db.close();
+        return blob;
+    } catch {
+        return null;
+    }
+}
+
+export async function saveReadingAnnotationFont(blob: Blob | null): Promise<void> {
+    const db = await openBackgroundDb();
+    await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(BG_STORE_NAME, "readwrite");
+        const store = tx.objectStore(BG_STORE_NAME);
+        if (blob) store.put(blob, ANNOTATION_FONT_KEY);
+        else store.delete(ANNOTATION_FONT_KEY);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+}
+
+export async function loadReadingAnnotationFont(): Promise<Blob | null> {
+    try {
+        const db = await openBackgroundDb();
+        const blob = await new Promise<Blob | null>((resolve, reject) => {
+            const tx = db.transaction(BG_STORE_NAME, "readonly");
+            const req = tx.objectStore(BG_STORE_NAME).get(ANNOTATION_FONT_KEY);
             req.onsuccess = () => resolve((req.result as Blob) || null);
             req.onerror = () => reject(req.error);
         });

@@ -7,10 +7,13 @@ import { ReadingViewer } from "./reading-viewer";
 import type { Book } from "@/lib/reading-types";
 import {
     DEFAULT_READING_APPEARANCE,
+    loadReadingAnnotationFont,
     loadReadingAppearance,
     loadReadingBackground,
     loadReadingCustomFont,
+    resolveReadingAnnotationFontFamily,
     resolveReadingFontFamily,
+    saveReadingAnnotationFont,
     saveReadingAppearance,
     saveReadingBackground,
     saveReadingCustomFont,
@@ -25,10 +28,12 @@ export default function ReadingApp({ onClose }: Props) {
     const [appearance, setAppearance] = useState<ReadingAppearance>(DEFAULT_READING_APPEARANCE);
     const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
     const [customFontFamily, setCustomFontFamily] = useState<string | undefined>(undefined);
+    const [annotationFontFamily, setAnnotationFontFamily] = useState<string | undefined>(undefined);
     // Keep track of the last opened book so viewer stays mounted
     const lastBookRef = useRef<Book | null>(null);
     const backgroundUrlRef = useRef<string | null>(null);
     const customFontUrlRef = useRef<string | null>(null);
+    const annotationFontUrlRef = useRef<string | null>(null);
     if (activeBook) lastBookRef.current = activeBook;
 
     const updateBackgroundUrl = (nextUrl: string | null) => {
@@ -39,27 +44,38 @@ export default function ReadingApp({ onClose }: Props) {
         setBackgroundUrl(nextUrl);
     };
 
-    const loadCustomFontFace = async (blob: Blob | null) => {
-        if (customFontUrlRef.current) {
-            URL.revokeObjectURL(customFontUrlRef.current);
-            customFontUrlRef.current = null;
+    const loadFontFace = async (
+        blob: Blob | null,
+        urlRef: React.MutableRefObject<string | null>,
+        setFamily: (family: string | undefined) => void,
+        familyPrefix: string,
+    ) => {
+        if (urlRef.current) {
+            URL.revokeObjectURL(urlRef.current);
+            urlRef.current = null;
         }
-        setCustomFontFamily(undefined);
+        setFamily(undefined);
         if (!blob) return;
 
         const url = URL.createObjectURL(blob);
-        customFontUrlRef.current = url;
-        const familyName = `AIVirtualPhoneReadingFont_${Date.now()}`;
+        urlRef.current = url;
+        const familyName = `${familyPrefix}_${Date.now()}`;
 
         try {
             const face = new FontFace(familyName, `url("${url}")`);
             await face.load();
             document.fonts.add(face);
-            setCustomFontFamily(`"${familyName}"`);
+            setFamily(`"${familyName}"`);
         } catch {
-            setCustomFontFamily(undefined);
+            setFamily(undefined);
         }
     };
+
+    const loadCustomFontFace = (blob: Blob | null) =>
+        loadFontFace(blob, customFontUrlRef, setCustomFontFamily, "AIVirtualPhoneReadingFont");
+
+    const loadAnnotationFontFace = (blob: Blob | null) =>
+        loadFontFace(blob, annotationFontUrlRef, setAnnotationFontFamily, "AIVirtualPhoneReadingAnnotationFont");
 
     useEffect(() => {
         hydrateReadingStorage().then(() => setReady(true));
@@ -70,18 +86,39 @@ export default function ReadingApp({ onClose }: Props) {
         void loadReadingCustomFont().then((blob) => {
             void loadCustomFontFace(blob);
         });
+        void loadReadingAnnotationFont().then((blob) => {
+            void loadAnnotationFontFace(blob);
+        });
         return () => {
             if (backgroundUrlRef.current) URL.revokeObjectURL(backgroundUrlRef.current);
             if (customFontUrlRef.current) URL.revokeObjectURL(customFontUrlRef.current);
+            if (annotationFontUrlRef.current) URL.revokeObjectURL(annotationFontUrlRef.current);
         };
     }, []);
 
     const handleSaveAppearance = async (
         nextAppearance: ReadingAppearance,
-        options: { backgroundFile: File | null; clearBackground: boolean; customFontFile: File | null; clearCustomFont: boolean },
+        options: {
+            backgroundFile: File | null;
+            clearBackground: boolean;
+            customFontFile: File | null;
+            clearCustomFont: boolean;
+            annotationFontFile: File | null;
+            clearAnnotationFont: boolean;
+        },
     ) => {
         const normalized = saveReadingAppearance(nextAppearance);
         setAppearance(normalized);
+
+        // 放在下面几个 early return 之前：原有分支里清背景/清字体都会直接 return，
+        // 挂在后面的话「同时改背景和批注字体」就会被吞掉。
+        if (options.clearAnnotationFont) {
+            await saveReadingAnnotationFont(null);
+            await loadAnnotationFontFace(null);
+        } else if (options.annotationFontFile) {
+            await saveReadingAnnotationFont(options.annotationFontFile);
+            await loadAnnotationFontFace(options.annotationFontFile);
+        }
 
         if (options.clearBackground) {
             await saveReadingBackground(null);
@@ -106,7 +143,12 @@ export default function ReadingApp({ onClose }: Props) {
         }
     };
 
+    const resolvedAnnotationFont = resolveReadingAnnotationFontFamily(appearance.annotationFontFamily, annotationFontFamily);
     const appearanceStyle = {
+        // 只有真的选了批注字体才下发这个变量；跟随正文时整条不出现，CSS 自然回退到正文字体
+        ...(resolvedAnnotationFont
+            ? { ["--reading-annotation-font-family" as "--reading-annotation-font-family"]: resolvedAnnotationFont }
+            : {}),
         ["--reading-font-family" as "--reading-font-family"]: resolveReadingFontFamily(appearance.fontFamily, customFontFamily),
         ["--reading-font-size" as "--reading-font-size"]: `${appearance.fontSize}px`,
         ["--reading-text-color" as "--reading-text-color"]: appearance.textColor,

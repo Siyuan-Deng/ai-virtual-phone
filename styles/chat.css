@@ -3855,6 +3855,7 @@
   display: flex;
 }
 .reading-annotation-name {
+  font-family: var(--reading-annotation-font-family, var(--reading-font-family, var(--app-font-family)));
   font-size: calc(9.9px*var(--app-text-scale,1));
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -3908,8 +3909,11 @@
   padding: 4px 0;
   align-self: flex-start;
 }
+/* 批注字体独立于正文：没设 --reading-annotation-font-family 时回退到正文字体，
+   行为与只有单一字体变量时完全一致。 */
 .reading-annotation-text {
   display: block;
+  font-family: var(--reading-annotation-font-family, var(--reading-font-family, var(--app-font-family)));
   font-size: calc(11.7px*var(--app-text-scale,1));
   line-height: 1.72;
   white-space: pre-wrap;
@@ -3920,6 +3924,7 @@
 }
 .reading-annotation-translation {
   margin-top: 4px;
+  font-family: var(--reading-annotation-font-family, var(--reading-font-family, var(--app-font-family)));
   color: rgba(74, 61, 26, 0.65);
 }
 .reading-chat-msg {
