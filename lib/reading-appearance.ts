@@ -130,9 +130,25 @@ async function openBackgroundDb(): Promise<IDBDatabase> {
     // 直接打开」那条分支，upgradeneeded 不触发，store 永远补不上，之后每次
     // transaction 都抛 "One of the specified object stores was not found."。
     // 显式升一个版本把 store 补建出来。
-    const nextVersion = db.version + 1;
+    const staleVersion = db.version;
+    const nextVersion = staleVersion + 1;
     db.close();
-    return openIndexedDbAtLeast(BG_DB_NAME, nextVersion, ensureBackgroundStore);
+    const repaired = await openIndexedDbAtLeast(BG_DB_NAME, nextVersion, ensureBackgroundStore)
+        .catch((err: unknown) => {
+            // 升版本会被任何仍然开着的连接 block 住（别的标签页、或本页泄漏的连接）
+            const detail = err instanceof Error ? err.message : String(err);
+            throw new Error(`阅读资源库补建失败：${BG_DB_NAME} v${staleVersion} → v${nextVersion} 被占用或中断（${detail}）`);
+        });
+    if (repaired.objectStoreNames.contains(BG_STORE_NAME)) return repaired;
+
+    // 补建完还是没有，说明升版本那一步没真正跑到 onupgradeneeded。把库名/版本号带出去，
+    // 免得只剩一句没有主语的 "One of the specified object stores was not found."。
+    const existing = Array.from(repaired.objectStoreNames).join(", ") || "（空）";
+    repaired.close();
+    throw new Error(
+        `阅读资源库缺少「${BG_STORE_NAME}」：${BG_DB_NAME} v${staleVersion} → 已尝试补建到 v${nextVersion}，`
+        + `现有 store = ${existing}`,
+    );
 }
 
 /** 统一收口资源库的读写：无论成功失败都关闭连接。
