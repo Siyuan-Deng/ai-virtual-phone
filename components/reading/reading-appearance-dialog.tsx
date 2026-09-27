@@ -20,6 +20,8 @@ type Props = {
             clearCustomFont: boolean;
             annotationFontFile: File | null;
             clearAnnotationFont: boolean;
+            userAnnotationFontFile: File | null;
+            clearUserAnnotationFont: boolean;
         }
     ) => Promise<void>;
 };
@@ -29,23 +31,28 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, onClose, on
     const [backgroundFile, setBackgroundFile] = useState<File | null>(null);
     const [customFontFile, setCustomFontFile] = useState<File | null>(null);
     const [annotationFontFile, setAnnotationFontFile] = useState<File | null>(null);
+    const [userAnnotationFontFile, setUserAnnotationFontFile] = useState<File | null>(null);
     const [clearBackground, setClearBackground] = useState(false);
     const [clearCustomFont, setClearCustomFont] = useState(false);
     const [clearAnnotationFont, setClearAnnotationFont] = useState(false);
+    const [clearUserAnnotationFont, setClearUserAnnotationFont] = useState(false);
     const [saving, setSaving] = useState(false);
     const [previewUrl, setPreviewUrl] = useState<string | null>(backgroundUrl);
     const fileRef = useRef<HTMLInputElement>(null);
     const fontFileRef = useRef<HTMLInputElement>(null);
     const annotationFontFileRef = useRef<HTMLInputElement>(null);
+    const userAnnotationFontFileRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         setDraft(appearance);
         setBackgroundFile(null);
         setCustomFontFile(null);
         setAnnotationFontFile(null);
+        setUserAnnotationFontFile(null);
         setClearBackground(false);
         setClearCustomFont(false);
         setClearAnnotationFont(false);
+        setClearUserAnnotationFont(false);
         setPreviewUrl(backgroundUrl);
     }, [appearance, backgroundUrl]);
 
@@ -68,6 +75,8 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, onClose, on
                 clearCustomFont,
                 annotationFontFile,
                 clearAnnotationFont,
+                userAnnotationFontFile,
+                clearUserAnnotationFont,
             });
             onClose();
         } catch (err) {
@@ -180,7 +189,7 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, onClose, on
                 <section className="reading-settings-group">
                     <div className="reading-settings-heading">
                         <Type size={15} />
-                        <span>批注样式</span>
+                        <span>TA的批注样式</span>
                     </div>
                     <label className="reading-settings-label">
                         <span>字体</span>
@@ -244,6 +253,80 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, onClose, on
                                 ...prev,
                                 annotationFontFamily: "custom",
                                 annotationCustomFontName: file.name,
+                            }));
+                        }}
+                    />
+                </section>
+
+                <section className="reading-settings-group">
+                    <div className="reading-settings-heading">
+                        <Type size={15} />
+                        <span>我的批注样式</span>
+                    </div>
+                    <label className="reading-settings-label">
+                        <span>字体</span>
+                        <Select
+                            value={draft.userAnnotationFontFamily ?? "inherit"}
+                            onChange={(e) => setDraft((prev) => ({
+                                ...prev,
+                                userAnnotationFontFamily: e.target.value as ReadingAppearance["userAnnotationFontFamily"],
+                            }))}
+                        >
+                            {READING_ANNOTATION_FONT_OPTIONS.map((option) => (
+                                option.id === "custom" && !draft.userAnnotationCustomFontName ? null :
+                                <option key={option.id} value={option.id}>
+                                    {option.id === "inherit" ? "跟随 TA 的批注" : option.label}
+                                </option>
+                            ))}
+                        </Select>
+                    </label>
+                    <div className="reading-settings-inline-note">
+                        <span>自定义字体</span>
+                        <span>{draft.userAnnotationCustomFontName ? `已选择 · ${draft.userAnnotationCustomFontName}` : "未上传"}</span>
+                    </div>
+                    <div className="reading-settings-actions">
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => userAnnotationFontFileRef.current?.click()}
+                            disabled={saving}
+                        >
+                            <Type size={14} />
+                            <span>{draft.userAnnotationCustomFontName ? "更换字体" : "上传字体"}</span>
+                        </button>
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-ghost"
+                            onClick={() => {
+                                setUserAnnotationFontFile(null);
+                                setClearUserAnnotationFont(true);
+                                setDraft((prev) => ({
+                                    ...prev,
+                                    userAnnotationCustomFontName: undefined,
+                                    userAnnotationFontFamily: prev.userAnnotationFontFamily === "custom" ? "inherit" : prev.userAnnotationFontFamily,
+                                }));
+                            }}
+                            disabled={saving || !draft.userAnnotationCustomFontName}
+                        >
+                            <Trash2 size={14} />
+                            <span>清除</span>
+                        </button>
+                    </div>
+                    <input
+                        ref={userAnnotationFontFileRef}
+                        type="file"
+                        accept=".ttf,.otf,.woff,.woff2"
+                        className="hidden"
+                        onChange={(e) => {
+                            const file = e.target.files?.[0] || null;
+                            e.target.value = "";
+                            if (!file) return;
+                            setUserAnnotationFontFile(file);
+                            setClearUserAnnotationFont(false);
+                            setDraft((prev) => ({
+                                ...prev,
+                                userAnnotationFontFamily: "custom",
+                                userAnnotationCustomFontName: file.name,
                             }));
                         }}
                     />

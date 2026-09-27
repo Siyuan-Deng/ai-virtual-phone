@@ -17,6 +17,9 @@ export type ReadingAppearance = {
     /** 缺省即「跟随正文」，老配置读出来就是这个，行为与改动前一致。 */
     annotationFontFamily?: ReadingAnnotationFontFamilyId;
     annotationCustomFontName?: string;
+    /** 用户自己写的批注再单独一档；缺省时跟随角色批注的字体。 */
+    userAnnotationFontFamily?: ReadingAnnotationFontFamilyId;
+    userAnnotationCustomFontName?: string;
 };
 
 export const READING_FONT_OPTIONS: Array<{ id: ReadingFontFamilyId; label: string; cssValue: string }> = [
@@ -39,6 +42,7 @@ const BG_STORE_NAME = "assets";
 const BG_KEY = "shared-background";
 const FONT_KEY = "custom-font";
 const ANNOTATION_FONT_KEY = "custom-font-annotation";
+const USER_ANNOTATION_FONT_KEY = "custom-font-user-annotation";
 
 export const DEFAULT_READING_APPEARANCE: ReadingAppearance = {
     fontFamily: "system",
@@ -74,7 +78,18 @@ function normalizeAppearance(raw: Partial<ReadingAppearance> | null | undefined)
         ? raw.annotationCustomFontName.trim()
         : undefined;
 
-    return { fontFamily, fontSize, textColor, lineHeight, customFontName, annotationFontFamily, annotationCustomFontName };
+    const userAnnotationFontFamily = READING_ANNOTATION_FONT_OPTIONS.some((option) => option.id === raw?.userAnnotationFontFamily)
+        ? raw!.userAnnotationFontFamily!
+        : undefined;
+    const userAnnotationCustomFontName = typeof raw?.userAnnotationCustomFontName === "string" && raw.userAnnotationCustomFontName.trim()
+        ? raw.userAnnotationCustomFontName.trim()
+        : undefined;
+
+    return {
+        fontFamily, fontSize, textColor, lineHeight, customFontName,
+        annotationFontFamily, annotationCustomFontName,
+        userAnnotationFontFamily, userAnnotationCustomFontName,
+    };
 }
 
 export function resolveReadingFontFamily(fontFamily: ReadingFontFamilyId, customFontFamily?: string): string {
@@ -212,4 +227,12 @@ export async function saveReadingAnnotationFont(blob: Blob | null): Promise<void
 
 export async function loadReadingAnnotationFont(): Promise<Blob | null> {
     return loadAsset(ANNOTATION_FONT_KEY);
+}
+
+export async function saveReadingUserAnnotationFont(blob: Blob | null): Promise<void> {
+    await withBackgroundDb((db) => putAsset(db, USER_ANNOTATION_FONT_KEY, blob));
+}
+
+export async function loadReadingUserAnnotationFont(): Promise<Blob | null> {
+    return loadAsset(USER_ANNOTATION_FONT_KEY);
 }

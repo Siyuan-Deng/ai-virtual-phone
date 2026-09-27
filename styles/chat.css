@@ -3969,6 +3969,13 @@
   font-family: var(--reading-annotation-font-family, var(--reading-font-family, var(--app-font-family)));
   color: rgba(74, 61, 26, 0.65);
 }
+/* 我的批注字体可再单独指定；没设就回退到批注字体，再回退到正文，
+   与只有两级字体时的表现完全一致。 */
+.reading-annotation[data-author="user"] .reading-annotation-name,
+.reading-annotation[data-author="user"] .reading-annotation-text,
+.reading-annotation[data-author="user"] .reading-annotation-translation {
+  font-family: var(--reading-user-annotation-font-family, var(--reading-annotation-font-family, var(--reading-font-family, var(--app-font-family))));
+}
 .reading-chat-msg {
   padding: 6px 10px;
   border-radius: 8px;
@@ -7307,7 +7314,22 @@
 }
 
 /* ── 阅读：选区菜单 / 荧光笔 / 划线 ── */
+/* 选字菜单固定停在页脚上方：iOS 的 Copy / Look Up 条永远贴着选区出现，
+   跟着选区走一定会撞上（而网页没法关掉那条系统菜单），索性错开位置。 */
 .reading-selection-menu {
+  position: absolute;
+  left: 50%;
+  z-index: 60;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(38, 32, 24, 0.94);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+}
+/* 点已有标记弹出的删除菜单：这是单纯点击、没有选区，系统菜单不会出现，就近显示 */
+.reading-mark-menu {
   position: fixed;
   z-index: 60;
   transform: translateX(-50%);
@@ -7318,6 +7340,7 @@
   background: rgba(38, 32, 24, 0.94);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
 }
+.reading-mark-menu button,
 .reading-selection-menu button {
   border: 0;
   background: transparent;
@@ -7329,7 +7352,11 @@
   cursor: pointer;
   white-space: nowrap;
 }
+.reading-mark-menu button:active,
 .reading-selection-menu button:active { background: rgba(255, 255, 255, 0.16); }
+.reading-mark {
+  cursor: pointer;
+}
 .reading-mark[data-style="highlight"] {
   background: rgba(255, 226, 120, 0.72);
   border-radius: 2px;
@@ -7343,6 +7370,21 @@
   justify-content: space-between;
   gap: 10px;
   font-size: calc(12.5px*var(--app-text-scale,1));
+}
+/* 「我的批注」面板里那条：左边原文片段 + 自己写的内容，右边删除 */
+.reading-my-annotation-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 auto;
+  text-align: left;
+}
+.reading-my-annotation-row-quote {
+  padding-left: 7px;
+  border-left: 2px solid rgba(120, 100, 70, 0.35);
+  color: rgba(70, 58, 42, 0.7);
+  font-size: calc(11.5px*var(--app-text-scale,1));
 }
 .reading-mark-row button {
   border: 0;

@@ -11,12 +11,14 @@ import {
     loadReadingAppearance,
     loadReadingBackground,
     loadReadingCustomFont,
+    loadReadingUserAnnotationFont,
     resolveReadingAnnotationFontFamily,
     resolveReadingFontFamily,
     saveReadingAnnotationFont,
     saveReadingAppearance,
     saveReadingBackground,
     saveReadingCustomFont,
+    saveReadingUserAnnotationFont,
     type ReadingAppearance,
 } from "@/lib/reading-appearance";
 
@@ -29,11 +31,13 @@ export default function ReadingApp({ onClose }: Props) {
     const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
     const [customFontFamily, setCustomFontFamily] = useState<string | undefined>(undefined);
     const [annotationFontFamily, setAnnotationFontFamily] = useState<string | undefined>(undefined);
+    const [userAnnotationFontFamily, setUserAnnotationFontFamily] = useState<string | undefined>(undefined);
     // Keep track of the last opened book so viewer stays mounted
     const lastBookRef = useRef<Book | null>(null);
     const backgroundUrlRef = useRef<string | null>(null);
     const customFontUrlRef = useRef<string | null>(null);
     const annotationFontUrlRef = useRef<string | null>(null);
+    const userAnnotationFontUrlRef = useRef<string | null>(null);
     if (activeBook) lastBookRef.current = activeBook;
 
     const updateBackgroundUrl = (nextUrl: string | null) => {
@@ -77,21 +81,26 @@ export default function ReadingApp({ onClose }: Props) {
     const loadAnnotationFontFace = (blob: Blob | null) =>
         loadFontFace(blob, annotationFontUrlRef, setAnnotationFontFamily, "AIVirtualPhoneReadingAnnotationFont");
 
+    const loadUserAnnotationFontFace = (blob: Blob | null) =>
+        loadFontFace(blob, userAnnotationFontUrlRef, setUserAnnotationFontFamily, "AIVirtualPhoneReadingUserAnnotationFont");
+
     useEffect(() => {
         hydrateReadingStorage().then(() => setReady(true));
         setAppearance(loadReadingAppearance());
-        // 串行读取：三者共用同一个 IndexedDB。并发打开时，若库缺 store 需要升版本补建，
+        // 串行读取：这几项共用同一个 IndexedDB。并发打开时，若库缺 store 需要升版本补建，
         // 会被其它尚未关闭的连接 block 掉。顺序执行可以保证同一时刻只有一个连接。
         void (async () => {
             const background = await loadReadingBackground();
             updateBackgroundUrl(background ? URL.createObjectURL(background) : null);
             await loadCustomFontFace(await loadReadingCustomFont());
             await loadAnnotationFontFace(await loadReadingAnnotationFont());
+            await loadUserAnnotationFontFace(await loadReadingUserAnnotationFont());
         })();
         return () => {
             if (backgroundUrlRef.current) URL.revokeObjectURL(backgroundUrlRef.current);
             if (customFontUrlRef.current) URL.revokeObjectURL(customFontUrlRef.current);
             if (annotationFontUrlRef.current) URL.revokeObjectURL(annotationFontUrlRef.current);
+            if (userAnnotationFontUrlRef.current) URL.revokeObjectURL(userAnnotationFontUrlRef.current);
         };
     }, []);
 
@@ -104,6 +113,8 @@ export default function ReadingApp({ onClose }: Props) {
             clearCustomFont: boolean;
             annotationFontFile: File | null;
             clearAnnotationFont: boolean;
+            userAnnotationFontFile: File | null;
+            clearUserAnnotationFont: boolean;
         },
     ) => {
         const normalized = saveReadingAppearance(nextAppearance);
@@ -117,6 +128,14 @@ export default function ReadingApp({ onClose }: Props) {
         } else if (options.annotationFontFile) {
             await saveReadingAnnotationFont(options.annotationFontFile);
             await loadAnnotationFontFace(options.annotationFontFile);
+        }
+
+        if (options.clearUserAnnotationFont) {
+            await saveReadingUserAnnotationFont(null);
+            await loadUserAnnotationFontFace(null);
+        } else if (options.userAnnotationFontFile) {
+            await saveReadingUserAnnotationFont(options.userAnnotationFontFile);
+            await loadUserAnnotationFontFace(options.userAnnotationFontFile);
         }
 
         if (options.clearBackground) {
@@ -143,10 +162,14 @@ export default function ReadingApp({ onClose }: Props) {
     };
 
     const resolvedAnnotationFont = resolveReadingAnnotationFontFamily(appearance.annotationFontFamily, annotationFontFamily);
+    const resolvedUserAnnotationFont = resolveReadingAnnotationFontFamily(appearance.userAnnotationFontFamily, userAnnotationFontFamily);
     const appearanceStyle = {
         // 只有真的选了批注字体才下发这个变量；跟随正文时整条不出现，CSS 自然回退到正文字体
         ...(resolvedAnnotationFont
             ? { ["--reading-annotation-font-family" as "--reading-annotation-font-family"]: resolvedAnnotationFont }
+            : {}),
+        ...(resolvedUserAnnotationFont
+            ? { ["--reading-user-annotation-font-family" as "--reading-user-annotation-font-family"]: resolvedUserAnnotationFont }
             : {}),
         ["--reading-font-family" as "--reading-font-family"]: resolveReadingFontFamily(appearance.fontFamily, customFontFamily),
         ["--reading-font-size" as "--reading-font-size"]: `${appearance.fontSize}px`,

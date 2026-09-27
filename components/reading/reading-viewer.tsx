@@ -20,7 +20,7 @@ import {
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { loadReadingMarks, saveReadingMark, deleteReadingMark } from "@/lib/reading-marks";
 import { textOffsetWithin } from "./reading-selection";
-import type { ReadingMark, ReadingMarkStyle } from "@/lib/reading-types";
+import { isUserAnnotation, type ReadingMark, type ReadingMarkStyle } from "@/lib/reading-types";
 import { generateAnnotationBatch, generateReadingChat, parseReadingDiscussResponse, type ReadingDiscussAction, type ReadingDiscussContext } from "@/lib/reading-engine";
 import { loadChatMessages, pushChatMessage, deleteChatMessage, editChatMessage, loadChatContacts, createOrGetSession, isReadingDiscussMessage } from "@/lib/chat-storage";
 import type { ChatMessage, ChatSession } from "@/lib/chat-storage";
@@ -254,8 +254,13 @@ export function ReadingViewer({ book, onBack }: Props) {
     const [companionId, setCompanionId] = useState<string | null>(null);
     const [marks, setMarks] = useState<ReadingMark[]>([]);
     const [selectionInfo, setSelectionInfo] = useState<
-        { text: string; chapterIndex: number; paragraphIndex: number; start: number; end: number; x: number; y: number } | null
+        { text: string; chapterIndex: number; paragraphIndex: number; start: number; end: number } | null
     >(null);
+    /** 点到已有的荧光笔/划线时弹出的删除菜单 */
+    const [markMenu, setMarkMenu] = useState<{ mark: ReadingMark; x: number; y: number } | null>(null);
+    /** 选字菜单要停在页脚正上方，页脚高度随安全区/字号变，量出来最稳 */
+    const footerRef = useRef<HTMLElement | null>(null);
+    const [footerHeight, setFooterHeight] = useState(96);
     const [showMyAnnotation, setShowMyAnnotation] = useState(false);
     const [showCharAnnotationMenu, setShowCharAnnotationMenu] = useState(false);
     const [showMyMarksPanel, setShowMyMarksPanel] = useState(false);
@@ -430,6 +435,16 @@ export function ReadingViewer({ book, onBack }: Props) {
 
     useEffect(() => { setMarks(loadReadingMarks(book.id)); }, [book.id]);
 
+    useEffect(() => {
+        const el = footerRef.current;
+        if (!el) return;
+        const sync = () => setFooterHeight(el.offsetHeight);
+        sync();
+        const observer = new ResizeObserver(sync);
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, []);
+
 
     /** 松手后读取选区：定位到所属段落，换算成段落内字符区间 */
     const captureSelection = useCallback(() => {
@@ -455,13 +470,26 @@ export function ReadingViewer({ book, onBack }: Props) {
         const end = endLineStart + textOffsetWithin(endLine, range.endContainer, range.endOffset);
         if (!(end > startOffset)) { setSelectionInfo(null); return; }
 
-        const rect = range.getBoundingClientRect();
-        setSelectionInfo({
-            text, chapterIndex: lineChapter, paragraphIndex,
-            start: startOffset, end,
-            x: rect.left + rect.width / 2, y: rect.bottom,
-        });
+        setSelectionInfo({ text, chapterIndex: lineChapter, paragraphIndex, start: startOffset, end });
     }, []);
+
+    /** 点已有标记：iOS 的系统菜单只在有选区时出现，这里是单纯点击，就近弹自己的菜单 */
+    const handleSurfaceClick = (e: React.MouseEvent) => {
+        const sel = typeof window !== "undefined" ? window.getSelection() : null;
+        if (sel && !sel.isCollapsed) return; // 正在选字，交给选字菜单
+        const hit = (e.target as HTMLElement | null)?.closest<HTMLElement>("[data-mark-id]");
+        if (!hit) { setMarkMenu(null); return; }
+        const mark = marks.find(item => item.id === hit.dataset.markId);
+        if (!mark) return;
+        const rect = hit.getBoundingClientRect();
+        setMarkMenu({ mark, x: rect.left + rect.width / 2, y: rect.bottom });
+    };
+
+    const removeMark = (mark: ReadingMark) => {
+        deleteReadingMark(book.id, mark.id);
+        setMarks(prev => prev.filter(item => item.id !== mark.id));
+        setMarkMenu(null);
+    };
 
     const addMark = (style: ReadingMarkStyle) => {
         if (!selectionInfo) return;
@@ -597,7 +625,7 @@ export function ReadingViewer({ book, onBack }: Props) {
             if (from > cursor) nodes.push(item.text.slice(cursor - lineStart, from - lineStart));
             if (to > from) {
                 nodes.push(
-                    <span key={`${mark.id}-${i}`} className="reading-mark" data-style={mark.style}>
+                    <span key={`${mark.id}-${i}`} className="reading-mark" data-style={mark.style} data-mark-id={mark.id}>
                         {item.text.slice(from - lineStart, to - lineStart)}
                     </span>,
                 );
@@ -2286,7 +2314,7 @@ export function ReadingViewer({ book, onBack }: Props) {
     };
 
     return (
-        <div className="reading-app-surface absolute inset-0 z-[100] flex flex-col bg-[var(--c-page-body-bg)]" data-immersive={immersive} style={{ paddingTop: "var(--page-header-safe-top, 48px)" }}>
+        <div className="reading-app-surface absolute inset-0 z-[100] flex flex-col bg-[var(--c-page-body-bg)]" data-immersive={immersive} style={{ paddingTop: "var(--page-header-safe-top, 48px)" }} onClick={handleSurfaceClick}>
             {/* Page flip overlay */}
             {flipAnim && (
                 <>
@@ -2481,7 +2509,7 @@ export function ReadingViewer({ book, onBack }: Props) {
             </span>
 
             {/* Bottom bar — mirrors header style */}
-            <footer className="reading-footer">
+            <footer className="reading-footer" ref={footerRef}>
                 <div className="reading-footer-inner">
                     <div className="reading-footer-slider-row">
                         <button
@@ -2843,7 +2871,7 @@ export function ReadingViewer({ book, onBack }: Props) {
             {selectionInfo && (
                 <div
                     className="reading-selection-menu"
-                    style={{ left: selectionInfo.x, top: selectionInfo.y + 8 }}
+                    style={{ bottom: `${footerHeight + 12}px` }}
                     onPointerDown={(e) => e.stopPropagation()}
                 >
                     <button type="button" onClick={() => {
@@ -2859,6 +2887,19 @@ export function ReadingViewer({ book, onBack }: Props) {
                     <button type="button" onClick={() => addMark("highlight")}>荧光笔</button>
                     <button type="button" onClick={() => addMark("underline")}>划线</button>
                     <button type="button" onClick={clearSelection}>取消</button>
+                </div>
+            )}
+            {markMenu && (
+                <div
+                    className="reading-mark-menu"
+                    style={{ left: markMenu.x, top: markMenu.y + 8 }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <button type="button" onClick={() => removeMark(markMenu.mark)}>
+                        {markMenu.mark.style === "highlight" ? "删除荧光笔" : "删除划线"}
+                    </button>
+                    <button type="button" onClick={() => setMarkMenu(null)}>取消</button>
                 </div>
             )}
             {showCharAnnotationMenu && (
@@ -2901,17 +2942,38 @@ export function ReadingViewer({ book, onBack }: Props) {
                             <span>怎么用</span>
                             <span>长按正文选中一段文字，松手后选「写批注 / 荧光笔 / 划线」</span>
                         </div>
-                        {marks.filter(m => m.chapterIndex === chapterIndex).length === 0 ? (
-                            <div className="reading-settings-inline-note"><span>本章暂无标记</span></div>
-                        ) : marks.filter(m => m.chapterIndex === chapterIndex).map(mark => (
-                            <div key={mark.id} className="reading-mark-row">
-                                <span className="reading-mark" data-style={mark.style}>{mark.text.slice(0, 40)}</span>
-                                <button type="button" onClick={() => {
-                                    deleteReadingMark(book.id, mark.id);
-                                    setMarks(prev => prev.filter(item => item.id !== mark.id));
-                                }}>删除</button>
-                            </div>
-                        ))}
+                        {(() => {
+                            const chapterMarks = marks.filter(m => m.chapterIndex === chapterIndex);
+                            const myAnnotations = annotations.filter(a => a.chapterIndex === chapterIndex && isUserAnnotation(a));
+                            if (chapterMarks.length === 0 && myAnnotations.length === 0) {
+                                return <div className="reading-settings-inline-note"><span>本章暂无标记</span></div>;
+                            }
+                            return (
+                                <>
+                                    {myAnnotations.map(annotation => (
+                                        <div key={annotation.id} className="reading-mark-row">
+                                            <span className="reading-my-annotation-row-body">
+                                                {annotation.quote && <span className="reading-my-annotation-row-quote">{annotation.quote.slice(0, 40)}</span>}
+                                                <span>{annotation.content}</span>
+                                            </span>
+                                            <button type="button" onClick={() => {
+                                                void deleteAnnotation(annotation.id);
+                                                setAnnotations(prev => prev.filter(item => item.id !== annotation.id));
+                                            }}>删除</button>
+                                        </div>
+                                    ))}
+                                    {chapterMarks.map(mark => (
+                                        <div key={mark.id} className="reading-mark-row">
+                                            <span className="reading-mark" data-style={mark.style}>{mark.text.slice(0, 40)}</span>
+                                            <button type="button" onClick={() => {
+                                                deleteReadingMark(book.id, mark.id);
+                                                setMarks(prev => prev.filter(item => item.id !== mark.id));
+                                            }}>删除</button>
+                                        </div>
+                                    ))}
+                                </>
+                            );
+                        })()}
                     </div>
                 </ContentDialog>
             )}

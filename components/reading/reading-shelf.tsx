@@ -25,6 +25,8 @@ type Props = {
             clearCustomFont: boolean;
             annotationFontFile: File | null;
             clearAnnotationFont: boolean;
+            userAnnotationFontFile: File | null;
+            clearUserAnnotationFont: boolean;
         }
     ) => Promise<void>;
 };
