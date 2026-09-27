@@ -396,18 +396,26 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
 
     // 4. Build id → href map from manifest
     const idToHref = new Map<string, string>();
+    // EPUB3 的导航文档（properties="nav"）本身就是一张目录页，阅读器已经有自己的
+    // 导航面板，把它当章节收进来只会在正文里多出一屏目录条目。
+    const navItemIds = new Set<string>();
     const manifestMatch = opfXml.match(/<manifest[^>]*>([\s\S]*?)<\/manifest>/i);
     if (manifestMatch) {
-        const itemPattern = /id="([^"]+)"[^>]*href="([^"]+)"/g;
-        let m;
-        while ((m = itemPattern.exec(manifestMatch[1])) !== null) {
-            idToHref.set(m[1], m[2]);
+        const itemTagPattern = /<item\b[^>]*>/gi;
+        let tag;
+        while ((tag = itemTagPattern.exec(manifestMatch[1])) !== null) {
+            const id = tag[0].match(/\bid="([^"]+)"/)?.[1];
+            const itemHref = tag[0].match(/\bhref="([^"]+)"/)?.[1];
+            if (!id || !itemHref) continue;
+            idToHref.set(id, itemHref);
+            if (/\bproperties="[^"]*\bnav\b[^"]*"/i.test(tag[0])) navItemIds.add(id);
         }
     }
 
     // 5. Read each spine item and extract text
     const chapters: ParsedChapter[] = [];
     for (const itemId of spineItems) {
+        if (navItemIds.has(itemId)) continue;
         const href = idToHref.get(itemId);
         if (!href) continue;
         const filePath = rootDir + decodeURIComponent(href);
@@ -427,8 +435,75 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
     return { title: bookTitle, author, chapters };
 }
 
+const BLOCK_TAGS = new Set([
+    "P", "DIV", "LI", "BLOCKQUOTE", "TD", "TH", "DD", "DT", "PRE", "SECTION", "ARTICLE", "FIGCAPTION",
+    "H1", "H2", "H3", "H4", "H5", "H6",
+]);
+
+/** 正文提取（DOM 版）。
+ *  正则版遇到嵌套块（<div><p>…</p></div>）会错位，且去标签时不插分隔符，
+ *  相邻的行内元素会被粘成一坨（目录里的「八 革职」+「1」变成「八 革职1」）。
+ *  这里只取「叶子块」——本身不再包含块级后代的元素——避免父块和子块各产出一次。 */
+function extractTextFromDom(html: string): { title: string; paragraphs: string[] } | null {
+    if (typeof DOMParser === "undefined") return null;
+    let doc: Document;
+    try {
+        doc = new DOMParser().parseFromString(html, "text/html");
+    } catch {
+        return null;
+    }
+    const body = doc.body;
+    if (!body) return null;
+
+    body.querySelectorAll("script, style, nav[*|type='toc'], nav.toc").forEach((node) => node.remove());
+
+    const heading = body.querySelector("h1, h2, h3");
+    const title = normalizeInlineText(heading?.textContent || doc.querySelector("title")?.textContent || "");
+
+    const paragraphs: string[] = [];
+    const seenHeading = { done: false };
+    const visit = (node: Element) => {
+        const hasBlockChild = Array.from(node.children).some((child) => BLOCK_TAGS.has(child.tagName));
+        if (hasBlockChild) {
+            Array.from(node.children).forEach((child) => {
+                if (BLOCK_TAGS.has(child.tagName)) visit(child);
+            });
+            return;
+        }
+        const text = normalizeInlineText(node.textContent || "");
+        if (!text) return;
+        // 章节标题已经单独拿出来当章名了，正文里再出现一次就是重复
+        if (!seenHeading.done && node === heading && text === title) {
+            seenHeading.done = true;
+            return;
+        }
+        paragraphs.push(text);
+    };
+    Array.from(body.children).forEach((child) => {
+        if (BLOCK_TAGS.has(child.tagName)) visit(child);
+        else {
+            const text = normalizeInlineText(child.textContent || "");
+            if (text) paragraphs.push(text);
+        }
+    });
+
+    if (paragraphs.length === 0) {
+        const plain = normalizeInlineText(body.textContent || "");
+        if (plain) paragraphs.push(plain);
+    }
+    return { title, paragraphs };
+}
+
+/** 行内文本归一：把标签间的换行/缩进压成单空格，但不吞掉正常的词间空格。 */
+function normalizeInlineText(value: string): string {
+    return value.replace(/\s+/g, " ").trim();
+}
+
 /** Extract readable text from HTML/XHTML content. */
 function extractTextFromHtml(html: string): { title: string; paragraphs: string[] } {
+    const fromDom = extractTextFromDom(html);
+    if (fromDom && fromDom.paragraphs.length > 0) return fromDom;
+
     // Try to extract title from <title> or <h1>-<h3>
     const titleMatch = html.match(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/i)
         || html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
