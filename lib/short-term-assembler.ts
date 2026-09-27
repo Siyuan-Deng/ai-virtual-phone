@@ -30,6 +30,7 @@ import { loadChatOfflineProjectionEntries } from "./chat-offline-storage";
 import { loadCheckPhoneProjectionEntries } from "./checkphone-storage";
 import { formatShoppingPaymentRequestHistory } from "./shopping-payment-request";
 import { loadCustomAppTimelineEntries } from "./custom-app-storage";
+import { formatReadingAnnotationMemo, loadReadingAnnotationMemos } from "./reading-memory";
 import {
     canCharacterSeeMomentPost,
     getVisibleMomentCommentsForCharacter,
@@ -51,8 +52,8 @@ function formatPhotoDirectiveForPrompt(msg: ChatMessage): string {
 
 export type NativeTimelineEntry = {
     id: string;
-    sourceApp: "chat" | "moments" | "story" | "vn" | "map" | "game" | "diary" | "xiaohongshu" | "interview_magazine" | "cocreate" | "checkphone" | "custom_app";
-    sourceDetail?: "direct" | "group" | "system" | "story" | "chat_offline" | "game" | "diary_entry" | "notewall" | "xiaohongshu" | "black_market_theater" | "interview_issue" | "interview_shared_issue" | "cocreate_project" | "checkphone" | "custom_app_event"; // chat sub-type: 1:1 vs group chat vs system note
+    sourceApp: "chat" | "moments" | "story" | "vn" | "map" | "game" | "diary" | "xiaohongshu" | "interview_magazine" | "cocreate" | "checkphone" | "custom_app" | "reading";
+    sourceDetail?: "direct" | "group" | "system" | "story" | "chat_offline" | "game" | "diary_entry" | "notewall" | "xiaohongshu" | "black_market_theater" | "interview_issue" | "interview_shared_issue" | "cocreate_project" | "checkphone" | "custom_app_event" | "reading_annotation"; // chat sub-type: 1:1 vs group chat vs system note
     authorType?: "user" | "character" | "npc"; // who authored this entry
     postAuthorType?: "user" | "character"; // for moments: who owns the parent post
     sessionId?: string;
@@ -792,6 +793,24 @@ export function loadNativeTimeline(
                 timeAware,
                 timestampOptions,
             }),
+        });
+    }
+
+    // ── Reading annotations ──
+    // 只进批注，不进荧光笔/划线——标记不带信息量，不该占记忆。
+    for (const memo of loadReadingAnnotationMemos()) {
+        if (memo.characterId !== characterId) continue;
+        if (options?.afterTimestamp && memo.createdAt <= options.afterTimestamp) continue;
+        entries.push({
+            id: `reading_anno_${memo.id}`,
+            sourceApp: "reading",
+            sourceDetail: "reading_annotation",
+            authorType: memo.authorType,
+            timestamp: memo.createdAt,
+            content: formatStoredPromptEventContent(
+                formatReadingAnnotationMemo(memo, { userName, characterName: charName }),
+                { label: "批注", timestamp: memo.createdAt, timeAware, timestampOptions },
+            ),
         });
     }
 

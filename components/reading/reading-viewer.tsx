@@ -19,6 +19,7 @@ import {
 } from "@/lib/reading-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { loadReadingMarks, saveReadingMark, deleteReadingMark } from "@/lib/reading-marks";
+import { appendReadingAnnotationMemos, deleteReadingAnnotationMemo, type ReadingAnnotationMemo } from "@/lib/reading-memory";
 import { textOffsetWithin } from "./reading-selection";
 import { isUserAnnotation, type ReadingMark, type ReadingMarkStyle } from "@/lib/reading-types";
 import { generateAnnotationBatch, generateReadingChat, parseReadingDiscussResponse, type ReadingDiscussAction, type ReadingDiscussContext } from "@/lib/reading-engine";
@@ -557,6 +558,22 @@ export function ReadingViewer({ book, onBack }: Props) {
         };
     }, [captureSelection]);
 
+    /** 批注落库后同步往记忆日志追一条。没有共读角色时不写——没人可记。 */
+    const toAnnotationMemos = (list: ReadingAnnotation[]): ReadingAnnotationMemo[] =>
+        list
+            .filter(annotation => annotation.characterId)
+            .map(annotation => ({
+                id: annotation.id,
+                characterId: annotation.characterId,
+                bookTitle: book.title,
+                chapterIndex: annotation.chapterIndex,
+                chapterTitle: chapters.find(chapter => chapter.index === annotation.chapterIndex)?.title || "",
+                authorType: annotation.authorType === "user" ? "user" as const : "character" as const,
+                quote: annotation.quote,
+                content: annotation.content,
+                createdAt: annotation.createdAt,
+            }));
+
     const saveMyAnnotation = async () => {
         const text = myAnnotationText.trim();
         if (!text || !pendingQuote) return;
@@ -574,6 +591,7 @@ export function ReadingViewer({ book, onBack }: Props) {
             quote: pendingQuote.text,
         };
         await saveAnnotation(annotation);
+        appendReadingAnnotationMemos(toAnnotationMemos([annotation]));
         setAnnotations(prev => [...prev, annotation]);
         setShowMyAnnotation(false);
         setMyAnnotationText("");
@@ -1103,6 +1121,7 @@ export function ReadingViewer({ book, onBack }: Props) {
 
             if (newAnnotations.length > 0) {
                 await saveAnnotations(newAnnotations);
+                appendReadingAnnotationMemos(toAnnotationMemos(newAnnotations));
                 setAnnotations((prev) => {
                     const merged = new Map(prev.map((annotation) => [annotation.id, annotation]));
                     for (const annotation of newAnnotations) merged.set(annotation.id, annotation);
@@ -1325,6 +1344,7 @@ export function ReadingViewer({ book, onBack }: Props) {
 
     const handleDeleteReadingAnnotation = useCallback(async (annotationId: string) => {
         await deleteAnnotation(annotationId);
+        deleteReadingAnnotationMemo(annotationId);
         setAnnotations((prev) => prev.filter((annotation) => annotation.id !== annotationId));
         setActiveAnnotationId(null);
     }, []);
@@ -2988,6 +3008,7 @@ export function ReadingViewer({ book, onBack }: Props) {
                                             </span>
                                             <button type="button" onClick={() => {
                                                 void deleteAnnotation(annotation.id);
+                                                deleteReadingAnnotationMemo(annotation.id);
                                                 setAnnotations(prev => prev.filter(item => item.id !== annotation.id));
                                             }}>删除</button>
                                         </div>
