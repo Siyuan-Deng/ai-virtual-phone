@@ -48,4 +48,11 @@ export type ReadingAnnotation = {
     characterName: string;
     content: string;
     createdAt: string;
+    /** 批注作者。缺省即角色批注——存量数据没有这个字段，读出来仍按角色处理。
+     *  用户批注沿用 characterId/characterName 记录「这条是写给哪个角色看的」。 */
+    authorType?: "user" | "character";
 };
+
+export function isUserAnnotation(annotation: Pick<ReadingAnnotation, "authorType">): boolean {
+    return annotation.authorType === "user";
+}

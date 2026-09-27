@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from "react";
-import { Bot, ChevronDown, ChevronRight, Languages, Menu, Minus, PenLine, Rocket, SendHorizontal, X, ZoomIn } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, Highlighter, Languages, Menu, Minus, PenLine, Rocket, SendHorizontal, X, ZoomIn } from "lucide-react";
 import {
     loadChapters,
     loadProgress,
@@ -17,6 +17,7 @@ import {
     saveReadingInteractionConfig,
     DEFAULT_READING_INTERACTION_CONFIG,
 } from "@/lib/reading-storage";
+import { resolveUserIdentity } from "@/lib/settings-storage";
 import { generateAnnotationBatch, generateReadingChat, parseReadingDiscussResponse, type ReadingDiscussAction, type ReadingDiscussContext } from "@/lib/reading-engine";
 import { loadChatMessages, pushChatMessage, deleteChatMessage, editChatMessage, loadChatContacts, createOrGetSession, isReadingDiscussMessage } from "@/lib/chat-storage";
 import type { ChatMessage, ChatSession } from "@/lib/chat-storage";
@@ -248,6 +249,9 @@ export function ReadingViewer({ book, onBack }: Props) {
     const [annotations, setAnnotations] = useState<ReadingAnnotation[]>([]);
     const [generating, setGenerating] = useState(false);
     const [companionId, setCompanionId] = useState<string | null>(null);
+    const [showMyAnnotation, setShowMyAnnotation] = useState(false);
+    const [myAnnotationParagraph, setMyAnnotationParagraph] = useState(0);
+    const [myAnnotationText, setMyAnnotationText] = useState("");
     const [immersive, setImmersive] = useState(true);
     const [showCharPicker, setShowCharPicker] = useState(false);
     const [charPickerClosing, setCharPickerClosing] = useState(false);
@@ -385,6 +389,11 @@ export function ReadingViewer({ book, onBack }: Props) {
         setScrollFraction(actual);
     }, []);
     const currentChapter = chapters[chapterIndex];
+    // 批注署名用绑定的用户身份，不写死
+    const userDisplayName = useMemo(
+        () => resolveUserIdentity(companionId || undefined, "reading")?.name?.trim() || "我",
+        [companionId],
+    );
     const txtPagesChapterIndex = txtPages[0]?.find((item) => item.kind !== "gap")?.chapterIndex ?? txtPages[0]?.[0]?.chapterIndex;
     const txtPagesReadyForCurrentChapter = !isPdf && !isScrollMode && txtPages.length > 0 && txtPagesChapterIndex === chapterIndex;
     const showTxtLoading = !isPdf && (
@@ -408,11 +417,33 @@ export function ReadingViewer({ book, onBack }: Props) {
         );
     };
 
+    const saveMyAnnotation = async () => {
+        const text = myAnnotationText.trim();
+        if (!text || !currentChapter) return;
+        const annotation: ReadingAnnotation = {
+            id: `ann_user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            bookId: book.id,
+            chapterIndex,
+            paragraphIndex: myAnnotationParagraph,
+            // 用户批注仍记录当前共读的角色，便于「这条是写给谁看的」
+            characterId: companionId || "",
+            characterName: "",
+            content: text,
+            createdAt: new Date().toISOString(),
+            authorType: "user",
+        };
+        await saveAnnotation(annotation);
+        setAnnotations(prev => [...prev, annotation]);
+        setShowMyAnnotation(false);
+        setMyAnnotationText("");
+    };
+
     // 批注块（翻页与滚动模式共用）：长按呼出 复制/删除 菜单
     const renderAnnotationItem = (annotation: ReadingAnnotation) => (
         <div
             key={annotation.id}
             className="reading-annotation reading-annotation-interactive"
+            data-author={annotation.authorType === "user" ? "user" : "character"}
             data-no-nav="true"
             onPointerDown={() => {
                 longPressTimer.current = setTimeout(() => {
@@ -428,7 +459,9 @@ export function ReadingViewer({ book, onBack }: Props) {
                 if (activeAnnotationId && activeAnnotationId !== annotation.id) setActiveAnnotationId(null);
             }}
         >
-            <span className="reading-annotation-name">{annotation.characterName}</span>
+            <span className="reading-annotation-name">
+                {annotation.authorType === "user" ? userDisplayName : annotation.characterName}
+            </span>
             <ReadingAnnotationContent
                 text={annotation.content}
                 bilingualEnabled={bilingualTranslationEnabled}
@@ -463,8 +496,10 @@ export function ReadingViewer({ book, onBack }: Props) {
                 item.kind === "gap"
                     ? <div key={i} className="reading-line-gap" />
                     : item.kind === "annotation"
-                        ? <div key={i} className="reading-annotation">
-                            <span className="reading-annotation-name">{item.annotation.characterName}</span>
+                        ? <div key={i} className="reading-annotation" data-author={item.annotation.authorType === "user" ? "user" : "character"}>
+                            <span className="reading-annotation-name">
+                                {item.annotation.authorType === "user" ? userDisplayName : item.annotation.characterName}
+                            </span>
                             <span className="reading-annotation-text">{item.annotation.content}</span>
                         </div>
                         : <p key={i} className={`reading-line${item.indent ? " reading-line-indent" : ""}${item.segEnd ? " reading-line-seg-end" : ""}`}>{item.text}</p>
@@ -2352,6 +2387,19 @@ export function ReadingViewer({ book, onBack }: Props) {
                             <PenLine size={22} strokeWidth={1.7} />
                             <span>写批注</span>
                         </button>
+                        <button
+                            type="button"
+                            className="reading-footer-icon-btn"
+                            onClick={() => {
+                                setMyAnnotationParagraph(0);
+                                setMyAnnotationText("");
+                                setShowMyAnnotation(true);
+                            }}
+                            disabled={!currentChapter || currentChapter.paragraphs.length === 0}
+                        >
+                            <Highlighter size={22} strokeWidth={1.7} />
+                            <span>我的批注</span>
+                        </button>
                         {isPdf && (
                             <button
                                 type="button"
@@ -2652,6 +2700,42 @@ export function ReadingViewer({ book, onBack }: Props) {
                                 <span>{annotationError}</span>
                             </p>
                         )}
+                    </div>
+                </ContentDialog>
+            )}
+            {showMyAnnotation && currentChapter && (
+                <ContentDialog
+                    title="我的批注"
+                    confirmLabel="保存"
+                    cancelLabel="取消"
+                    onConfirm={() => { void saveMyAnnotation(); }}
+                    onCancel={() => setShowMyAnnotation(false)}
+                >
+                    <div className="reading-settings-grid">
+                        <label className="reading-settings-label">
+                            <span>批注哪一段</span>
+                            <select
+                                className="reading-my-annotation-select"
+                                value={myAnnotationParagraph}
+                                onChange={(e) => setMyAnnotationParagraph(Number(e.target.value))}
+                            >
+                                {currentChapter.paragraphs.map((text, index) => (
+                                    <option key={index} value={index}>
+                                        {`${index + 1}. ${text.slice(0, 24)}${text.length > 24 ? "…" : ""}`}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                        <div className="reading-my-annotation-quote">
+                            {currentChapter.paragraphs[myAnnotationParagraph] || ""}
+                        </div>
+                        <textarea
+                            className="reading-my-annotation-input"
+                            value={myAnnotationText}
+                            onChange={(e) => setMyAnnotationText(e.target.value)}
+                            placeholder="写下你对这一段的想法……"
+                            rows={4}
+                        />
                     </div>
                 </ContentDialog>
             )}

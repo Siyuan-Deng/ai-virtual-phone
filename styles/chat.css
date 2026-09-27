@@ -3922,6 +3922,48 @@
 .reading-annotation-bilingual-toggle {
   margin-top: 3px;
 }
+/* 用户批注：与角色批注左右错开、配色区分，便于一眼分辨是谁写的 */
+.reading-annotation[data-author="user"] {
+  margin-left: 22px;
+  margin-right: 4px;
+  background: #e7f0ff;
+  transform: rotate(0.3deg);
+  box-shadow:
+    1px 2px 6px rgba(20, 40, 80, 0.08),
+    inset 0 -1px 0 rgba(60, 100, 170, 0.1);
+}
+.reading-annotation[data-author="user"] .reading-annotation-name {
+  color: #33507f;
+}
+.reading-annotation[data-author="user"] .reading-annotation-text {
+  color: #1e3050;
+}
+.reading-my-annotation-select,
+.reading-my-annotation-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--reading-warm-card-border, #f0e8da);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.7);
+  color: inherit;
+  font: inherit;
+  padding: 8px 9px;
+  outline: none;
+}
+.reading-my-annotation-input {
+  resize: vertical;
+  line-height: 1.6;
+}
+.reading-my-annotation-quote {
+  padding: 8px 10px;
+  border-left: 3px solid rgba(120, 100, 70, 0.35);
+  background: rgba(120, 100, 70, 0.06);
+  font-size: calc(12.5px*var(--app-text-scale,1));
+  line-height: 1.6;
+  color: rgba(70, 58, 42, 0.85);
+  max-height: 96px;
+  overflow: auto;
+}
 .reading-annotation-translation {
   margin-top: 4px;
   font-family: var(--reading-annotation-font-family, var(--reading-font-family, var(--app-font-family)));
