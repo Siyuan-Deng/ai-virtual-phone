@@ -167,6 +167,38 @@ function formatBatchChapterContent(targets: AnnotationTarget[]): string {
     return targets.map((target, index) => `[${index + 1}] ${target.text}`).join("\n\n");
 }
 
+/** 角色批注锚定片段的长度下限/上限。下限挡住「的」这种没有指向性的锚点，
+ *  上限比提示词里写的宽松一些：模型多抄几个字仍然应该认，只是别整段照抄。 */
+const ANCHOR_MIN_LENGTH = 2;
+const ANCHOR_PROMPT_MAX_LENGTH = 30;
+const ANCHOR_PARSE_MAX_LENGTH = 60;
+
+/** 在段落里定位模型给的片段。原样找不到时按去空白的形式再找一次，
+ *  还是找不到就返回 null，这条批注退回整段批注。 */
+function locateAnchor(paragraph: string, rawQuote: string): { quote: string; start: number; end: number } | null {
+    const quote = rawQuote.trim();
+    if (quote.length < ANCHOR_MIN_LENGTH || quote.length > ANCHOR_PARSE_MAX_LENGTH) return null;
+    const direct = paragraph.indexOf(quote);
+    if (direct >= 0) return { quote, start: direct, end: direct + quote.length };
+
+    const compact = quote.replace(/\s+/g, "");
+    if (compact.length < ANCHOR_MIN_LENGTH) return null;
+    // 段落里逐字扫描，跳过空白后逐字比对，命中即得到原文中的真实区间
+    for (let start = 0; start < paragraph.length; start += 1) {
+        let cursor = start;
+        let matched = 0;
+        while (cursor < paragraph.length && matched < compact.length) {
+            const ch = paragraph[cursor];
+            if (/\s/.test(ch)) { cursor += 1; continue; }
+            if (ch !== compact[matched]) break;
+            cursor += 1;
+            matched += 1;
+        }
+        if (matched === compact.length) return { quote: paragraph.slice(start, cursor), start, end: cursor };
+    }
+    return null;
+}
+
 /** 批注密度要求。拼在 chapterContent 末尾而不是写进预设条目：预设属于用户数据，
  *  克隆过预设的人拿不到预设侧的改动，引擎侧拼接才对所有预设都生效。
  *  interval <= 0 时返回空串，提示词与加此设置之前逐字一致。 */
@@ -181,6 +213,20 @@ function formatAnnotationDensityHint(paragraphCount: number, interval: number): 
         + `本批总共写 ${target} 条左右（可以上下浮动一两条）。`,
         "宁可少写也不要为了凑数而评论平淡的段落；挑最值得说的那几段。",
         "</annotation_density>",
+    ].join("\n");
+}
+
+/** 批注锚点要求。和密度要求一样拼在 chapterContent 末尾，不写进预设：
+ *  克隆过预设的人拿不到预设侧的改动，引擎侧拼接才对所有预设都生效。 */
+function formatAnnotationAnchorHint(): string {
+    return [
+        "",
+        "",
+        "<annotation_anchor>",
+        `每条批注请锚定到原文里的一个片段，写成：[批注:段落序号|原文片段]批注内容[/批注]`,
+        `「原文片段」必须逐字抄自该段原文，${ANCHOR_MIN_LENGTH} 到 ${ANCHOR_PROMPT_MAX_LENGTH} 字，不要跨段。`,
+        "挑你真正想说的那一句，而不是整段。抄不准原文时可以退回旧写法 [批注:段落序号]，仍然有效。",
+        "</annotation_anchor>",
     ].join("\n");
 }
 
@@ -314,7 +360,8 @@ export async function generateAnnotationBatch(
         bookTitle: book.title,
         chapterTitle: batchTitle,
         chapterContent: formatBatchChapterContent(targets)
-            + formatAnnotationDensityHint(targets.length, loadReadingInteractionConfig().annotationInterval),
+            + formatAnnotationDensityHint(targets.length, loadReadingInteractionConfig().annotationInterval)
+            + formatAnnotationAnchorHint(),
         annotationHistory: formatBatchAnnotationHistory(existingAnnotations, targets),
     });
     if (!resolved) throw new Error("未找到 API 配置，请在设置中绑定 API");
@@ -333,15 +380,16 @@ export async function generateAnnotationBatch(
     if (!responseText) throw new Error("API 返回空内容");
     if (responseText.includes("[无批注]")) return [];
 
-    // Parse [批注:N]...[/批注]
-    const pattern = /\[批注[:：](\d+)\]([\s\S]*?)\[\/批注\]/g;
+    // Parse [批注:N|原文片段]...[/批注]；片段可省略，老格式 [批注:N] 照样认
+    const pattern = /\[批注[:：](\d+)(?:\s*[|｜]\s*([^\]]*))?\]([\s\S]*?)\[\/批注\]/g;
     const results: ReadingAnnotation[] = [];
     let match;
     while ((match = pattern.exec(responseText)) !== null) {
         const relativeIndex = parseInt(match[1], 10) - 1;
-        const content = match[2].trim();
+        const content = match[3].trim();
         const target = targets[relativeIndex];
         if (content && target) {
+            const anchor = match[2] ? locateAnchor(target.text, match[2]) : null;
             results.push({
                 id: `ra_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
                 bookId: book.id,
@@ -351,6 +399,7 @@ export async function generateAnnotationBatch(
                 characterName: character.name,
                 content,
                 createdAt: new Date().toISOString(),
+                ...(anchor ? { quote: anchor.quote, quoteStart: anchor.start, quoteEnd: anchor.end } : {}),
             });
         }
     }
@@ -375,7 +424,8 @@ export async function previewReadingAnnotationPrompt(
         bookTitle: book.title,
         chapterTitle: chapter.title,
         chapterContent: formatBatchChapterContent(targets)
-            + formatAnnotationDensityHint(targets.length, loadReadingInteractionConfig().annotationInterval),
+            + formatAnnotationDensityHint(targets.length, loadReadingInteractionConfig().annotationInterval)
+            + formatAnnotationAnchorHint(),
         annotationHistory: formatBatchAnnotationHistory(existingAnnotations, targets),
     });
     if (!resolved?.apiConfig) throw new Error("未找到 API 配置，请在设置中绑定 API");

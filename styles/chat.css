@@ -3919,6 +3919,19 @@
   white-space: pre-wrap;
   color: #4a3d1a;
 }
+/* 批注锚定的原文片段：角色批注来自 [批注:段落|片段]，用户批注来自选中的那段 */
+.reading-annotation-quote {
+  display: block;
+  padding-left: 8px;
+  border-left: 2px solid rgba(150, 120, 40, 0.45);
+  font-family: var(--reading-annotation-font-family, var(--reading-font-family, var(--app-font-family)));
+  font-size: calc(10.8px*var(--app-text-scale,1));
+  line-height: 1.6;
+  color: rgba(90, 72, 24, 0.72);
+}
+.reading-annotation[data-author="user"] .reading-annotation-quote {
+  font-family: var(--reading-user-annotation-font-family, var(--reading-annotation-font-family, var(--reading-font-family, var(--app-font-family))));
+}
 .reading-annotation-bilingual-toggle {
   margin-top: 3px;
 }
@@ -7314,13 +7327,11 @@
 }
 
 /* ── 阅读：选区菜单 / 荧光笔 / 划线 ── */
-/* 选字菜单固定停在页脚上方：iOS 的 Copy / Look Up 条永远贴着选区出现，
-   跟着选区走一定会撞上（而网页没法关掉那条系统菜单），索性错开位置。 */
+/* 选字菜单默认走选区上方（iOS 的 Copy / Look Up 条永远贴在选区下方，
+   而网页没法关掉那条系统菜单）；上方塞不下时退回页脚上方。位置由内联样式给。 */
 .reading-selection-menu {
   position: absolute;
-  left: 50%;
   z-index: 60;
-  transform: translateX(-50%);
   display: flex;
   gap: 2px;
   padding: 4px;
