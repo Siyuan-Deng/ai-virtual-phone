@@ -20,6 +20,8 @@ import {
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { loadReadingMarks, saveReadingMark, deleteReadingMark } from "@/lib/reading-marks";
 import { appendReadingAnnotationMemos, deleteReadingAnnotationMemo, type ReadingAnnotationMemo } from "@/lib/reading-memory";
+import { annotationExportFileName, buildAnnotationMarkdown } from "@/lib/reading-export";
+import { downloadFile } from "@/lib/download-utils";
 import { textOffsetWithin } from "./reading-selection";
 import { isUserAnnotation, type ReadingMark, type ReadingMarkStyle } from "@/lib/reading-types";
 import { generateAnnotationBatch, generateReadingChat, parseReadingDiscussResponse, summarizeReadingRange, type ReadingDiscussAction, type ReadingDiscussContext } from "@/lib/reading-engine";
@@ -287,6 +289,7 @@ export function ReadingViewer({ book, onBack }: Props) {
     const [showMyAnnotation, setShowMyAnnotation] = useState(false);
     const [showCharAnnotationMenu, setShowCharAnnotationMenu] = useState(false);
     const [showMyMarksPanel, setShowMyMarksPanel] = useState(false);
+    const [exportNote, setExportNote] = useState("");
     const [showRangeSummary, setShowRangeSummary] = useState(false);
     const [summaryRange, setSummaryRange] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
     const [summaryDraft, setSummaryDraft] = useState("");
@@ -579,6 +582,28 @@ export function ReadingViewer({ book, onBack }: Props) {
                 content: annotation.content,
                 createdAt: annotation.createdAt,
             }));
+
+    /** 导出全书批注。state 里的 annotations 只覆盖读过的章节，这里重新按章全量取一遍。 */
+    const exportAnnotations = async () => {
+        setExportNote("正在整理…");
+        try {
+            const groups = await Promise.all(chapters.map(chapter => loadAnnotations(book.id, chapter.index)));
+            const markdown = buildAnnotationMarkdown({
+                book,
+                chapters,
+                annotations: groups.flat(),
+                marks,
+                userName: userDisplayName,
+            });
+            await downloadFile(
+                new Blob([markdown], { type: "text/markdown;charset=utf-8" }),
+                annotationExportFileName(book),
+            );
+            setExportNote("");
+        } catch (err) {
+            setExportNote(err instanceof Error ? err.message : "导出失败");
+        }
+    };
 
     const saveMyAnnotation = async () => {
         const text = myAnnotationText.trim();
@@ -3082,6 +3107,16 @@ export function ReadingViewer({ book, onBack }: Props) {
                     onCancel={() => setShowMyMarksPanel(false)}
                 >
                     <div className="reading-settings-grid">
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => { void exportAnnotations(); }}
+                        >
+                            导出全书批注（Markdown）
+                        </button>
+                        {exportNote && (
+                            <div className="reading-settings-inline-note"><span>{exportNote}</span></div>
+                        )}
                         {(() => {
                             const myAnnotations = annotations.filter(a => a.chapterIndex === chapterIndex && isUserAnnotation(a));
                             // 已经写了批注的标记不再单独列一条：批注那条里就带着这段原文
