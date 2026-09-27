@@ -167,6 +167,23 @@ function formatBatchChapterContent(targets: AnnotationTarget[]): string {
     return targets.map((target, index) => `[${index + 1}] ${target.text}`).join("\n\n");
 }
 
+/** 批注密度要求。拼在 chapterContent 末尾而不是写进预设条目：预设属于用户数据，
+ *  克隆过预设的人拿不到预设侧的改动，引擎侧拼接才对所有预设都生效。
+ *  interval <= 0 时返回空串，提示词与加此设置之前逐字一致。 */
+function formatAnnotationDensityHint(paragraphCount: number, interval: number): string {
+    if (!Number.isFinite(interval) || interval <= 0 || paragraphCount <= 0) return "";
+    const target = Math.max(1, Math.round(paragraphCount / interval));
+    return [
+        "",
+        "",
+        "<annotation_density>",
+        `本批共 ${paragraphCount} 段。请控制批注密度：大约每 ${interval} 段写 1 条，`
+        + `本批总共写 ${target} 条左右（可以上下浮动一两条）。`,
+        "宁可少写也不要为了凑数而评论平淡的段落；挑最值得说的那几段。",
+        "</annotation_density>",
+    ].join("\n");
+}
+
 function formatBatchAnnotationHistory(annotations: ReadingAnnotation[], targets: AnnotationTarget[]): string {
     if (annotations.length === 0) return "（暂无批注）";
 
@@ -296,7 +313,8 @@ export async function generateAnnotationBatch(
     const resolved = await resolveReadingInput(characterId, ["reading", "annotate"], {
         bookTitle: book.title,
         chapterTitle: batchTitle,
-        chapterContent: formatBatchChapterContent(targets),
+        chapterContent: formatBatchChapterContent(targets)
+            + formatAnnotationDensityHint(targets.length, loadReadingInteractionConfig().annotationInterval),
         annotationHistory: formatBatchAnnotationHistory(existingAnnotations, targets),
     });
     if (!resolved) throw new Error("未找到 API 配置，请在设置中绑定 API");
@@ -356,7 +374,8 @@ export async function previewReadingAnnotationPrompt(
     const resolved = await resolveReadingInput(characterId, ["reading", "annotate"], {
         bookTitle: book.title,
         chapterTitle: chapter.title,
-        chapterContent: formatBatchChapterContent(targets),
+        chapterContent: formatBatchChapterContent(targets)
+            + formatAnnotationDensityHint(targets.length, loadReadingInteractionConfig().annotationInterval),
         annotationHistory: formatBatchAnnotationHistory(existingAnnotations, targets),
     });
     if (!resolved?.apiConfig) throw new Error("未找到 API 配置，请在设置中绑定 API");

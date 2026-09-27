@@ -70,6 +70,8 @@ export type ReadingInteractionConfig = {
     readingMode: ReadingViewMode;
     /** 自动批注失败时的静默重试次数（0=不重试） */
     annotationRetryCount: number;
+    /** 批注密度：大约每多少段写 1 条批注。0 = 不限（模型自己决定，等同加此设置之前的行为） */
+    annotationInterval: number;
     /** TXT 预批注：读到上一批批注阈值时提前生成下一批（TXT 按段落分批）；默认关闭，由用户手动开启 */
     autoAnnotatePrefetch: boolean;
     /** PDF 预批注：同上，但针对 PDF（按页分批）；默认关闭，由用户手动开启 */
@@ -94,6 +96,7 @@ export const DEFAULT_READING_INTERACTION_CONFIG: ReadingInteractionConfig = {
     txtEncoding: "auto",
     readingMode: "page",
     annotationRetryCount: 3,
+    annotationInterval: 0,
     autoAnnotatePrefetch: false,
     autoAnnotatePrefetchPdf: false,
     annotationPrefetchThreshold: 2 / 3,

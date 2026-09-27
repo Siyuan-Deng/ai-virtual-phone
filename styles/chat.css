@@ -4780,6 +4780,29 @@
   justify-content: center;
   gap: 16px;
 }
+.reading-interval-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: calc(13px*var(--app-text-scale,1));
+  color: rgba(72, 60, 44, 0.75);
+}
+.reading-interval-input {
+  width: 72px;
+  padding: 7px 8px;
+  text-align: center;
+  border: 1px solid var(--reading-warm-card-border, #f0e8da);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.7);
+  color: inherit;
+  font: inherit;
+  font-size: calc(15px*var(--app-text-scale,1));
+  outline: none;
+}
+.reading-interval-input:focus {
+  border-color: rgba(120, 100, 70, 0.45);
+}
 .reading-retry-btn {
   width: 34px;
   height: 34px;
