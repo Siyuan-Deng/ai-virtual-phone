@@ -7363,6 +7363,18 @@
   border-bottom: 2px solid rgba(190, 140, 60, 0.85);
 }
 /* 批注面板里按章折叠：长书里一屏列不完，当前章展开、其余收起 */
+/* 书自带封面时铺满整块，没有时仍然走下面那几种自己画的封面 */
+.reading-list-cover--image {
+  padding: 0;
+  overflow: hidden;
+  background: rgba(45, 35, 28, 0.06);
+}
+.reading-list-cover--image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 .reading-fold {
   border: 1px solid rgba(45, 35, 28, 0.08);
   border-radius: 10px;

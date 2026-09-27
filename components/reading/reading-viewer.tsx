@@ -3138,16 +3138,6 @@ export function ReadingViewer({ book, onBack }: Props) {
                     onCancel={() => setShowMyMarksPanel(false)}
                 >
                     <div className="reading-settings-grid">
-                        <button
-                            type="button"
-                            className="ui-btn ui-btn-outline"
-                            onClick={() => { void exportAnnotations(); }}
-                        >
-                            导出全书批注（Markdown）
-                        </button>
-                        {exportNote && (
-                            <div className="reading-settings-inline-note"><span>{exportNote}</span></div>
-                        )}
                         {(() => {
                             const indexes = Array.from(new Set([
                                 ...panelAnnotations.filter(isUserAnnotation).map(a => a.chapterIndex),
@@ -3274,7 +3264,6 @@ export function ReadingViewer({ book, onBack }: Props) {
                             <>
                                 <div className="reading-settings-inline-note">
                                     <span>已存的摘要</span>
-                                    <span>删掉这里的条目，记忆区里也会跟着没有</span>
                                 </div>
                                 {summaryMemos.map(memo => (
                                     <div key={memo.id} className="reading-mark-row">
@@ -3325,6 +3314,16 @@ export function ReadingViewer({ book, onBack }: Props) {
                         >
                             总结内容
                         </button>
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => { void exportAnnotations(); }}
+                        >
+                            导出全书批注（Markdown）
+                        </button>
+                        {exportNote && (
+                            <div className="reading-settings-inline-note"><span>{exportNote}</span></div>
+                        )}
                         <div className="reading-settings-inline-note">
                             <span>批注密度</span>
                             <span className="reading-interval-row">

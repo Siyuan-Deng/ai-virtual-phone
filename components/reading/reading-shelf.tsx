@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { ChevronLeft, Palette, Settings } from "lucide-react";
 import { loadBooks, addBook, deleteBook, saveChapters, loadProgress, saveRawFile } from "@/lib/reading-storage";
+import { loadReadingCover, saveReadingCover } from "@/lib/reading-appearance";
 import { decodeTxtArrayBuffer, parseTxtContent, parseEpubFile, parseMobiFile, PDF_PAGES_PER_CHAPTER } from "@/lib/reading-parser";
 import { loadReadingInteractionConfig } from "@/lib/reading-storage";
 import type { Book, BookChapter } from "@/lib/reading-types";
@@ -97,6 +98,8 @@ function buildImportError(stage: string, err: unknown, format?: Book["format"]):
 
 export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, onSaveAppearance }: Props) {
     const [books, setBooks] = useState<Book[]>([]);
+    /** bookId → 封面 objectURL；没有封面的书不在这里，走原来那种自己画的封面 */
+    const [coverUrls, setCoverUrls] = useState<Record<string, string>>({});
     const [progressMap, setProgressMap] = useState<Record<string, {
         chapterIndex: number;
         total: number;
@@ -144,6 +147,29 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
         })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    // 封面按书逐本取。串行读：这几个资源共用一个 IndexedDB，并发打开会互相 block。
+    useEffect(() => {
+        let cancelled = false;
+        const created: string[] = [];
+        (async () => {
+            const map: Record<string, string> = {};
+            for (const b of books) {
+                const blob = await loadReadingCover(b.id).catch(() => null);
+                if (cancelled) break;
+                if (!blob || blob.size === 0) continue;
+                const url = URL.createObjectURL(blob);
+                created.push(url);
+                map[b.id] = url;
+            }
+            if (cancelled) { created.forEach(url => URL.revokeObjectURL(url)); return; }
+            setCoverUrls(prev => {
+                Object.values(prev).forEach(url => URL.revokeObjectURL(url));
+                return map;
+            });
+        })();
+        return () => { cancelled = true; };
+    }, [books]);
 
     useEffect(() => {
         if (typeof window === "undefined") return;
@@ -327,6 +353,10 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
             });
             await addBook(book);
             await saveChapters(bookId, chapters);
+            if ("cover" in parsed && parsed.cover) {
+                await saveReadingCover(bookId, new Blob([parsed.cover.data], { type: parsed.cover.mime }))
+                    .catch(() => { /* 封面存不下不该挡住导入 */ });
+            }
             if (rawFile) {
                 try {
                     importStage = format === "pdf" ? "保存原始 PDF 文件" : "保存原始文件";
@@ -342,6 +372,7 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
                     await saveRawFile(bookId, rawFile);
                 } catch (saveErr) {
                     await deleteBook(bookId).catch(() => {});
+                    await saveReadingCover(bookId, null).catch(() => {});
                     const built = buildImportError(importStage, saveErr, format);
                     setImportError(built);
                     persistImportDiagnostic({
@@ -383,6 +414,7 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
     const handleDelete = async (bookId: string) => {
         if (!confirm("确定删除这本书吗？")) return;
         await deleteBook(bookId);
+        await saveReadingCover(bookId, null).catch(() => {});
         setBooks(loadBooks());
     };
 
@@ -478,10 +510,17 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
                             const layout = coverLayouts[(book.title.length + (book.author?.length || 0)) % coverLayouts.length];
                             return (
                                 <div key={book.id} className="reading-list-item" onClick={() => onOpenBook(book)}>
-                                    <div className={`reading-list-cover reading-list-cover--${gradient} reading-list-cover--${layout}`}>
-                                        <span className="reading-list-cover-author">{book.author || ""}</span>
-                                        <span className="reading-list-cover-title">{book.title}</span>
-                                    </div>
+                                    {coverUrls[book.id] ? (
+                                        <div className="reading-list-cover reading-list-cover--image">
+                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                            <img src={coverUrls[book.id]} alt="" />
+                                        </div>
+                                    ) : (
+                                        <div className={`reading-list-cover reading-list-cover--${gradient} reading-list-cover--${layout}`}>
+                                            <span className="reading-list-cover-author">{book.author || ""}</span>
+                                            <span className="reading-list-cover-title">{book.title}</span>
+                                        </div>
+                                    )}
                                     <div className="reading-list-info">
                                         <span className="reading-list-title">{book.title}</span>
                                         {book.author && <span className="reading-list-author">{book.author}</span>}

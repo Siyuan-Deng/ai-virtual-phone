@@ -229,6 +229,19 @@ export async function loadReadingAnnotationFont(): Promise<Blob | null> {
     return loadAsset(ANNOTATION_FONT_KEY);
 }
 
+/** 每本书一张封面图。和背景/字体共用同一个资源库，不新开 IndexedDB。 */
+function coverKey(bookId: string): string {
+    return `cover:${bookId}`;
+}
+
+export async function saveReadingCover(bookId: string, blob: Blob | null): Promise<void> {
+    await withBackgroundDb((db) => putAsset(db, coverKey(bookId), blob));
+}
+
+export async function loadReadingCover(bookId: string): Promise<Blob | null> {
+    return loadAsset(coverKey(bookId));
+}
+
 export async function saveReadingUserAnnotationFont(blob: Blob | null): Promise<void> {
     await withBackgroundDb((db) => putAsset(db, USER_ANNOTATION_FONT_KEY, blob));
 }

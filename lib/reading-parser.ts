@@ -41,6 +41,8 @@ export type ParsedBook = {
     title: string;
     author?: string;
     chapters: ParsedChapter[];
+    /** EPUB 里自带的封面图；没有就不给，书架退回自己画的那种封面 */
+    cover?: { data: ArrayBuffer; mime: string };
 };
 
 export type TxtDecodeResult = {
@@ -399,6 +401,8 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
     // EPUB3 的导航文档（properties="nav"）本身就是一张目录页，阅读器已经有自己的
     // 导航面板，把它当章节收进来只会在正文里多出一屏目录条目。
     const navItemIds = new Set<string>();
+    const idToMime = new Map<string, string>();
+    let coverImageId = "";
     const manifestMatch = opfXml.match(/<manifest[^>]*>([\s\S]*?)<\/manifest>/i);
     if (manifestMatch) {
         const itemTagPattern = /<item\b[^>]*>/gi;
@@ -408,8 +412,33 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
             const itemHref = tag[0].match(/\bhref="([^"]+)"/)?.[1];
             if (!id || !itemHref) continue;
             idToHref.set(id, itemHref);
+            const mime = tag[0].match(/\bmedia-type="([^"]+)"/)?.[1];
+            if (mime) idToMime.set(id, mime);
             if (/\bproperties="[^"]*\bnav\b[^"]*"/i.test(tag[0])) navItemIds.add(id);
+            // EPUB3 的封面标记
+            if (/\bproperties="[^"]*\bcover-image\b[^"]*"/i.test(tag[0])) coverImageId = id;
         }
+    }
+
+    // EPUB2 用 <meta name="cover" content="ID">；再不行就找 id/href 里带 cover 的图片
+    if (!coverImageId) {
+        const metaCover = opfXml.match(/<meta\b[^>]*\bname="cover"[^>]*>/i)?.[0];
+        const candidate = metaCover?.match(/\bcontent="([^"]+)"/)?.[1];
+        if (candidate && idToHref.has(candidate)) coverImageId = candidate;
+    }
+    if (!coverImageId) {
+        for (const [id, itemHref] of idToHref) {
+            if (!idToMime.get(id)?.startsWith("image/")) continue;
+            if (/cover/i.test(id) || /cover/i.test(itemHref)) { coverImageId = id; break; }
+        }
+    }
+
+    let cover: ParsedBook["cover"];
+    const coverHref = coverImageId ? idToHref.get(coverImageId) : undefined;
+    const coverMime = coverImageId ? idToMime.get(coverImageId) : undefined;
+    if (coverHref && coverMime?.startsWith("image/")) {
+        const data = await zip.file(rootDir + decodeURIComponent(coverHref))?.async("arraybuffer");
+        if (data && data.byteLength > 0) cover = { data, mime: coverMime };
     }
 
     // 5. Read each spine item and extract text
@@ -429,10 +458,10 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
     }
 
     if (chapters.length === 0) {
-        return { title: bookTitle, author, chapters: [{ title: "全文", paragraphs: ["（EPUB 解析失败，未找到文本内容）"] }] };
+        return { title: bookTitle, author, cover, chapters: [{ title: "全文", paragraphs: ["（EPUB 解析失败，未找到文本内容）"] }] };
     }
 
-    return { title: bookTitle, author, chapters };
+    return { title: bookTitle, author, cover, chapters };
 }
 
 /** MOBI 里章节之间是 <mbp:pagebreak/>。切开后每一块当一章，走和 EPUB 相同的取文路径。 */
