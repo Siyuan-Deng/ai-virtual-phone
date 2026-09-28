@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ChevronLeft, Palette, Settings } from "lucide-react";
+import { ChevronLeft, Palette, Settings, UserRound } from "lucide-react";
 import { loadBooks, addBook, deleteBook, saveChapters, loadProgress, saveRawFile, countAnnotationsByBook } from "@/lib/reading-storage";
 import { loadCharacters } from "@/lib/character-storage";
-import { loadReadingCover, saveReadingCover } from "@/lib/reading-appearance";
+import { deleteReadingAssetsByPrefix, loadReadingCover, saveReadingAsset, saveReadingCover } from "@/lib/reading-appearance";
+import { readingImageAssetKey, readingImageAssetPrefix } from "@/lib/reading-inline-image";
 import { decodeTxtArrayBuffer, parseTxtContent, parseEpubFile, parseMobiFile, PDF_PAGES_PER_CHAPTER } from "@/lib/reading-parser";
 import { loadReadingInteractionConfig } from "@/lib/reading-storage";
 import type { Book, BookChapter } from "@/lib/reading-types";
@@ -12,7 +13,9 @@ import type { ReadingAppearance } from "@/lib/reading-appearance";
 import { ContentDialog } from "@/components/ui/modal";
 import { ReadingAppearanceDialog, type ReadingAppearanceSaveOptions, type ReadingLoadedFonts } from "./reading-appearance-dialog";
 import { ReadingInteractionDialog } from "./reading-interaction-dialog";
+import { ReadingProfileDialog } from "./reading-profile-dialog";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
+import { READING_COVER_MAX_SIZE, compressReadingImage } from "@/lib/reading-image";
 
 type Props = {
     onOpenBook: (book: Book) => void;
@@ -22,33 +25,6 @@ type Props = {
     loadedFonts: ReadingLoadedFonts;
     onSaveAppearance: (appearance: ReadingAppearance, options: ReadingAppearanceSaveOptions) => Promise<void>;
 };
-
-/** 封面图最长边。列表里只有几十像素宽，存手机原图纯属浪费 IndexedDB。 */
-const COVER_MAX_SIZE = 900;
-
-/** 压缩用户选的封面图。和贴纸压缩同一套路：任何一步不支持就原图存下去。 */
-async function compressCoverImage(blob: Blob): Promise<Blob> {
-    if (typeof window === "undefined" || typeof createImageBitmap === "undefined" || typeof OffscreenCanvas === "undefined") return blob;
-    try {
-        const bmp = await createImageBitmap(blob);
-        let w = bmp.width;
-        let h = bmp.height;
-        if (w > COVER_MAX_SIZE || h > COVER_MAX_SIZE) {
-            const scale = COVER_MAX_SIZE / Math.max(w, h);
-            w = Math.max(1, Math.round(w * scale));
-            h = Math.max(1, Math.round(h * scale));
-        }
-        const canvas = new OffscreenCanvas(w, h);
-        const ctx = canvas.getContext("2d");
-        if (!ctx) { bmp.close(); return blob; }
-        ctx.drawImage(bmp, 0, 0, w, h);
-        bmp.close();
-        const compressed = await canvas.convertToBlob({ type: "image/webp", quality: 0.82 });
-        return compressed.size > 0 && compressed.size < blob.size ? compressed : blob;
-    } catch {
-        return blob;
-    }
-}
 
 const IMPORT_DIAG_KEY = "reading-import-diagnostic-v1";
 
@@ -137,6 +113,7 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
     const [search, setSearch] = useState("");
     const [showAppearanceDialog, setShowAppearanceDialog] = useState(false);
     const [showInteractionDialog, setShowInteractionDialog] = useState(false);
+    const [showProfileDialog, setShowProfileDialog] = useState(false);
     /** 已经有封面的书，点封面先弹这个小菜单（换 / 移除），没封面的直接开相册 */
     const [coverMenuBook, setCoverMenuBook] = useState<Book | null>(null);
     const [coverBusy, setCoverBusy] = useState(false);
@@ -276,7 +253,7 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
         const bookId = coverTargetRef.current;
         coverTargetRef.current = null;
         if (!file || !bookId) return;
-        await applyCover(bookId, await compressCoverImage(file));
+        await applyCover(bookId, await compressReadingImage(file, READING_COVER_MAX_SIZE));
     };
 
     const filteredBooks = search.trim()
@@ -448,6 +425,15 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                 await saveReadingCover(bookId, new Blob([parsed.cover.data], { type: parsed.cover.mime }))
                     .catch(() => { /* 封面存不下不该挡住导入 */ });
             }
+            const parsedImages = "images" in parsed ? parsed.images : undefined;
+            if (parsedImages && parsedImages.length > 0) {
+                importStage = "保存正文插图";
+                setImportStatus(`正在保存 ${parsedImages.length} 张插图…`);
+                for (const image of parsedImages) {
+                    // 单张图存不下不该让整本书导入失败，正文里那一格会显示成「插图加载失败」
+                    await saveReadingAsset(readingImageAssetKey(bookId, image.index), image.blob).catch(() => {});
+                }
+            }
             if (rawFile) {
                 try {
                     importStage = format === "pdf" ? "保存原始 PDF 文件" : "保存原始文件";
@@ -464,6 +450,7 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                 } catch (saveErr) {
                     await deleteBook(bookId).catch(() => {});
                     await saveReadingCover(bookId, null).catch(() => {});
+                    await deleteReadingAssetsByPrefix(readingImageAssetPrefix(bookId)).catch(() => {});
                     const built = buildImportError(importStage, saveErr, format);
                     setImportError(built);
                     persistImportDiagnostic({
@@ -506,6 +493,7 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
         if (!confirm("确定删除这本书吗？")) return;
         await deleteBook(bookId);
         await saveReadingCover(bookId, null).catch(() => {});
+        await deleteReadingAssetsByPrefix(readingImageAssetPrefix(bookId)).catch(() => {});
         setBooks(loadBooks());
     };
 
@@ -522,6 +510,9 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                         <ChevronLeft size={22} strokeWidth={2.5} />
                     </button>
                     <div className="reading-shelf-actions">
+                        <button className="reading-shelf-action-btn" type="button" onClick={() => setShowProfileDialog(true)} aria-label="阅读账号">
+                            <UserRound size={16} strokeWidth={1.7} />
+                        </button>
                         <button className="reading-shelf-action-btn" type="button" onClick={() => setShowInteractionDialog(true)} aria-label="阅读设置">
                             <Settings size={16} strokeWidth={1.7} />
                         </button>
@@ -730,6 +721,10 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
 
             {showInteractionDialog && (
                 <ReadingInteractionDialog onClose={() => setShowInteractionDialog(false)} />
+            )}
+
+            {showProfileDialog && (
+                <ReadingProfileDialog onClose={() => setShowProfileDialog(false)} />
             )}
         </div>
     );

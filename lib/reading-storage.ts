@@ -68,6 +68,8 @@ export type ReadingInteractionConfig = {
     txtEncoding: "auto" | "utf-8" | "gb18030" | "gbk" | "big5" | "utf-16le" | "utf-16be";
     /** 阅读模式：翻页 / 连续滚动 */
     readingMode: ReadingViewMode;
+    /** 翻页模式的翻页动画；关掉就是直接切到下一页 */
+    pageFlipAnimation: boolean;
     /** 自动批注失败时的静默重试次数（0=不重试） */
     annotationRetryCount: number;
     /** 批注密度：大约每多少段写 1 条批注。0 = 不限（模型自己决定，等同加此设置之前的行为） */
@@ -95,6 +97,7 @@ export const DEFAULT_READING_INTERACTION_CONFIG: ReadingInteractionConfig = {
     paragraphMode: "auto",
     txtEncoding: "auto",
     readingMode: "page",
+    pageFlipAnimation: true,
     annotationRetryCount: 3,
     annotationInterval: 0,
     autoAnnotatePrefetch: false,

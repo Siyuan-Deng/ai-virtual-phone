@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect, type CSSProperties } from "react";
 import { ChevronDown, ChevronRight, Highlighter, Languages, Menu, Minus, PenLine, Rocket, SendHorizontal, X, ZoomIn } from "lucide-react";
 import {
     loadChapters,
@@ -42,10 +42,17 @@ import { decodeTxtArrayBuffer, parsePdfPageRange, PDF_PAGES_PER_CHAPTER, parseTx
 import type { Book, BookChapter, ReadingAnnotation, ReadingProgress } from "@/lib/reading-types";
 import type { Character } from "@/lib/character-types";
 import { splitBilingualText } from "@/lib/bilingual-text";
+import {
+    parseReadingImageMarker,
+    readingImageAssetKey,
+    type ReadingImageRef,
+} from "@/lib/reading-inline-image";
+import { loadReadingAsset } from "@/lib/reading-appearance";
 
 type TxtPageItem =
     | { kind: "line"; text: string; chapterIndex: number; paragraphIndex: number; indent?: boolean; segEnd?: boolean; charStart?: number }
     | { kind: "gap"; chapterIndex: number; paragraphIndex: number }
+    | { kind: "image"; image: ReadingImageRef; chapterIndex: number; paragraphIndex: number }
     | { kind: "annotation"; annotation: ReadingAnnotation; chapterIndex: number; paragraphIndex: number };
 
 /** 菜单半宽，避免贴着某个点算出来的位置把菜单顶出屏幕 */
@@ -133,14 +140,17 @@ function buildPdfChunkTitle(startPage: number, endPage: number): string {
 
 function buildParagraphRefsFromChapters(chapters: BookChapter[]): ParagraphRef[] {
     const refs: ParagraphRef[] = chapters.flatMap((chapter, currentChapterIndex) =>
-        chapter.paragraphs.map((text, paragraphIndex) => ({
+        chapter.paragraphs.flatMap((text, paragraphIndex) => (
+            // 插图占位不是正文，不该出现在给模型的段落里，也不该被批注
+            parseReadingImageMarker(text) ? [] : [{
             absoluteIndex: 0,
             chapterIndex: currentChapterIndex,
             paragraphIndex,
             text,
             pageNum: chapter.paragraphPages?.[paragraphIndex],
             yRatio: chapter.paragraphYPositions?.[paragraphIndex],
-        })),
+        }]
+        )),
     );
 
     for (let i = 0; i < refs.length; i += 1) {
@@ -280,6 +290,8 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     const [generating, setGenerating] = useState(false);
     const [companionId, setCompanionId] = useState<string | null>(null);
     const [marks, setMarks] = useState<ReadingMark[]>([]);
+    /** 插图序号 → objectURL。只为当前正在显示的章节加载，读到哪加载到哪 */
+    const [inlineImageUrls, setInlineImageUrls] = useState<Record<number, string>>({});
     const [selectionInfo, setSelectionInfo] = useState<
         {
             text: string; chapterIndex: number; paragraphIndex: number; start: number; end: number;
@@ -397,6 +409,8 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         setTxtLayoutVersion((version) => version + 1);
     }, [appearanceKey]);
     const [txtPages, setTxtPages] = useState<TxtPageItem[][]>([]);
+    /** 一页能放下的高度，同时用来限制插图的最大高度（翻页模式） */
+    const [imageMaxHeight, setImageMaxHeight] = useState(0);
     const [scrollFraction, setScrollFraction] = useState(0);
     const [flipAnim, setFlipAnim] = useState<{ direction: 'forward' | 'backward'; items: TxtPageItem[] } | null>(null);
 
@@ -425,6 +439,8 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
 
     const companion = companionId ? (enrichedContacts.find(c => c.characterId === companionId)?.char || loadCharacters().find(c => c.id === companionId)) : null;
     const bilingualTranslationEnabled = readingConfig.bilingualTranslationEnabled === true;
+    /** 翻页动画；老配置里没有这个字段时默认开着，和加开关之前的表现一致 */
+    const flipAnimationEnabled = readingConfig.pageFlipAnimation !== false;
     const defaultTranslationExpanded = readingConfig.collapseBilingualTranslation !== true;
     const isScrollMode = !isPdf && readingConfig.readingMode === "scroll";
     // 保持 ref 与最新状态同步（供长生命周期滚动回调读取）
@@ -454,6 +470,57 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         setScrollFraction(actual);
     }, []);
     const currentChapter = chapters[chapterIndex];
+
+    /** 当前屏上会用到的插图序号。只加载这些，读完就放掉，
+     *  免得整本画册的图全挂在内存里。 */
+    const visibleImageIndices = useMemo(() => {
+        const source = isScrollMode ? windowChapters : (currentChapter ? [currentChapter] : []);
+        const indices = new Set<number>();
+        for (const chapter of source) {
+            for (const paragraph of chapter.paragraphs) {
+                const marker = parseReadingImageMarker(paragraph);
+                if (marker) indices.add(marker.index);
+            }
+        }
+        return [...indices].sort((a, b) => a - b);
+    }, [currentChapter, isScrollMode, windowChapters]);
+
+    useEffect(() => {
+        let cancelled = false;
+        const wanted = new Set(visibleImageIndices);
+        // 离开视野的先放掉（objectURL 不回收就一直占着内存）
+        setInlineImageUrls((prev) => {
+            let changed = false;
+            const next: Record<number, string> = {};
+            for (const [key, url] of Object.entries(prev)) {
+                if (wanted.has(Number(key))) next[Number(key)] = url;
+                else { URL.revokeObjectURL(url); changed = true; }
+            }
+            return changed ? next : prev;
+        });
+        void (async () => {
+            for (const index of visibleImageIndices) {
+                if (cancelled) return;
+                // 串行：这几张图和封面/字体共用一个 IndexedDB，并发打开会互相 block
+                const blob = await loadReadingAsset(readingImageAssetKey(book.id, index)).catch(() => null);
+                if (cancelled) return;
+                if (!blob || blob.size === 0) continue;
+                setInlineImageUrls((prev) => {
+                    if (prev[index]) return prev;
+                    return { ...prev, [index]: URL.createObjectURL(blob) };
+                });
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [book.id, visibleImageIndices]);
+
+    // 离开阅读器时把剩下的 objectURL 全放掉
+    useEffect(() => () => {
+        setInlineImageUrls((prev) => {
+            Object.values(prev).forEach((url) => URL.revokeObjectURL(url));
+            return {};
+        });
+    }, []);
     // 批注署名用绑定的用户身份，不写死
     const userDisplayName = useMemo(
         () => resolveUserIdentity(companionId || undefined, "reading")?.name?.trim() || "我",
@@ -476,7 +543,9 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                         ? <div key={i} className="reading-line-gap" />
                         : item.kind === "annotation"
                             ? renderAnnotationItem(item.annotation)
-                            : renderLine(item, i)
+                            : item.kind === "image"
+                                ? renderImageItem(item.image, i)
+                                : renderLine(item, i)
                 ))}
             </div>
         );
@@ -771,6 +840,22 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         </p>
     );
 
+    /** 一张正文插图。图还没读出来时先占住位置（有原始尺寸就按比例占），
+     *  否则图片加载完会把正文顶得一跳一跳。 */
+    const renderImageItem = (image: ReadingImageRef, key: number | string) => {
+        const url = inlineImageUrls[image.index];
+        // 量不出原图尺寸时按正方形占位，和分页里的算法保持一致
+        const ratio = image.width > 0 && image.height > 0 ? `${image.width} / ${image.height}` : "1 / 1";
+        return (
+            <div key={key} className="reading-inline-image" style={{ aspectRatio: ratio }}>
+                {url
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={url} alt="" />
+                    : <span className="reading-inline-image-hint">插图</span>}
+            </div>
+        );
+    };
+
     const renderStaticPage = (items: TxtPageItem[]) => (
         <div className="reading-page-content">
             {items.map((item, i) =>
@@ -783,7 +868,9 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                             </span>
                             <span className="reading-annotation-text">{item.annotation.content}</span>
                         </div>
-                        : <p key={i} className={`reading-line${item.indent ? " reading-line-indent" : ""}${item.segEnd ? " reading-line-seg-end" : ""}`}>{item.text}</p>
+                        : item.kind === "image"
+                            ? renderImageItem(item.image, i)
+                            : <p key={i} className={`reading-line${item.indent ? " reading-line-indent" : ""}${item.segEnd ? " reading-line-seg-end" : ""}`}>{item.text}</p>
             )}
         </div>
     );
@@ -2110,6 +2197,12 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         }
 
         currentChapter.paragraphs.forEach((paragraph, index) => {
+            const imageMarker = parseReadingImageMarker(paragraph);
+            if (imageMarker) {
+                tokens.push({ kind: "image", image: imageMarker, chapterIndex, paragraphIndex: index });
+                if (index < currentChapter.paragraphs.length - 1) tokens.push({ kind: "gap", chapterIndex, paragraphIndex: index });
+                return;
+            }
             const segments = paragraph.split("\n");
             // 段落内的字符游标：wrapTextToLines 不裁剪字符，各行拼接等于原段落，
             // 所以逐行累加长度就能得到每行在段落中的起始偏移（荧光笔/划线按此定位）。
@@ -2135,8 +2228,24 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         let currentPage: TxtPageItem[] = [];
         let usedHeight = 0;
 
+        /** 插图占多高：按原图比例铺满正文宽度，最高不超过一页能放下的高度。
+         *  CSS 里用同一个数当 max-height，排版和实际渲染才对得上。 */
+        const measureImageHeight = (image: ReadingImageRef) => {
+            if (image.width > 0 && image.height > 0) {
+                return Math.min(maxHeight, Math.round((maxWidth * image.height) / image.width));
+            }
+            // 量不出原始尺寸（SVG 等）：留一块方方正正的位置
+            return Math.min(maxHeight, Math.round(maxWidth));
+        };
+
         for (const token of tokens) {
-            const tokenHeight = token.kind === "gap" ? gapHeight : token.kind === "annotation" ? measureAnnotationHeight(token.annotation) : lineHeight;
+            const tokenHeight = token.kind === "gap"
+                ? gapHeight
+                : token.kind === "annotation"
+                    ? measureAnnotationHeight(token.annotation)
+                    : token.kind === "image"
+                        ? measureImageHeight(token.image)
+                        : lineHeight;
             if (token.kind === "gap" && currentPage.length === 0) continue;
 
             if (currentPage.length > 0 && usedHeight + tokenHeight > maxHeight) {
@@ -2155,6 +2264,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         if (pages.length === 0) pages.push([{ kind: "line", text: "", chapterIndex, paragraphIndex: 0 }]);
 
         lastTxtPaginationSignatureRef.current = paginationSignature;
+        setImageMaxHeight((prev) => (prev === maxHeight ? prev : maxHeight));
         setTxtPages(pages);
     }, [annotations, bilingualTranslationEnabled, chapterIndex, currentChapter, isAnnotationTranslationExpanded, isPdf, isScrollMode, txtLayoutVersion]);
 
@@ -2200,7 +2310,10 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         if (direction === 'forward' && !canForward) return;
         if (direction === 'backward' && !canBackward) return;
 
-        if (currentItems && currentItems.length > 0) setFlipAnim({ direction, items: currentItems });
+        // 关掉动画就直接切页：flipAnim 是那层翻页覆盖物，不设它就没有动画
+        if (flipAnimationEnabled && currentItems && currentItems.length > 0) {
+            setFlipAnim({ direction, items: currentItems });
+        }
 
         if (direction === 'forward') {
             if (txtPage < txtTotalPages - 1) setTxtPage(p => p + 1);
@@ -2209,7 +2322,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             if (txtPage > 0) setTxtPage(p => p - 1);
             else goToChapter(chapterIndex - 1, true);
         }
-    }, [flipAnim, isPdf, txtPages, txtPage, txtTotalPages, chapterIndex, chapters.length, selectionInfo]);
+    }, [flipAnim, flipAnimationEnabled, isPdf, txtPages, txtPage, txtTotalPages, chapterIndex, chapters.length, selectionInfo]);
 
     const txtDisplayedPage = Math.min(txtPage + 1, txtTotalPages);
     const currentPageCount = isPdf ? Math.max(1, pdfTotalPages || 1) : Math.max(1, txtTotalPages);
@@ -2514,7 +2627,11 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     };
 
     return (
-        <div ref={surfaceRef} className="reading-app-surface absolute inset-0 z-[100] flex flex-col bg-[var(--c-page-body-bg)]" data-immersive={immersive} style={{ paddingTop: "var(--page-header-safe-top, 48px)" }} onClick={handleSurfaceClick}>
+        <div ref={surfaceRef} className="reading-app-surface absolute inset-0 z-[100] flex flex-col bg-[var(--c-page-body-bg)]" data-immersive={immersive} style={{
+            paddingTop: "var(--page-header-safe-top, 48px)",
+            // 插图最高不超过一页能放下的高度，和分页算出来的那个数是同一个
+            ...(imageMaxHeight > 0 ? { ["--reading-image-max-height" as "--reading-image-max-height"]: `${imageMaxHeight}px` } : {}),
+        } as CSSProperties} onClick={handleSurfaceClick}>
             {/* Page flip overlay */}
             {flipAnim && (
                 <>
@@ -2643,6 +2760,14 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                         {windowChapters.map((chapter) => (
                             <div key={chapter.id} data-chapter-index={chapter.index}>
                                 {chapter.paragraphs.map((paragraph, pIndex) => {
+                                    const imageMarker = parseReadingImageMarker(paragraph);
+                                    if (imageMarker) {
+                                        return (
+                                            <div key={pIndex} className="reading-scroll-block">
+                                                {renderImageItem(imageMarker, `img-${chapter.index}-${pIndex}`)}
+                                            </div>
+                                        );
+                                    }
                                     const segmentCount = paragraph.split("\n").length;
                                     const paragraphAnnotations = annotations.filter(
                                         (annotation) => annotation.chapterIndex === chapter.index && annotation.paragraphIndex === pIndex

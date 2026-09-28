@@ -140,6 +140,16 @@ export function ReadingInteractionDialog({ onClose }: Props) {
                             </button>
                         ))}
                     </div>
+                    <div className="reading-settings-inline-note">
+                        <span>翻页动画</span>
+                        <Toggle
+                            checked={config.pageFlipAnimation !== false}
+                            onChange={(checked) => setConfig((prev) => ({ ...prev, pageFlipAnimation: checked }))}
+                        />
+                    </div>
+                    <p className="reading-settings-inline-note">
+                        <span>关掉就直接切到下一页，没有翻页动效。只影响翻页模式。</span>
+                    </p>
                 </section>
 
                 <section className="reading-settings-group">

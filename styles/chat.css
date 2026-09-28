@@ -7499,3 +7499,65 @@
   word-break: break-all;
   color: rgba(60, 48, 35, 0.9);
 }
+
+/* 阅读账号：头像 + ID */
+.reading-profile-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.reading-profile-avatar {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 1px dashed rgba(45, 35, 28, 0.22);
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--reading-warm-brown-light, #a39487);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.reading-profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.reading-profile-avatar:active { transform: scale(0.97); }
+.reading-profile-fields {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 正文插图。高度上限用分页算出来的「一页能放下多少」，
+   这样翻页模式下图片不会被切成两页；滚动模式没有这个变量，退回 70vh。 */
+.reading-inline-image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-height: var(--reading-image-max-height, 70vh);
+  margin: 2px 0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(45, 35, 28, 0.05);
+}
+.reading-inline-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.reading-inline-image-hint {
+  font-size: calc(10px*var(--app-text-scale,1));
+  letter-spacing: 0.1em;
+  color: var(--reading-warm-ink-tertiary, #999);
+}

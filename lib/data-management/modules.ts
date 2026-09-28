@@ -256,6 +256,7 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
           "ai_phone_reading_appearance_v1",
           "ai_phone_reading_marks_v1",
           "ai_phone_reading_annotation_memos_v1",
+          "ai_phone_reading_profile_v1",
           "ai_phone_menstrual_config_v1",
           "ai_phone_menstrual_records_v1",
           "ai_phone_menstrual_period_care_triggers_v1",

@@ -303,6 +303,34 @@ export async function loadReadingAnnotationFont(): Promise<Blob | null> {
     return loadAsset(ANNOTATION_FONT_KEY);
 }
 
+/** 通用出入口：其它模块（比如阅读账号头像）往同一个资源库里存东西，
+ *  不必各自再开一个 IndexedDB。 */
+export async function saveReadingAsset(key: string, blob: Blob | null): Promise<void> {
+    await withBackgroundDb((db) => putAsset(db, key, blob));
+}
+
+export async function loadReadingAsset(key: string): Promise<Blob | null> {
+    return loadAsset(key);
+}
+
+/** 按前缀批量删：删书时要把这本书的插图一起清掉，
+ *  否则图片会永远留在资源库里，用户也看不见、删不掉。 */
+export async function deleteReadingAssetsByPrefix(prefix: string): Promise<void> {
+    await withBackgroundDb((db) => new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(BG_STORE_NAME, "readwrite");
+        const store = tx.objectStore(BG_STORE_NAME);
+        const request = store.openKeyCursor();
+        request.onsuccess = () => {
+            const cursor = request.result;
+            if (!cursor) return;
+            if (typeof cursor.key === "string" && cursor.key.startsWith(prefix)) store.delete(cursor.key);
+            cursor.continue();
+        };
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    }));
+}
+
 /** 每本书一张封面图。和背景/字体共用同一个资源库，不新开 IndexedDB。 */
 function coverKey(bookId: string): string {
     return `cover:${bookId}`;

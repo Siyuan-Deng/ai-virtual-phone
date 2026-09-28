@@ -1,5 +1,8 @@
 // lib/reading-parser.ts — File parsing for TXT, EPUB, PDF.
 
+import { buildReadingImageMarker, parseReadingImageMarker } from "./reading-inline-image";
+import { READING_INLINE_IMAGE_MAX_SIZE, compressReadingImage } from "./reading-image";
+
 // ── PDF.js CDN loader ──
 const PDFJS_VERSION = "3.11.174"; // stable version available on cdnjs
 const PDFJS_CDN = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}`;
@@ -45,6 +48,16 @@ export type ParsedBook = {
     chapters: ParsedChapter[];
     /** EPUB 里自带的封面图；没有就不给，书架退回自己画的那种封面 */
     cover?: { data: ArrayBuffer; mime: string };
+    /** 正文插图。段落里用 \uFFFCimg:<index> 占位，这里给出每个 index 对应的图 */
+    images?: ReadingParsedImage[];
+};
+
+export type ReadingParsedImage = {
+    index: number;
+    blob: Blob;
+    /** 原图像素尺寸；解码不出来时是 0（SVG 等），排版按未知处理 */
+    width: number;
+    height: number;
 };
 
 export type TxtDecodeResult = {
@@ -365,6 +378,19 @@ function splitParagraphs(lines: string[], mode: TxtParagraphMode = "auto"): stri
  * Parse EPUB file into chapters and paragraphs.
  * EPUB is a ZIP containing XHTML files.
  */
+/** 量一张图的原始像素尺寸。解码不了（SVG、老浏览器）就返回 null，按未知处理。 */
+async function measureImageBlob(blob: Blob): Promise<{ width: number; height: number } | null> {
+    if (typeof createImageBitmap === "undefined") return null;
+    try {
+        const bitmap = await createImageBitmap(blob);
+        const size = { width: bitmap.width, height: bitmap.height };
+        bitmap.close();
+        return size;
+    } catch {
+        return null;
+    }
+}
+
 type TocEntry = { label: string; path: string; level: number };
 
 /** href 去掉锚点和 ./，再解码，用来和 manifest 里的路径对齐 */
@@ -571,6 +597,10 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
 
     // 6. Read each spine item and extract text
     const chapters: ParsedChapter[] = [];
+    // 插图：章节里的标记是「本章第几张」，这里换算成「全书第几张」，
+    // 同一张图被多处引用时只存一份。
+    const imagePathToIndex = new Map<string, number>();
+    const imagePaths: string[] = [];
     for (const itemId of spineItems) {
         if (navItemIds.has(itemId)) continue;
         const href = idToHref.get(itemId);
@@ -580,21 +610,72 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
         if (!html) continue;
 
         // Extract text from HTML
-        const { title, paragraphs } = extractTextFromHtml(html);
+        const { title, paragraphs, imageSrcs } = extractTextFromHtml(html);
         if (paragraphs.length === 0) continue;
+
+        let finalParagraphs = paragraphs;
+        if (imageSrcs && imageSrcs.length > 0) {
+            const chapterDir = filePath.includes("/") ? filePath.substring(0, filePath.lastIndexOf("/") + 1) : "";
+            const localToGlobal = new Map<number, number>();
+            imageSrcs.forEach((src, localIndex) => {
+                const resolved = normalizeTocHref(src, chapterDir);
+                if (!resolved) return;
+                let globalIndex = imagePathToIndex.get(resolved);
+                if (globalIndex === undefined) {
+                    globalIndex = imagePaths.length;
+                    imagePathToIndex.set(resolved, globalIndex);
+                    imagePaths.push(resolved);
+                }
+                localToGlobal.set(localIndex, globalIndex);
+            });
+            finalParagraphs = paragraphs.map((paragraph) => {
+                const marker = parseReadingImageMarker(paragraph);
+                if (!marker) return paragraph;
+                const globalIndex = localToGlobal.get(marker.index);
+                return globalIndex === undefined ? "" : buildReadingImageMarker(globalIndex);
+            }).filter((paragraph) => paragraph !== "");
+            if (finalParagraphs.length === 0) continue;
+        }
+
         const fromToc = tocByPath.get(normalizeTocHref(href, rootDir));
         chapters.push({
             title: fromToc?.label || title || `第${chapters.length + 1}章`,
-            paragraphs,
+            paragraphs: finalParagraphs,
             ...(fromToc ? { tocLevel: fromToc.level } : {}),
         });
+    }
+
+    // 7. 取出插图的字节，顺便量一下原图尺寸（翻页分页要用它算这张图占多高）
+    const images: ReadingParsedImage[] = [];
+    const droppedImages = new Set<number>();
+    for (let index = 0; index < imagePaths.length; index += 1) {
+        const data = await zip.file(imagePaths[index])?.async("blob");
+        if (!data || data.size === 0) { droppedImages.add(index); continue; }
+        const measured = await measureImageBlob(data);
+        // 1x1 透明占位、分隔线之类的小图没有阅读价值，只会在正文里留一行空白
+        if (measured && (measured.width < 40 || measured.height < 40)) { droppedImages.add(index); continue; }
+        const blob = await compressReadingImage(data, READING_INLINE_IMAGE_MAX_SIZE);
+        images.push({ index, blob, width: measured?.width ?? 0, height: measured?.height ?? 0 });
+    }
+
+    if (images.length > 0 || droppedImages.size > 0) {
+        const sizeByIndex = new Map(images.map((image) => [image.index, image]));
+        for (const chapter of chapters) {
+            chapter.paragraphs = chapter.paragraphs.map((paragraph) => {
+                const marker = parseReadingImageMarker(paragraph);
+                if (!marker) return paragraph;
+                if (droppedImages.has(marker.index)) return "";
+                const image = sizeByIndex.get(marker.index);
+                return buildReadingImageMarker(marker.index, image?.width ?? 0, image?.height ?? 0);
+            }).filter((paragraph) => paragraph !== "");
+        }
     }
 
     if (chapters.length === 0) {
         return { title: bookTitle, author, cover, chapters: [{ title: "全文", paragraphs: ["（EPUB 解析失败，未找到文本内容）"] }] };
     }
 
-    return { title: bookTitle, author, cover, chapters };
+    return { title: bookTitle, author, cover, chapters, ...(images.length > 0 ? { images } : {}) };
 }
 
 /** MOBI 里章节之间是 <mbp:pagebreak/>。切开后每一块当一章，走和 EPUB 相同的取文路径。 */
@@ -631,15 +712,27 @@ export async function parseMobiFile(arrayBuffer: ArrayBuffer, fileName?: string)
 }
 
 const BLOCK_TAGS = new Set([
-    "P", "DIV", "LI", "BLOCKQUOTE", "TD", "TH", "DD", "DT", "PRE", "SECTION", "ARTICLE", "FIGCAPTION",
+    "P", "DIV", "LI", "BLOCKQUOTE", "TD", "TH", "DD", "DT", "PRE", "SECTION", "ARTICLE", "FIGURE", "FIGCAPTION",
     "H1", "H2", "H3", "H4", "H5", "H6",
 ]);
+
+/** 插图标记可能和文字挤在同一个块里（典型是 <figure> 里图配图注）。
+ *  把标记切出来单独成段，图和文字都不会丢；顺带保证标记绝不会混进正文文字里
+ *  ——那样既会显示成一个怪符号，也会被当成正文送进模型。 */
+function pushParagraphWithImages(paragraphs: string[], text: string): void {
+    if (!text) return;
+    if (!text.includes("\uFFFC")) { paragraphs.push(text); return; }
+    for (const piece of text.split(/(\uFFFCimg:\d+(?::\d+x\d+)?)/)) {
+        const trimmed = piece.trim();
+        if (trimmed) paragraphs.push(trimmed);
+    }
+}
 
 /** 正文提取（DOM 版）。
  *  正则版遇到嵌套块（<div><p>…</p></div>）会错位，且去标签时不插分隔符，
  *  相邻的行内元素会被粘成一坨（目录里的「八 革职」+「1」变成「八 革职1」）。
  *  这里只取「叶子块」——本身不再包含块级后代的元素——避免父块和子块各产出一次。 */
-function extractTextFromDom(html: string): { title: string; paragraphs: string[] } | null {
+function extractTextFromDom(html: string): { title: string; paragraphs: string[]; imageSrcs?: string[] } | null {
     if (typeof DOMParser === "undefined") return null;
     let doc: Document;
     try {
@@ -654,6 +747,23 @@ function extractTextFromDom(html: string): { title: string; paragraphs: string[]
 
     const heading = body.querySelector("h1, h2, h3");
     const title = normalizeInlineText(heading?.textContent || doc.querySelector("title")?.textContent || "");
+
+    // 插图：原地换成一条「标记段落」，保住它在正文里的位置。
+    // 下面的取文逻辑只看文字，图片元素本身不产出任何段落，不换的话图就没了。
+    const imageSrcs: string[] = [];
+    body.querySelectorAll("img, image").forEach((node) => {
+        const src = node.getAttribute("src")
+            || node.getAttribute("xlink:href")
+            || node.getAttribute("href")
+            || "";
+        if (!src.trim()) { node.remove(); return; }
+        const placeholder = doc.createElement("p");
+        placeholder.textContent = buildReadingImageMarker(imageSrcs.length);
+        // <image> 一般裹在 <svg> 里，整块换掉，免得留个空 svg
+        const target = node.tagName.toLowerCase() === "image" ? (node.closest("svg") || node) : node;
+        target.replaceWith(placeholder);
+        imageSrcs.push(src.trim());
+    });
 
     const paragraphs: string[] = [];
     const seenHeading = { done: false };
@@ -672,13 +782,12 @@ function extractTextFromDom(html: string): { title: string; paragraphs: string[]
             seenHeading.done = true;
             return;
         }
-        paragraphs.push(text);
+        pushParagraphWithImages(paragraphs, text);
     };
     Array.from(body.children).forEach((child) => {
         if (BLOCK_TAGS.has(child.tagName)) visit(child);
         else {
-            const text = normalizeInlineText(child.textContent || "");
-            if (text) paragraphs.push(text);
+            pushParagraphWithImages(paragraphs, normalizeInlineText(child.textContent || ""));
         }
     });
 
@@ -686,7 +795,7 @@ function extractTextFromDom(html: string): { title: string; paragraphs: string[]
         const plain = normalizeInlineText(body.textContent || "");
         if (plain) paragraphs.push(plain);
     }
-    return { title, paragraphs };
+    return { title, paragraphs, imageSrcs };
 }
 
 /** 行内文本归一：把标签间的换行/缩进压成单空格，但不吞掉正常的词间空格。 */
@@ -695,7 +804,7 @@ function normalizeInlineText(value: string): string {
 }
 
 /** Extract readable text from HTML/XHTML content. */
-function extractTextFromHtml(html: string): { title: string; paragraphs: string[] } {
+function extractTextFromHtml(html: string): { title: string; paragraphs: string[]; imageSrcs?: string[] } {
     const fromDom = extractTextFromDom(html);
     if (fromDom && fromDom.paragraphs.length > 0) return fromDom;
 
