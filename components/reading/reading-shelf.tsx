@@ -420,7 +420,16 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                         pageEnd,
                     };
                 }
-                return { id: `${bookId}_ch${i}`, bookId, index: i, title: ch.title, paragraphs: ch.paragraphs };
+                // PDF 那条分支给的是个占位章节，没有 tocLevel，取值要容错
+                const tocLevel = (ch as { tocLevel?: number }).tocLevel;
+                return {
+                    id: `${bookId}_ch${i}`,
+                    bookId,
+                    index: i,
+                    title: ch.title,
+                    paragraphs: ch.paragraphs,
+                    ...(typeof tocLevel === "number" ? { tocLevel } : {}),
+                };
             });
 
             importStage = "写入书架数据";

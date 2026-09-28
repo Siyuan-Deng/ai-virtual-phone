@@ -35,6 +35,8 @@ type PdfSource = ArrayBuffer | Blob;
 export type ParsedChapter = {
     title: string;
     paragraphs: string[];
+    /** 目录层级：0 = 顶层。来自 EPUB 自带的目录（nav / NCX），没有目录时不给。 */
+    tocLevel?: number;
 };
 
 export type ParsedBook = {
@@ -363,6 +365,88 @@ function splitParagraphs(lines: string[], mode: TxtParagraphMode = "auto"): stri
  * Parse EPUB file into chapters and paragraphs.
  * EPUB is a ZIP containing XHTML files.
  */
+type TocEntry = { label: string; path: string; level: number };
+
+/** href 去掉锚点和 ./，再解码，用来和 manifest 里的路径对齐 */
+function normalizeTocHref(href: string, baseDir: string): string {
+    const withoutHash = href.split("#")[0].trim();
+    if (!withoutHash) return "";
+    let path = decodeURIComponent(withoutHash);
+    if (path.startsWith("./")) path = path.slice(2);
+    // 目录文件自己可能在子目录里，相对路径要按它所在目录拼
+    const combined = baseDir ? `${baseDir}${path}` : path;
+    // 压掉 a/b/../c 这种
+    const parts: string[] = [];
+    for (const piece of combined.split("/")) {
+        if (piece === "." || piece === "") continue;
+        if (piece === "..") { parts.pop(); continue; }
+        parts.push(piece);
+    }
+    return parts.join("/");
+}
+
+/** EPUB3 的导航文档：<nav epub:type="toc"><ol><li><a href>…，靠 <ol> 嵌套表示层级 */
+function parseNavDocument(xml: string, baseDir: string): TocEntry[] {
+    if (typeof DOMParser === "undefined") return [];
+    let doc: Document;
+    try {
+        doc = new DOMParser().parseFromString(xml, "application/xhtml+xml");
+        if (doc.querySelector("parsererror")) doc = new DOMParser().parseFromString(xml, "text/html");
+    } catch {
+        return [];
+    }
+    const navs = Array.from(doc.querySelectorAll("nav"));
+    const toc = navs.find((nav) => {
+        const type = nav.getAttribute("epub:type") || nav.getAttribute("type") || "";
+        return /\btoc\b/i.test(type);
+    }) || navs[0];
+    const root = toc?.querySelector("ol");
+    if (!root) return [];
+
+    const entries: TocEntry[] = [];
+    const walk = (list: Element, level: number) => {
+        for (const li of Array.from(list.children)) {
+            if (li.tagName.toLowerCase() !== "li") continue;
+            const anchorEl = li.querySelector(":scope > a, :scope > span > a");
+            const href = anchorEl?.getAttribute("href") || "";
+            const label = (anchorEl?.textContent || "").replace(/\s+/g, " ").trim();
+            const path = normalizeTocHref(href, baseDir);
+            if (label && path) entries.push({ label, path, level });
+            const childList = li.querySelector(":scope > ol");
+            if (childList) walk(childList, level + 1);
+        }
+    };
+    walk(root, 0);
+    return entries;
+}
+
+/** EPUB2 的 toc.ncx：<navMap><navPoint><navLabel><text>…，navPoint 嵌套表示层级 */
+function parseNcxDocument(xml: string, baseDir: string): TocEntry[] {
+    if (typeof DOMParser === "undefined") return [];
+    let doc: Document;
+    try {
+        doc = new DOMParser().parseFromString(xml, "application/xml");
+    } catch {
+        return [];
+    }
+    const navMap = doc.getElementsByTagName("navMap")[0];
+    if (!navMap) return [];
+
+    const entries: TocEntry[] = [];
+    const walk = (parent: Element, level: number) => {
+        for (const child of Array.from(parent.children)) {
+            if (child.tagName.replace(/^.*:/, "") !== "navPoint") continue;
+            const label = (child.getElementsByTagName("text")[0]?.textContent || "").replace(/\s+/g, " ").trim();
+            const href = child.getElementsByTagName("content")[0]?.getAttribute("src") || "";
+            const path = normalizeTocHref(href, baseDir);
+            if (label && path) entries.push({ label, path, level });
+            walk(child, level + 1);
+        }
+    };
+    walk(navMap, 0);
+    return entries;
+}
+
 export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string): Promise<ParsedBook> {
     const JSZip = (await import("jszip")).default;
     const zip = await JSZip.loadAsync(arrayBuffer);
@@ -441,7 +525,51 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
         if (data && data.byteLength > 0) cover = { data, mime: coverMime };
     }
 
-    // 5. Read each spine item and extract text
+    // 5. 读书自带的目录：章节名用目录里的名字，比从正文第一个标题猜准得多
+    //    （正文里常常「四 狗屋」在 <h2> 和正文里各出现一次，猜出来就是「四 狗屋 四 狗屋」）
+    const tocByPath = new Map<string, { label: string; level: number }>();
+    {
+        let tocXml = "";
+        let tocDir = rootDir;
+        // EPUB3：manifest 里 properties="nav" 的那份
+        for (const navId of navItemIds) {
+            const navHref = idToHref.get(navId);
+            if (!navHref) continue;
+            const navPath = rootDir + decodeURIComponent(navHref);
+            const text = await zip.file(navPath)?.async("text");
+            if (!text) continue;
+            tocXml = text;
+            tocDir = navPath.includes("/") ? navPath.substring(0, navPath.lastIndexOf("/") + 1) : "";
+            break;
+        }
+        let entries = tocXml ? parseNavDocument(tocXml, tocDir) : [];
+
+        // EPUB2：<spine toc="ncx">，或 manifest 里那份 x-dtbncx+xml
+        if (entries.length === 0) {
+            let ncxId = opfXml.match(/<spine[^>]*\btoc="([^"]+)"/i)?.[1] || "";
+            if (!ncxId) {
+                for (const [id, mime] of idToMime) {
+                    if (mime === "application/x-dtbncx+xml") { ncxId = id; break; }
+                }
+            }
+            const ncxHref = ncxId ? idToHref.get(ncxId) : undefined;
+            if (ncxHref) {
+                const ncxPath = rootDir + decodeURIComponent(ncxHref);
+                const ncxXml = await zip.file(ncxPath)?.async("text");
+                if (ncxXml) {
+                    const ncxDir = ncxPath.includes("/") ? ncxPath.substring(0, ncxPath.lastIndexOf("/") + 1) : "";
+                    entries = parseNcxDocument(ncxXml, ncxDir);
+                }
+            }
+        }
+
+        // 同一个文件可能被目录里的多条指向（靠锚点区分小节），取第一条
+        for (const entry of entries) {
+            if (!tocByPath.has(entry.path)) tocByPath.set(entry.path, { label: entry.label, level: entry.level });
+        }
+    }
+
+    // 6. Read each spine item and extract text
     const chapters: ParsedChapter[] = [];
     for (const itemId of spineItems) {
         if (navItemIds.has(itemId)) continue;
@@ -454,7 +582,12 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
         // Extract text from HTML
         const { title, paragraphs } = extractTextFromHtml(html);
         if (paragraphs.length === 0) continue;
-        chapters.push({ title: title || `第${chapters.length + 1}章`, paragraphs });
+        const fromToc = tocByPath.get(normalizeTocHref(href, rootDir));
+        chapters.push({
+            title: fromToc?.label || title || `第${chapters.length + 1}章`,
+            paragraphs,
+            ...(fromToc ? { tocLevel: fromToc.level } : {}),
+        });
     }
 
     if (chapters.length === 0) {

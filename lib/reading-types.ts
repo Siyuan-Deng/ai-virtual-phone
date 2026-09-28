@@ -15,6 +15,8 @@ export type BookChapter = {
     index: number;
     title: string;
     paragraphs: string[];
+    /** EPUB 自带目录里的层级：0 = 顶层，1 = 它的子条目。没有目录的书不给。 */
+    tocLevel?: number;
     /** PDF only: synthetic page chunk start (1-based) */
     pageStart?: number;
     /** PDF only: synthetic page chunk end (1-based) */

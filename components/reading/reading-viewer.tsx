@@ -3501,6 +3501,10 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                         <div className="reading-nav-chapter-list">
                             {chapters.map((chapter, index) => {
                                 const charCount = chapter.paragraphs.reduce((sum, p) => sum + p.replace(/\s+/g, "").length, 0);
+                                // 书自带目录里的层级：每深一层多缩进一点，最多缩三层
+                                const navIndent = chapter.tocLevel
+                                    ? { paddingLeft: `${16 + Math.min(chapter.tocLevel, 3) * 14}px` }
+                                    : undefined;
                                 const pageLabel = isPdf && chapter.pageStart ? chapter.pageStart : null;
                                 return (
                                     <button
@@ -3508,6 +3512,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                                         type="button"
                                         className={`reading-nav-chapter-item${index === chapterIndex ? " is-active" : ""}`}
                                         onClick={() => handleNavChapterClick(index)}
+                                        style={navIndent}
                                     >
                                         <div className="reading-nav-chapter-main">
                                             <span className="reading-nav-chapter-name">{chapter.title || `第${index + 1}章`}</span>
