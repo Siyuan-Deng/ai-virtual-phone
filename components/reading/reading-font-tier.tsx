@@ -9,6 +9,7 @@ import {
     listReadingAnnotationFontOptions,
     type ReadingAnnotationFontFamilyId,
 } from "@/lib/reading-appearance";
+import { isFontStackIneffective } from "@/lib/reading-font-probe";
 
 /** 正文 / TA的批注 / 我的批注 三档字体设置长得一模一样，只有标题、
  *  「跟随」那一项的措辞和落到哪个自定义字体不同，所以收成一个组件。 */
@@ -93,12 +94,29 @@ export function ReadingFontTier({
     const fileRef = useRef<HTMLInputElement>(null);
     const previewFamily = usePreviewFontFace(pendingFile);
 
+    /** 这台设备上哪些字体其实没效果。iOS 只开放很少几个字体给网页，
+     *  选了没反应的选项必须如实标出来，否则就是个假开关。 */
+    const ineffective = useMemo(() => {
+        if (typeof window === "undefined") return new Set<string>();
+        const baseline = getComputedStyle(document.documentElement)
+            .getPropertyValue("--app-font-family").trim() || "sans-serif";
+        const result = new Set<string>();
+        for (const option of READING_FONT_OPTIONS) {
+            if (option.id === "system" || option.id === "custom") continue;
+            if (isFontStackIneffective(option.cssValue, baseline)) result.add(option.id);
+        }
+        return result;
+    }, []);
+
     const options = useMemo(() => {
         const all = listReadingAnnotationFontOptions(value);
+        const withHint = all.map((option) => (
+            ineffective.has(option.id) ? { ...option, label: `${option.label}（本机无效果）` } : option
+        ));
         return inheritLabel
-            ? all.map((option) => (option.id === "inherit" ? { ...option, label: inheritLabel } : option))
-            : all.filter((option) => option.id !== "inherit");
-    }, [inheritLabel, value]);
+            ? withHint.map((option) => (option.id === "inherit" ? { ...option, label: inheritLabel } : option))
+            : withHint.filter((option) => option.id !== "inherit");
+    }, [ineffective, inheritLabel, value]);
 
     const isCustom = value === "custom";
     const customFamily = previewFamily || loadedCustomFamily;
@@ -130,6 +148,12 @@ export function ReadingFontTier({
             <div className="reading-font-preview" style={{ fontFamily: previewCss }}>
                 {READING_FONT_PREVIEW_TEXT}
             </div>
+            {ineffective.has(value) && (
+                <div className="reading-settings-inline-note">
+                    <span>提示</span>
+                    <span>这台设备没有这个字体，实际显示的是系统默认；想换字体可以选「自定义字体」上传一个字体文件。</span>
+                </div>
+            )}
 
             {isCustom && (
                 <>

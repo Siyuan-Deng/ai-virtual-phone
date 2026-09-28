@@ -184,17 +184,32 @@ export default function ReadingApp({ onClose }: Props) {
     const resolvedUserAnnotationFont = resolveReadingAnnotationFontFamily(appearance.userAnnotationFontFamily, userAnnotationFontFamily);
     const resolvedBodyFont = resolveReadingFontFamily(appearance.fontFamily, customFontFamily);
 
-    // 字体不走 CSS 变量。iOS Safari 上实测：同一条规则里 color: var(--x) 生效、
-    // font-family: var(--x) 不生效，而直接写在 style 上的 font-family 正常
-    // （Chromium 两种都正常，根因没能在本机复现确认）。所以正文字体直接内联在这个
-    // 根节点上，靠继承铺满整个阅读 app；批注两档用下面这段 <style> 把算好的值写死，
-    // 规则里一个 var() 都不留。
-    const annotationFontCss = [
-        resolvedAnnotationFont && [
+    // 字体由这段注入的 <style> 统一下发，而不是靠「根节点内联 + 继承」。
+    //
+    // 起因：用户的全局自定义 CSS 里有一条普通优先级的字体规则，它打不过带声明的
+    // 元素，却稳稳打赢「继承」——于是正文 <p>、书架标题 <h1> 这些靠继承拿字体的
+    // 元素全被接管，而批注是 <span>、没被那条规则选中，反倒一直是对的。这类事故
+    // 以后还会有（插件、主题、自定义 CSS 都能注入全局样式），所以阅读区的字体给成
+    // 真正的声明、并且带上一点选择器权重，别再把它挂在最弱的继承上。
+    // 这里刻意不用 !important：用户想用自定义 CSS 精细覆盖阅读样式时还能盖得动。
+    //
+    // 排除项：设置里的字体样张和诊断报告要保留自己的字体，否则预览就没意义了。
+    // :where() 本身不带权重，所以整条规则只有「一个 class」那么重：
+    // 足以压过 p{} / body *{} 这类全局规则，又不至于让用户没法再覆盖它。
+    const FONT_EXCLUDES = ":not(:where(.reading-font-preview, .reading-font-diag-report,"
+        + " .reading-annotation-name, .reading-annotation-text, .reading-annotation-translation))";
+    const readingFontCss = [
+        [
+            ".reading-app-surface,",
+            `.reading-app-surface *${FONT_EXCLUDES} {`,
+            `  font-family: ${resolvedBodyFont};`,
+            "}",
+        ].join("\n"),
+        [
             ".reading-app-surface .reading-annotation-name,",
             ".reading-app-surface .reading-annotation-text,",
             ".reading-app-surface .reading-annotation-translation {",
-            `  font-family: ${resolvedAnnotationFont};`,
+            `  font-family: ${resolvedAnnotationFont || resolvedBodyFont};`,
             "}",
         ].join("\n"),
         resolvedUserAnnotationFont && [
@@ -202,6 +217,13 @@ export default function ReadingApp({ onClose }: Props) {
             '.reading-app-surface .reading-annotation[data-author="user"] .reading-annotation-text,',
             '.reading-app-surface .reading-annotation[data-author="user"] .reading-annotation-translation {',
             `  font-family: ${resolvedUserAnnotationFont};`,
+            "}",
+        ].join("\n"),
+        // 提示词输入框保持等宽，别被上面那条通吃规则带走
+        [
+            ".reading-app-surface .reading-settings-prompt textarea,",
+            ".reading-app-surface .chat-bilingual-prompt-textarea {",
+            "  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;",
             "}",
         ].join("\n"),
     ].filter(Boolean).join("\n");
@@ -243,7 +265,7 @@ export default function ReadingApp({ onClose }: Props) {
 
     return (
         <div className="absolute inset-0" style={appearanceStyle}>
-            {annotationFontCss && <style>{annotationFontCss}</style>}
+            <style>{readingFontCss}</style>
             {!activeBook && (
                 <ReadingShelf
                     onOpenBook={setActiveBook}
