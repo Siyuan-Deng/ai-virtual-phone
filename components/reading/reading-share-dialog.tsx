@@ -13,6 +13,7 @@ import {
     renderReadingShareCard,
     type ReadingShareAlign,
     type ReadingShareAnnotation,
+    type ReadingShareAvatarShape,
     type ReadingShareFonts,
     type ReadingSharePalette,
     type ReadingShareTemplate,
@@ -82,6 +83,7 @@ export function ReadingShareDialog({
     const [template, setTemplate] = useState<ReadingShareTemplate>("poster");
     const [palette, setPalette] = useState<ReadingSharePalette>(READING_SHARE_TEMPLATE_PRESETS.poster);
     const [align, setAlign] = useState<ReadingShareAlign>(READING_SHARE_TEMPLATE_PRESETS.poster.align);
+    const [avatarShape, setAvatarShape] = useState<ReadingShareAvatarShape>("circle");
 
     /** 换模板时配色和对齐回到那个模板的出厂值——深色版面套上浅色底会直接糊掉 */
     const pickTemplate = (next: ReadingShareTemplate) => {
@@ -92,12 +94,18 @@ export function ReadingShareDialog({
     };
 
     /** 存一档 = 模板 + 配色 + 对齐 */
-    type ShareStyle = { template: ReadingShareTemplate; palette: ReadingSharePalette; align: ReadingShareAlign };
+    type ShareStyle = {
+        template: ReadingShareTemplate;
+        palette: ReadingSharePalette;
+        align: ReadingShareAlign;
+        avatarShape?: ReadingShareAvatarShape;
+    };
     const applyStyle = (style: ShareStyle) => {
         if (!style?.template || !READING_SHARE_TEMPLATE_PRESETS[style.template]) return;
         setTemplate(style.template);
         if (style.palette) setPalette(style.palette);
         if (style.align) setAlign(style.align);
+        setAvatarShape(style.avatarShape === "square" ? "square" : "circle");
     };
     const hasMine = annotations.some((annotation) => annotation.authorType === "user");
     const hasTheirs = annotations.some((annotation) => annotation.authorType === "character");
@@ -149,6 +157,7 @@ export function ReadingShareDialog({
                     timestamp: new Date(),
                     palette,
                     align,
+                    avatarShape,
                 });
                 if (cancelled) return;
                 canvas.className = "reading-share-canvas";
@@ -161,7 +170,7 @@ export function ReadingShareDialog({
         };
         void draw();
         return () => { cancelled = true; };
-    }, [align, palette, template, withMine, withTheirs]);
+    }, [align, avatarShape, palette, template, withMine, withTheirs]);
 
     const handleDownload = async () => {
         const canvas = canvasRef.current;
@@ -216,12 +225,12 @@ export function ReadingShareDialog({
                                     className={`reading-share-scheme${active ? " is-active" : ""}`}
                                     onClick={() => setPalette(scheme.palette)}
                                     title={scheme.name}
+                                    aria-label={scheme.name}
                                 >
                                     <span className="reading-share-scheme-swatch" style={{ background: scheme.palette.background }}>
                                         <i style={{ background: scheme.palette.accent }} />
                                         <i style={{ background: scheme.palette.ink }} />
                                     </span>
-                                    <span>{scheme.name}</span>
                                 </button>
                             );
                         })}
@@ -252,9 +261,19 @@ export function ReadingShareDialog({
                             >{label}</button>
                         ))}
                     </div>
+                    <div className="reading-share-aligns">
+                        {([["圆头像", "circle"], ["方头像", "square"]] as Array<[string, ReadingShareAvatarShape]>).map(([label, value]) => (
+                            <button
+                                key={value}
+                                type="button"
+                                className={`reading-share-template${avatarShape === value ? " is-active" : ""}`}
+                                onClick={() => setAvatarShape(value)}
+                            >{label}</button>
+                        ))}
+                    </div>
                     <ReadingPresetBar<ShareStyle>
                         kind="share"
-                        current={() => ({ template, palette, align })}
+                        current={() => ({ template, palette, align, avatarShape })}
                         onLoad={applyStyle}
                         defaultName={READING_SHARE_TEMPLATES.find(t => t.id === template)?.label || "我的样式"}
                     />

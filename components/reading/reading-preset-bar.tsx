@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, FolderOpen, Save, Trash2, X } from "lucide-react";
+import { Check, Save, Trash2, X } from "lucide-react";
 import {
     deleteReadingPreset,
     loadReadingPresets,
@@ -12,19 +12,21 @@ import {
 
 type Props<T> = {
     kind: ReadingPresetKind;
-    /** 点「存一档」时要存的东西 */
+    /** 点保存时要存下来的东西 */
     current: () => T;
     onLoad: (payload: T) => void;
-    /** 存档时预填的名字 */
+    /** 保存时预填的名字 */
     defaultName?: string;
 };
 
-/** 「存一档 / 调出来」的小条。摘抄图的模板配色、两段提示词都用它。 */
+/** 「保存配置 / 选一个配置」。左边一条下拉，右边一个方形保存键。
+ *  摘抄图的模板配色、两段提示词都用它。 */
 export function ReadingPresetBar<T>({ kind, current, onLoad, defaultName = "" }: Props<T>) {
     const [presets, setPresets] = useState<Array<ReadingPreset<T>>>([]);
+    const [selectedId, setSelectedId] = useState("");
     const [naming, setNaming] = useState(false);
     const [name, setName] = useState(defaultName);
-    const [confirmingId, setConfirmingId] = useState<string | null>(null);
+    const [confirmingDelete, setConfirmingDelete] = useState(false);
 
     useEffect(() => { setPresets(loadReadingPresets<T>(kind)); }, [kind]);
 
@@ -32,19 +34,49 @@ export function ReadingPresetBar<T>({ kind, current, onLoad, defaultName = "" }:
 
     return (
         <div className="reading-preset-bar">
-            <div className="reading-preset-actions">
+            <div className="reading-preset-row">
+                <select
+                    className="ui-input reading-preset-select"
+                    value={selectedId}
+                    onChange={(event) => {
+                        const id = event.target.value;
+                        setSelectedId(id);
+                        setConfirmingDelete(false);
+                        const preset = presets.find(item => item.id === id);
+                        if (preset) onLoad(preset.payload);
+                    }}
+                >
+                    <option value="">{presets.length > 0 ? "选一个保存过的配置" : "还没有保存过配置"}</option>
+                    {presets.map((preset) => (
+                        <option key={preset.id} value={preset.id}>{preset.name}</option>
+                    ))}
+                </select>
+
+                {selectedId && (
+                    <button
+                        type="button"
+                        className={`reading-preset-icon-btn${confirmingDelete ? " is-danger" : ""}`}
+                        aria-label={confirmingDelete ? "确认删除这个配置" : "删除这个配置"}
+                        onClick={() => {
+                            if (!confirmingDelete) { setConfirmingDelete(true); return; }
+                            deleteReadingPreset(selectedId);
+                            setSelectedId("");
+                            setConfirmingDelete(false);
+                            refresh();
+                        }}
+                    >
+                        <Trash2 size={15} />
+                    </button>
+                )}
+
                 <button
                     type="button"
-                    className="ui-btn ui-btn-outline"
-                    onClick={() => { setName(defaultName); setNaming(true); }}
+                    className="reading-preset-icon-btn"
+                    aria-label="保存配置"
+                    onClick={() => { setName(defaultName); setNaming(true); setConfirmingDelete(false); }}
                 >
-                    <Save size={13} />
-                    <span>存一档</span>
+                    <Save size={15} />
                 </button>
-                <span className="reading-preset-count">
-                    <FolderOpen size={12} />
-                    {presets.length > 0 ? `${presets.length} 档` : "还没存过"}
-                </span>
             </div>
 
             {naming && (
@@ -53,57 +85,31 @@ export function ReadingPresetBar<T>({ kind, current, onLoad, defaultName = "" }:
                         className="ui-input"
                         value={name}
                         maxLength={30}
-                        placeholder="给这一档起个名字"
+                        placeholder="给这套配置起个名字"
                         onChange={(event) => setName(event.target.value)}
                         autoFocus
                     />
                     <button
                         type="button"
-                        className="ui-btn ui-btn-soft-action"
+                        className="reading-preset-icon-btn"
+                        aria-label="确认保存"
                         onClick={() => {
-                            saveReadingPreset(kind, name || defaultName || "未命名", current());
+                            const saved = saveReadingPreset(kind, name || defaultName || "未命名", current());
                             refresh();
+                            setSelectedId(saved.id);
                             setNaming(false);
                         }}
                     >
-                        <Check size={13} />
-                        <span>保存</span>
+                        <Check size={15} />
                     </button>
-                    <button type="button" className="ui-btn ui-btn-ghost" onClick={() => setNaming(false)}>
-                        <X size={13} />
+                    <button
+                        type="button"
+                        className="reading-preset-icon-btn"
+                        aria-label="取消"
+                        onClick={() => setNaming(false)}
+                    >
+                        <X size={15} />
                     </button>
-                </div>
-            )}
-
-            {presets.length > 0 && (
-                <div className="reading-preset-list">
-                    {presets.map((preset) => (
-                        <div key={preset.id} className="reading-preset-item">
-                            <button
-                                type="button"
-                                className="reading-preset-name"
-                                onClick={() => onLoad(preset.payload)}
-                            >
-                                {preset.name}
-                            </button>
-                            <button
-                                type="button"
-                                className="reading-preset-delete"
-                                aria-label={`删除 ${preset.name}`}
-                                onClick={() => {
-                                    if (confirmingId === preset.id) {
-                                        deleteReadingPreset(preset.id);
-                                        refresh();
-                                        setConfirmingId(null);
-                                    } else {
-                                        setConfirmingId(preset.id);
-                                    }
-                                }}
-                            >
-                                {confirmingId === preset.id ? <span>确认删</span> : <Trash2 size={12} />}
-                            </button>
-                        </div>
-                    ))}
                 </div>
             )}
         </div>

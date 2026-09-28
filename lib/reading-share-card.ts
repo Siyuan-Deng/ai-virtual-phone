@@ -38,6 +38,10 @@ export type ReadingShareFonts = {
 
 export type ReadingShareAlign = "left" | "center" | "right";
 
+export type ReadingShareAvatarShape = "circle" | "square";
+/** 方形头像的圆角。版面按 1080 宽算，落到手机上差不多就是 3px。 */
+const AVATAR_CORNER = 8;
+
 export type ReadingSharePalette = {
     background: string;
     ink: string;
@@ -66,6 +70,8 @@ export type ReadingShareCardInput = {
     palette?: Partial<ReadingSharePalette>;
     /** 正文对齐；没给就用模板默认 */
     align?: ReadingShareAlign;
+    /** 头像形状：圆形或者圆角方形 */
+    avatarShape?: ReadingShareAvatarShape;
 };
 
 /** 每个模板的出厂配色和默认对齐 */
@@ -206,11 +212,14 @@ class Pen {
         ctx.fill();
     }
 
-    circleText(cx: number, cy: number, radius: number, label: string, fill: string, color: string, family: string): void {
+    circleText(cx: number, cy: number, radius: number, label: string, fill: string, color: string, family: string, shape: ReadingShareAvatarShape = "circle"): void {
         if (this.dry) return;
         const ctx = this.ctx;
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        if (shape === "square") this.tracePath(cx - radius, cy - radius, radius * 2, radius * 2, AVATAR_CORNER);
+        else {
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        }
         ctx.fillStyle = fill;
         ctx.fill();
         ctx.font = `${Math.round(radius)}px ${family}`;
@@ -220,16 +229,31 @@ class Pen {
         ctx.textAlign = "left";
     }
 
-    avatar(image: CanvasImageSource, x: number, y: number, size: number): void {
+    avatar(image: CanvasImageSource, x: number, y: number, size: number, shape: ReadingShareAvatarShape): void {
         if (this.dry) return;
         const ctx = this.ctx;
         ctx.save();
-        ctx.beginPath();
-        ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
-        ctx.closePath();
+        if (shape === "square") this.tracePath(x, y, size, size, AVATAR_CORNER);
+        else {
+            ctx.beginPath();
+            ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+            ctx.closePath();
+        }
         ctx.clip();
         ctx.drawImage(image, x, y, size, size);
         ctx.restore();
+    }
+
+    /** 圆角矩形的路径，clip 和 fill 都用它 */
+    tracePath(x: number, y: number, w: number, h: number, r: number): void {
+        const ctx = this.ctx;
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
     }
 
     dashedLine(x1: number, y: number, x2: number, color: string): void {
@@ -274,6 +298,7 @@ type Ctx = {
     input: ReadingShareCardInput;
     palette: ReadingSharePalette;
     align: ReadingShareAlign;
+    avatarShape: ReadingShareAvatarShape;
     fonts: ReadingShareFonts;
     /** 整张图的高度。量版面那一遍还不知道，是 0；真正落笔那一遍才有。
      *  「先铺纸再写字」的模板（书签条、便利贴）靠它先画底。 */
@@ -315,6 +340,22 @@ function isDarkColor(hex: string): boolean {
     const g = ((value >> 8) & 255) / 255;
     const b = (value & 255) / 255;
     return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.45;
+}
+
+/** 两个颜色按比例混一混：t=0 全取 a，t=1 全取 b */
+function mixHex(a: string, b: string, t: number): string {
+    const parse = (hex: string) => {
+        const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+        return match ? parseInt(match[1], 16) : null;
+    };
+    const left = parse(a);
+    const right = parse(b);
+    if (left === null || right === null) return a;
+    const ratio = Math.max(0, Math.min(1, t));
+    const channel = (shift: number) => Math.round(
+        ((left >> shift) & 255) * (1 - ratio) + ((right >> shift) & 255) * ratio,
+    );
+    return `#${[channel(16), channel(8), channel(0)].map(c => c.toString(16).padStart(2, "0")).join("")}`;
 }
 
 function lightenHex(hex: string, amount: number): string {
@@ -452,11 +493,11 @@ function drawSignature(
     const { pen, input } = ctx;
     const name = displayName(input);
     if (input.avatar) {
-        pen.avatar(input.avatar, x, centerY - size / 2, size);
+        pen.avatar(input.avatar, x, centerY - size / 2, size, ctx.avatarShape);
     } else {
         pen.circleText(
             x + size / 2, centerY, size / 2, Array.from(name)[0],
-            readingMarkColor(avatarFallbackInk, 0.3), avatarFallbackInk, ctx.fonts.body,
+            readingMarkColor(avatarFallbackInk, 0.3), avatarFallbackInk, ctx.fonts.body, ctx.avatarShape,
         );
     }
 
@@ -518,25 +559,16 @@ function renderPoster(ctx: Ctx): number {
 
 function renderBookmark(ctx: Ctx): number {
     const { pen, input, palette } = ctx;
-    const outer = 58;
-    const cardWidth = 660;
-    const cardX = (WIDTH - cardWidth) / 2;
-    const pad = 54;
+    // 整张图就是那张书签：不再在外面套一圈底色，四边留白就够了
+    const pad = 92;
+    const cardWidth = WIDTH;
+    const cardX = 0;
     const inner = cardWidth - pad * 2;
-    const cardTop = outer;
-    // 纸要先铺、再写字。以前是写完用 destination-over 垫在下面，可整张画布一开始
-    // 就被背景色填满了，垫不进去——卡片根本没显示出来。
-    const cardColor = isDarkColor(palette.background)
-        ? lightenHex(palette.background, 0.12)
-        : lightenHex(palette.background, 0.62);
-    if (ctx.totalHeight > 0) {
-        pen.rect(cardX, cardTop, cardWidth, ctx.totalHeight - outer * 2, cardColor);
-    }
-    let y = cardTop + pad;
+    let y = pad;
 
     pen.rect(cardX + cardWidth / 2 - 22, y + 6, 44, 3, palette.accent);
     y += 42;
-    y = drawQuote(ctx, cardX + pad, y, inner, 26, 56, palette.ink);
+    y = drawQuote(ctx, cardX + pad, y, inner, 28, 62, palette.ink);
 
     if (input.annotations.length > 0) {
         y += 24;
@@ -548,8 +580,8 @@ function renderBookmark(ctx: Ctx): number {
     y += 40;
 
     const avatarSize = 62;
-    if (input.avatar) pen.avatar(input.avatar, cardX + cardWidth / 2 - avatarSize / 2, y, avatarSize);
-    else pen.circleText(cardX + cardWidth / 2, y + avatarSize / 2, avatarSize / 2, Array.from(displayName(input))[0], readingMarkColor(palette.accent, 0.3), palette.accent, ctx.fonts.body);
+    if (input.avatar) pen.avatar(input.avatar, cardX + cardWidth / 2 - avatarSize / 2, y, avatarSize, ctx.avatarShape);
+    else pen.circleText(cardX + cardWidth / 2, y + avatarSize / 2, avatarSize / 2, Array.from(displayName(input))[0], readingMarkColor(palette.accent, 0.3), palette.accent, ctx.fonts.body, ctx.avatarShape);
     y += avatarSize + 20;
 
     pen.font(25, ctx.fonts.body);
@@ -561,9 +593,7 @@ function renderBookmark(ctx: Ctx): number {
     pen.text(`${progressText(input)} · ${stampText(input)}`, cardX + cardWidth / 2, y + 19, palette.sub, "center");
     y += 40;
     pen.circleOutline(cardX + cardWidth / 2, y + 8, 7, palette.sub);
-    y += 30;
-
-    return y + outer;
+    return y + 38 + pad;
 }
 
 function renderMagazine(ctx: Ctx): number {
@@ -624,8 +654,8 @@ function renderMinimal(ctx: Ctx): number {
     y += 96;
 
     const avatarSize = 58;
-    if (input.avatar) pen.avatar(input.avatar, WIDTH / 2 - avatarSize / 2, y, avatarSize);
-    else pen.circleText(WIDTH / 2, y + avatarSize / 2, avatarSize / 2, Array.from(displayName(input))[0], readingMarkColor(palette.accent, 0.5), palette.sub, ctx.fonts.body);
+    if (input.avatar) pen.avatar(input.avatar, WIDTH / 2 - avatarSize / 2, y, avatarSize, ctx.avatarShape);
+    else pen.circleText(WIDTH / 2, y + avatarSize / 2, avatarSize / 2, Array.from(displayName(input))[0], readingMarkColor(palette.accent, 0.5), palette.sub, ctx.fonts.body, ctx.avatarShape);
     y += avatarSize + 22;
 
     pen.font(25, ctx.fonts.body);
@@ -723,9 +753,11 @@ function renderSticky(ctx: Ctx): number {
     const pad = 48;
     const inner = paperWidth - pad * 2;
     const paperTop = outer;
+    // 纸跟着配色走：浅色方案提亮成一张「比底色更白的纸」，深色方案只提一点点。
+    // 以前浅色方案一律纯白，换配色时只有深木看得出变化。
     const paperColor = isDarkColor(palette.background)
         ? lightenHex(palette.background, 0.10)
-        : "#ffffff";
+        : lightenHex(palette.background, 0.72);
     if (ctx.totalHeight > 0) {
         pen.rect(paperX, paperTop, paperWidth, ctx.totalHeight - outer * 2, paperColor);
     }
@@ -752,21 +784,27 @@ function renderSticky(ctx: Ctx): number {
             row.forEach((annotation, column) => {
                 const plan = heights[index + column];
                 const x = paperX + pad + column * (noteWidth + noteGap);
-                const tint = annotation.authorType === "user" ? input.annotationColors.user : input.annotationColors.character;
+                // 便签色 = 阅读界面里那张卡片的颜色，再往当前配色里调一调：
+                // user / char 的色相差别留着，整体跟着方案走，不会一套深色配色里
+                // 还贴两张亮黄亮蓝。
+                const baseTint = annotation.authorType === "user" ? input.annotationColors.user : input.annotationColors.character;
+                const tint = mixHex(baseTint, palette.background, isDarkColor(palette.background) ? 0.62 : 0.3);
                 const font = annotationFont(ctx, annotation);
                 pen.rotated(x + noteWidth / 2, rowTop + rowHeight / 2, (column === 0 ? -1 : 1) * 0.012, () => {
                     pen.roundRect(x, rowTop, noteWidth, rowHeight, 4, tint);
                     // 顶上那截半透明胶带，和阅读界面里的批注卡片、书架封面一个做法。
                     // 颜色比便签本身深一档：同色半透明压在同色便签上等于没有。
-                    pen.rotated(x + 52 + 65, rowTop - 14, 0.035, () => {
-                        pen.rect(x + 52, rowTop - 18, 130, 32, readingMarkColor(darkenHex(tint, 0.16), 0.6));
+                    pen.rotated(x + 46 + 44, rowTop - 10, 0.04, () => {
+                        pen.rect(x + 46, rowTop - 14, 88, 24, readingMarkColor(darkenHex(tint, 0.18), 0.55));
                     });
+                    // 便签上的字跟着便签深浅走：深色便签上写黑字就看不清了
+                    const noteInk = isDarkColor(tint) ? "#f2efe9" : "#241f18";
                     pen.font(19, font, "600");
-                    pen.text(annotation.name, x + 18, rowTop + 34, readingMarkColor(palette.ink, 0.7));
+                    pen.text(annotation.name, x + 18, rowTop + 34, readingMarkColor(noteInk, 0.72));
                     pen.font(24, font);
                     let cursor = rowTop + 56;
                     for (const line of plan.lines) {
-                        pen.text(line, x + 18, cursor + 24, palette.ink);
+                        pen.text(line, x + 18, cursor + 24, noteInk);
                         cursor += 40;
                     }
                 });
@@ -816,6 +854,7 @@ export function renderReadingShareCard(input: ReadingShareCardInput): HTMLCanvas
         accent: input.palette?.accent || preset.accent,
     };
     const align = input.align || preset.align;
+    const avatarShape = input.avatarShape || "circle";
 
     const measureCanvas = document.createElement("canvas");
     measureCanvas.width = WIDTH;
@@ -825,7 +864,7 @@ export function renderReadingShareCard(input: ReadingShareCardInput): HTMLCanvas
     measureCtx.textBaseline = "alphabetic";
 
     const render = RENDERERS[input.template];
-    const base = { input, palette, align, fonts: input.fonts };
+    const base = { input, palette, align, avatarShape, fonts: input.fonts };
     const height = Math.max(420, Math.round(render({ ...base, totalHeight: 0, pen: new Pen(measureCtx, true) })));
 
     // 版面按 1080 宽来算，真正的画布放大 SCALE 倍再画：手机屏幕是 3 倍像素密度，
