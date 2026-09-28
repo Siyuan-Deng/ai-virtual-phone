@@ -13,6 +13,7 @@ import {
     loadReadingBackground,
     loadReadingCustomFont,
     loadReadingUserAnnotationFont,
+    readingBackgroundOverlay,
     resolveReadingAnnotationFontFamily,
     resolveReadingFontFamily,
     saveReadingAnnotationFont,
@@ -173,28 +174,53 @@ export default function ReadingApp({ onClose }: Props) {
         }
     };
 
+    // 亮度是盖在背景图上的一层纯色，和图一起塞进同一个变量，
+    // 这样所有用到 --reading-bg-image 的地方（书架、阅读页、翻页动画）都自动跟着变。
+    const backgroundOverlay = readingBackgroundOverlay(appearance.backgroundBrightness);
+    const backgroundLayers = backgroundUrl
+        ? (backgroundOverlay ? `${backgroundOverlay}, url("${backgroundUrl}")` : `url("${backgroundUrl}")`)
+        : "none";
     const resolvedAnnotationFont = resolveReadingAnnotationFontFamily(appearance.annotationFontFamily, annotationFontFamily);
     const resolvedUserAnnotationFont = resolveReadingAnnotationFontFamily(appearance.userAnnotationFontFamily, userAnnotationFontFamily);
+    const resolvedBodyFont = resolveReadingFontFamily(appearance.fontFamily, customFontFamily);
+
+    // 字体不走 CSS 变量。iOS Safari 上实测：同一条规则里 color: var(--x) 生效、
+    // font-family: var(--x) 不生效，而直接写在 style 上的 font-family 正常
+    // （Chromium 两种都正常，根因没能在本机复现确认）。所以正文字体直接内联在这个
+    // 根节点上，靠继承铺满整个阅读 app；批注两档用下面这段 <style> 把算好的值写死，
+    // 规则里一个 var() 都不留。
+    const annotationFontCss = [
+        resolvedAnnotationFont && [
+            ".reading-app-surface .reading-annotation-name,",
+            ".reading-app-surface .reading-annotation-text,",
+            ".reading-app-surface .reading-annotation-translation {",
+            `  font-family: ${resolvedAnnotationFont};`,
+            "}",
+        ].join("\n"),
+        resolvedUserAnnotationFont && [
+            '.reading-app-surface .reading-annotation[data-author="user"] .reading-annotation-name,',
+            '.reading-app-surface .reading-annotation[data-author="user"] .reading-annotation-text,',
+            '.reading-app-surface .reading-annotation[data-author="user"] .reading-annotation-translation {',
+            `  font-family: ${resolvedUserAnnotationFont};`,
+            "}",
+        ].join("\n"),
+    ].filter(Boolean).join("\n");
+
     const appearanceStyle = {
-        // 只有真的选了批注字体才下发这个变量；跟随正文时整条不出现，CSS 自然回退到正文字体
-        ...(resolvedAnnotationFont
-            ? { ["--reading-annotation-font-family" as "--reading-annotation-font-family"]: resolvedAnnotationFont }
-            : {}),
-        ...(resolvedUserAnnotationFont
-            ? { ["--reading-user-annotation-font-family" as "--reading-user-annotation-font-family"]: resolvedUserAnnotationFont }
-            : {}),
-        ["--reading-font-family" as "--reading-font-family"]: resolveReadingFontFamily(appearance.fontFamily, customFontFamily),
+        fontFamily: resolvedBodyFont,
         ["--reading-font-size" as "--reading-font-size"]: `${appearance.fontSize}px`,
         ["--reading-text-color" as "--reading-text-color"]: appearance.textColor,
         ["--reading-line-height" as "--reading-line-height"]: String(appearance.lineHeight),
-        ["--reading-bg-image" as "--reading-bg-image"]: backgroundUrl ? `url("${backgroundUrl}")` : "none",
+        ["--reading-bg-image" as "--reading-bg-image"]: backgroundLayers,
     } as CSSProperties;
-    // 传给阅读器，让它在字体/字号/行距变化后重新分页
+    // 传给阅读器，让它在字体/字号/行距变化后重新分页。批注字体也算进来：
+    // 翻页模式连批注块的高度一起量，批注换字体同样会改变每页塞得下多少东西。
     const appearanceKey = [
-        appearance.fontFamily,
         appearance.fontSize,
         appearance.lineHeight,
-        customFontFamily || "",
+        resolvedBodyFont,
+        resolvedAnnotationFont || "",
+        resolvedUserAnnotationFont || "",
     ].join("|");
     const hiddenViewerStyle = {
         position: "absolute",
@@ -207,6 +233,7 @@ export default function ReadingApp({ onClose }: Props) {
 
     return (
         <div className="absolute inset-0" style={appearanceStyle}>
+            {annotationFontCss && <style>{annotationFontCss}</style>}
             {!activeBook && (
                 <ReadingShelf
                     onOpenBook={setActiveBook}

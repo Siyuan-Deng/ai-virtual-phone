@@ -26,7 +26,23 @@ export type ReadingAppearance = {
     /** 用户自己写的批注再单独一档；缺省时跟随角色批注的字体。 */
     userAnnotationFontFamily?: ReadingAnnotationFontFamilyId;
     userAnnotationCustomFontName?: string;
+    /** 背景图亮度：1 = 原图，<1 压暗，>1 提亮。缺省即 1（和加这个设置之前一样）。 */
+    backgroundBrightness?: number;
 };
+
+export const READING_BG_BRIGHTNESS_MIN = 0.4;
+export const READING_BG_BRIGHTNESS_MAX = 1.6;
+
+/** 把亮度换成盖在背景图上的一层纯色。不用 filter: brightness()——那会
+ *  连正文和按钮一起变暗，这里只想动背景。 */
+export function readingBackgroundOverlay(brightness: number | undefined): string | null {
+    const value = typeof brightness === "number" && Number.isFinite(brightness) ? brightness : 1;
+    if (Math.abs(value - 1) < 0.001) return null;
+    const alpha = Math.min(0.85, Math.abs(value - 1));
+    const rgb = value < 1 ? "0, 0, 0" : "255, 255, 255";
+    const layer = `rgba(${rgb}, ${alpha.toFixed(3)})`;
+    return `linear-gradient(${layer}, ${layer})`;
+}
 
 export type ReadingFontOption = {
     id: ReadingFontFamilyId;
@@ -136,10 +152,17 @@ function normalizeAppearance(raw: Partial<ReadingAppearance> | null | undefined)
         ? raw.userAnnotationCustomFontName.trim()
         : undefined;
 
+    const backgroundBrightness = clamp(
+        Number(raw?.backgroundBrightness ?? 1) || 1,
+        READING_BG_BRIGHTNESS_MIN,
+        READING_BG_BRIGHTNESS_MAX,
+    );
+
     return {
         fontFamily, fontSize, textColor, lineHeight, customFontName,
         annotationFontFamily, annotationCustomFontName,
         userAnnotationFontFamily, userAnnotationCustomFontName,
+        backgroundBrightness,
     };
 }
 

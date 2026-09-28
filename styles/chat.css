@@ -3349,9 +3349,18 @@
 .reading-list-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  /* 批注条数和伴读角色也挂在这一行，窄屏放不下就换行，别把信息挤没 */
+  flex-wrap: wrap;
+  row-gap: 4px;
   font-size: calc(9.9px*var(--app-text-scale,1));
   color: var(--reading-warm-ink-tertiary, #999);
+}
+.reading-list-meta .reading-list-badge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .reading-list-progress-row {
   display: flex;
@@ -3690,7 +3699,6 @@
   background-position: center;
   background-repeat: no-repeat;
   color: var(--reading-warm-ink);
-  font-family: var(--reading-font-family, var(--app-font-family));
   backface-visibility: hidden;
   pointer-events: none;
   display: flex;
@@ -3770,7 +3778,6 @@
   --reading-warm-brown: #8a5a2b;
   --reading-warm-brown-light: #a39487;
 
-  font-family: var(--reading-font-family, var(--app-font-family));
   background-color: var(--reading-warm-bg) !important;
   background-image: var(--reading-bg-image, none) !important;
   background-size: cover !important;
@@ -3782,7 +3789,8 @@
 .reading-app-surface input,
 .reading-app-surface select,
 .reading-app-surface textarea {
-  font-family: var(--reading-font-family, var(--app-font-family));
+  /* 表单控件默认用系统字体，不跟着父级走，这里显式继承阅读字体 */
+  font-family: inherit;
 }
 .reading-app-surface .page-back-btn,
 .reading-app-surface .page-title,
@@ -3807,7 +3815,6 @@
   stroke: var(--reading-warm-brown-light, #a39487) !important;
 }
 .reading-paragraph {
-  font-family: var(--reading-font-family, var(--app-font-family));
   font-size: calc(var(--reading-font-size,16px)*0.9*var(--app-text-scale,1));
   line-height: var(--reading-line-height, 1.9);
   color: var(--reading-text-color, var(--reading-warm-ink, #111));
@@ -3855,7 +3862,6 @@
   display: flex;
 }
 .reading-annotation-name {
-  font-family: var(--reading-annotation-font-family, var(--reading-font-family, var(--app-font-family)));
   font-size: calc(9.9px*var(--app-text-scale,1));
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -3909,11 +3915,15 @@
   padding: 4px 0;
   align-self: flex-start;
 }
-/* 批注字体独立于正文：没设 --reading-annotation-font-family 时回退到正文字体，
+/* 阅读区的字体一律不走 CSS 变量。iOS Safari 上实测：同一条规则里
+   color: var(--x) 生效、font-family: var(--x) 不生效（整个阅读 app 退回系统字体），
+   而直接写在 style 上的 font-family 正常；Chromium 两种都正常。根因没能在
+   本机复现确认（手上只有 Chromium），所以干脆不依赖它——正文字体由 reading-app
+   内联在根节点上靠继承铺开，批注两档由 reading-app 注入 <style> 写死算好的值。
+   下面这段原本是批注字体的说明：批注没单独设字体时就跟随正文，
    行为与只有单一字体变量时完全一致。 */
 .reading-annotation-text {
   display: block;
-  font-family: var(--reading-annotation-font-family, var(--reading-font-family, var(--app-font-family)));
   font-size: calc(11.7px*var(--app-text-scale,1));
   line-height: 1.72;
   white-space: pre-wrap;
@@ -3966,16 +3976,10 @@
 }
 .reading-annotation-translation {
   margin-top: 4px;
-  font-family: var(--reading-annotation-font-family, var(--reading-font-family, var(--app-font-family)));
   color: rgba(74, 61, 26, 0.65);
 }
 /* 我的批注字体可再单独指定；没设就回退到批注字体，再回退到正文，
    与只有两级字体时的表现完全一致。 */
-.reading-annotation[data-author="user"] .reading-annotation-name,
-.reading-annotation[data-author="user"] .reading-annotation-text,
-.reading-annotation[data-author="user"] .reading-annotation-translation {
-  font-family: var(--reading-user-annotation-font-family, var(--reading-annotation-font-family, var(--reading-font-family, var(--app-font-family))));
-}
 .reading-chat-msg {
   padding: 6px 10px;
   border-radius: 8px;
@@ -4608,7 +4612,6 @@
 }
 
 .reading-line {
-  font-family: var(--reading-font-family, var(--app-font-family));
   font-size: calc(var(--reading-font-size,16px)*0.9*var(--app-text-scale,1));
   line-height: var(--reading-line-height, 1.9);
   color: var(--reading-text-color, var(--reading-warm-ink, #111));

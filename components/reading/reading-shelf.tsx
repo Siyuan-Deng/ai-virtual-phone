@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect } from "react";
 import { ChevronLeft, Palette, Settings } from "lucide-react";
-import { loadBooks, addBook, deleteBook, saveChapters, loadProgress, saveRawFile } from "@/lib/reading-storage";
+import { loadBooks, addBook, deleteBook, saveChapters, loadProgress, saveRawFile, countAnnotationsByBook } from "@/lib/reading-storage";
+import { loadCharacters } from "@/lib/character-storage";
 import { loadReadingCover, saveReadingCover } from "@/lib/reading-appearance";
 import { decodeTxtArrayBuffer, parseTxtContent, parseEpubFile, parseMobiFile, PDF_PAGES_PER_CHAPTER } from "@/lib/reading-parser";
 import { loadReadingInteractionConfig } from "@/lib/reading-storage";
@@ -117,6 +118,10 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
     const [books, setBooks] = useState<Book[]>([]);
     /** bookId → 封面 objectURL；没有封面的书不在这里，走原来那种自己画的封面 */
     const [coverUrls, setCoverUrls] = useState<Record<string, string>>({});
+    /** bookId → 批注条数（用户 + 角色） */
+    const [annotationCounts, setAnnotationCounts] = useState<Record<string, number>>({});
+    /** bookId → 伴读角色名。名字一律从角色数据里取，不写死 */
+    const [companionNames, setCompanionNames] = useState<Record<string, string>>({});
     const [progressMap, setProgressMap] = useState<Record<string, {
         chapterIndex: number;
         total: number;
@@ -155,6 +160,8 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
         setBooks(allBooks);
         (async () => {
             const map: typeof progressMap = {};
+            const companions: Record<string, string> = {};
+            const characters = loadCharacters();
             for (const b of allBooks) {
                 const p = await loadProgress(b.id);
                 map[b.id] = {
@@ -166,8 +173,15 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                     pageTotal: p?.progressTotal,
                     scope: p?.progressScope,
                 };
+                const companionId = p?.companionCharacterId;
+                const companionName = companionId
+                    ? characters.find((character) => character.id === companionId)?.name
+                    : undefined;
+                if (companionName) companions[b.id] = companionName;
             }
             setProgressMap(map);
+            setCompanionNames(companions);
+            setAnnotationCounts(await countAnnotationsByBook().catch(() => ({})));
         })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
@@ -604,6 +618,12 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                                         <div className="reading-list-meta">
                                             <span className="reading-list-badge">{formatBadge(book.format)}</span>
                                             <span>{book.totalChapters}章</span>
+                                            {annotationCounts[book.id] ? (
+                                                <span className="reading-list-badge">批注 {annotationCounts[book.id]}条</span>
+                                            ) : null}
+                                            {companionNames[book.id] ? (
+                                                <span className="reading-list-badge">伴读 {companionNames[book.id]}</span>
+                                            ) : null}
                                         </div>
                                         <div className="reading-list-progress-row">
                                             <span className="reading-list-progress-label">

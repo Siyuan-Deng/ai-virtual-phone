@@ -5,7 +5,13 @@ import { ImagePlus, Palette, Trash2 } from "lucide-react";
 import { ContentDialog } from "@/components/ui/modal";
 import { ColorInput, Slider } from "@/components/ui/form";
 import type { ReadingAnnotationFontFamilyId, ReadingAppearance } from "@/lib/reading-appearance";
-import { resolveReadingAnnotationFontFamily, resolveReadingFontFamily } from "@/lib/reading-appearance";
+import {
+    READING_BG_BRIGHTNESS_MAX,
+    READING_BG_BRIGHTNESS_MIN,
+    readingBackgroundOverlay,
+    resolveReadingAnnotationFontFamily,
+    resolveReadingFontFamily,
+} from "@/lib/reading-appearance";
 import { ReadingFontTier } from "./reading-font-tier";
 
 export type ReadingAppearanceSaveOptions = {
@@ -69,6 +75,12 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
     }, [backgroundFile]);
 
     const hasPreview = useMemo(() => Boolean(previewUrl) && !clearBackground, [previewUrl, clearBackground]);
+    // 预览块用和正文一样的叠色方式，滑动条拖到哪里，这里就是那个效果
+    const backgroundPreviewLayers = useMemo(() => {
+        if (!previewUrl) return undefined;
+        const overlay = readingBackgroundOverlay(draft.backgroundBrightness);
+        return overlay ? `${overlay}, url("${previewUrl}")` : `url("${previewUrl}")`;
+    }, [draft.backgroundBrightness, previewUrl]);
 
     // 预览的回退链和 CSS 里那条完全一致：我的批注 → TA的批注 → 正文 → App 字体。
     const bodyCss = useMemo(
@@ -225,10 +237,21 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                     </div>
                     <div
                         className="reading-bg-preview"
-                        style={hasPreview ? { backgroundImage: `url("${previewUrl}")` } : undefined}
+                        style={hasPreview ? { backgroundImage: backgroundPreviewLayers } : undefined}
                     >
                         {!hasPreview && <span>书架页和阅读页共用背景</span>}
                     </div>
+                    {hasPreview && (
+                        <Slider
+                            label="背景亮度"
+                            min={READING_BG_BRIGHTNESS_MIN}
+                            max={READING_BG_BRIGHTNESS_MAX}
+                            step={0.05}
+                            value={draft.backgroundBrightness ?? 1}
+                            onChange={(e) => setDraft((prev) => ({ ...prev, backgroundBrightness: Number(e.target.value) }))}
+                            displayValue={`${Math.round((draft.backgroundBrightness ?? 1) * 100)}%`}
+                        />
+                    )}
                     <div className="reading-settings-actions">
                         <button
                             type="button"

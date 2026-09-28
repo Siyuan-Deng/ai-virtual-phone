@@ -214,6 +214,16 @@ export async function saveAnnotations(annotations: ReadingAnnotation[]): Promise
     }
 }
 
+/** 每本书的批注条数（用户 + 角色一起算）。书架上显示用，一次扫全表，
+ *  比按书逐次查省往返；批注量再大也就几千条。 */
+export async function countAnnotationsByBook(): Promise<Record<string, number>> {
+    const counts: Record<string, number> = {};
+    await db.annotations.each((annotation) => {
+        counts[annotation.bookId] = (counts[annotation.bookId] || 0) + 1;
+    });
+    return counts;
+}
+
 export async function deleteAnnotation(annotationId: string): Promise<void> {
     const existing = await db.annotations.get(annotationId);
     if (!existing) return;
