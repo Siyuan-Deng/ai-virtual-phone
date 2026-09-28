@@ -8,7 +8,8 @@ import { decodeTxtArrayBuffer, parseTxtContent, parseEpubFile, parseMobiFile, PD
 import { loadReadingInteractionConfig } from "@/lib/reading-storage";
 import type { Book, BookChapter } from "@/lib/reading-types";
 import type { ReadingAppearance } from "@/lib/reading-appearance";
-import { ReadingAppearanceDialog } from "./reading-appearance-dialog";
+import { ContentDialog } from "@/components/ui/modal";
+import { ReadingAppearanceDialog, type ReadingAppearanceSaveOptions, type ReadingLoadedFonts } from "./reading-appearance-dialog";
 import { ReadingInteractionDialog } from "./reading-interaction-dialog";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
 
@@ -17,20 +18,36 @@ type Props = {
     onClose: () => void;
     appearance: ReadingAppearance;
     backgroundUrl: string | null;
-    onSaveAppearance: (
-        appearance: ReadingAppearance,
-        options: {
-            backgroundFile: File | null;
-            clearBackground: boolean;
-            customFontFile: File | null;
-            clearCustomFont: boolean;
-            annotationFontFile: File | null;
-            clearAnnotationFont: boolean;
-            userAnnotationFontFile: File | null;
-            clearUserAnnotationFont: boolean;
-        }
-    ) => Promise<void>;
+    loadedFonts: ReadingLoadedFonts;
+    onSaveAppearance: (appearance: ReadingAppearance, options: ReadingAppearanceSaveOptions) => Promise<void>;
 };
+
+/** 封面图最长边。列表里只有几十像素宽，存手机原图纯属浪费 IndexedDB。 */
+const COVER_MAX_SIZE = 900;
+
+/** 压缩用户选的封面图。和贴纸压缩同一套路：任何一步不支持就原图存下去。 */
+async function compressCoverImage(blob: Blob): Promise<Blob> {
+    if (typeof window === "undefined" || typeof createImageBitmap === "undefined" || typeof OffscreenCanvas === "undefined") return blob;
+    try {
+        const bmp = await createImageBitmap(blob);
+        let w = bmp.width;
+        let h = bmp.height;
+        if (w > COVER_MAX_SIZE || h > COVER_MAX_SIZE) {
+            const scale = COVER_MAX_SIZE / Math.max(w, h);
+            w = Math.max(1, Math.round(w * scale));
+            h = Math.max(1, Math.round(h * scale));
+        }
+        const canvas = new OffscreenCanvas(w, h);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { bmp.close(); return blob; }
+        ctx.drawImage(bmp, 0, 0, w, h);
+        bmp.close();
+        const compressed = await canvas.convertToBlob({ type: "image/webp", quality: 0.82 });
+        return compressed.size > 0 && compressed.size < blob.size ? compressed : blob;
+    } catch {
+        return blob;
+    }
+}
 
 const IMPORT_DIAG_KEY = "reading-import-diagnostic-v1";
 
@@ -96,7 +113,7 @@ function buildImportError(stage: string, err: unknown, format?: Book["format"]):
     };
 }
 
-export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, onSaveAppearance }: Props) {
+export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, loadedFonts, onSaveAppearance }: Props) {
     const [books, setBooks] = useState<Book[]>([]);
     /** bookId → 封面 objectURL；没有封面的书不在这里，走原来那种自己画的封面 */
     const [coverUrls, setCoverUrls] = useState<Record<string, string>>({});
@@ -115,7 +132,14 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
     const [search, setSearch] = useState("");
     const [showAppearanceDialog, setShowAppearanceDialog] = useState(false);
     const [showInteractionDialog, setShowInteractionDialog] = useState(false);
+    /** 已经有封面的书，点封面先弹这个小菜单（换 / 移除），没封面的直接开相册 */
+    const [coverMenuBook, setCoverMenuBook] = useState<Book | null>(null);
+    const [coverBusy, setCoverBusy] = useState(false);
     const fileRef = useRef<HTMLInputElement>(null);
+    const coverInputRef = useRef<HTMLInputElement>(null);
+    /** 正在设封面的书。存 ref 而不是 state：点完立刻要打开文件选择器，
+     *  state 这一拍还没落地，onChange 里就取不到目标书了。 */
+    const coverTargetRef = useRef<string | null>(null);
 
     const persistImportDiagnostic = (payload: ImportDiagnostic | null) => {
         if (typeof window === "undefined") return;
@@ -195,6 +219,50 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
     const dismissImportError = () => {
         setImportError(null);
         persistImportDiagnostic(null);
+    };
+
+    /** 换掉一本书的封面图：null 表示恢复成自动生成的那种封面 */
+    const applyCover = async (bookId: string, blob: Blob | null) => {
+        setCoverBusy(true);
+        try {
+            await saveReadingCover(bookId, blob);
+            const nextUrl = blob ? URL.createObjectURL(blob) : null;
+            setCoverUrls(prev => {
+                const previous = prev[bookId];
+                if (previous) URL.revokeObjectURL(previous);
+                const next = { ...prev };
+                if (nextUrl) next[bookId] = nextUrl;
+                else delete next[bookId];
+                return next;
+            });
+        } catch (err) {
+            setImportError({
+                summary: "封面保存失败。",
+                detail: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+            });
+        } finally {
+            setCoverBusy(false);
+        }
+    };
+
+    const pickCoverFor = (bookId: string) => {
+        coverTargetRef.current = bookId;
+        coverInputRef.current?.click();
+    };
+
+    const handleCoverClick = (book: Book) => {
+        // 已有封面的书先问一句，否则误触就把 EPUB 自带封面换掉了，还退不回去
+        if (coverUrls[book.id]) setCoverMenuBook(book);
+        else pickCoverFor(book.id);
+    };
+
+    const handleCoverFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        const bookId = coverTargetRef.current;
+        coverTargetRef.current = null;
+        if (!file || !bookId) return;
+        await applyCover(bookId, await compressCoverImage(file));
     };
 
     const filteredBooks = search.trim()
@@ -510,17 +578,26 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
                             const layout = coverLayouts[(book.title.length + (book.author?.length || 0)) % coverLayouts.length];
                             return (
                                 <div key={book.id} className="reading-list-item" onClick={() => onOpenBook(book)}>
-                                    {coverUrls[book.id] ? (
-                                        <div className="reading-list-cover reading-list-cover--image">
-                                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                                            <img src={coverUrls[book.id]} alt="" />
-                                        </div>
-                                    ) : (
-                                        <div className={`reading-list-cover reading-list-cover--${gradient} reading-list-cover--${layout}`}>
-                                            <span className="reading-list-cover-author">{book.author || ""}</span>
-                                            <span className="reading-list-cover-title">{book.title}</span>
-                                        </div>
-                                    )}
+                                    {/* 点封面是换封面，不是打开书 */}
+                                    <button
+                                        type="button"
+                                        className="reading-list-cover-btn"
+                                        onClick={(e) => { e.stopPropagation(); handleCoverClick(book); }}
+                                        disabled={coverBusy}
+                                        aria-label={`设置《${book.title}》的封面`}
+                                    >
+                                        {coverUrls[book.id] ? (
+                                            <div className="reading-list-cover reading-list-cover--image">
+                                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                <img src={coverUrls[book.id]} alt="" />
+                                            </div>
+                                        ) : (
+                                            <div className={`reading-list-cover reading-list-cover--${gradient} reading-list-cover--${layout}`}>
+                                                <span className="reading-list-cover-author">{book.author || ""}</span>
+                                                <span className="reading-list-cover-title">{book.title}</span>
+                                            </div>
+                                        )}
+                                    </button>
                                     <div className="reading-list-info">
                                         <span className="reading-list-title">{book.title}</span>
                                         {book.author && <span className="reading-list-author">{book.author}</span>}
@@ -561,10 +638,56 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, o
                 </div>
             </div>
 
+            <input
+                ref={coverInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => { void handleCoverFileChange(e); }}
+            />
+
+            {coverMenuBook && (
+                <ContentDialog
+                    title="封面"
+                    confirmLabel=""
+                    cancelLabel="取消"
+                    onConfirm={() => setCoverMenuBook(null)}
+                    onCancel={() => setCoverMenuBook(null)}
+                >
+                    <div className="reading-settings-grid">
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            disabled={coverBusy}
+                            onClick={() => {
+                                const target = coverMenuBook.id;
+                                setCoverMenuBook(null);
+                                pickCoverFor(target);
+                            }}
+                        >
+                            从相册选择图片
+                        </button>
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-ghost"
+                            disabled={coverBusy}
+                            onClick={() => {
+                                const target = coverMenuBook.id;
+                                setCoverMenuBook(null);
+                                void applyCover(target, null);
+                            }}
+                        >
+                            移除封面，恢复默认样式
+                        </button>
+                    </div>
+                </ContentDialog>
+            )}
+
             {showAppearanceDialog && (
                 <ReadingAppearanceDialog
                     appearance={appearance}
                     backgroundUrl={backgroundUrl}
+                    loadedFonts={loadedFonts}
                     onClose={() => setShowAppearanceDialog(false)}
                     onSave={onSaveAppearance}
                 />

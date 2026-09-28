@@ -256,10 +256,13 @@ function ReadingAnnotationContent({
 
 type Props = {
     book: Book;
+    /** 正文字体 / 字号 / 行距的指纹。变了就得重排——翻页模式的断行是按当时的
+     *  字体量出来的，阅读器返回书架时又不卸载，不重排就会用旧字体的断行位置。 */
+    appearanceKey?: string;
     onBack: () => void;
 };
 
-export function ReadingViewer({ book, onBack }: Props) {
+export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     const isPdf = book.format === "pdf";
     const [readingConfig, setReadingConfig] = useState(() => loadReadingInteractionConfig());
     // 阅读器保持挂载（返回书架不卸载），书架设置页保存后通过事件同步最新配置
@@ -340,6 +343,7 @@ export function ReadingViewer({ book, onBack }: Props) {
     const [annotationBatchInput, setAnnotationBatchInput] = useState(String(isPdf ? 5 : 50));
     const [annotationDialogMode, setAnnotationDialogMode] = useState<AnnotationDialogMode | null>(null);
     const [showReadingSettings, setShowReadingSettings] = useState(false);
+    const [showTranslationDialog, setShowTranslationDialog] = useState(false);
     const [pdfRenderDraft, setPdfRenderDraft] = useState(() => ({
         pdfZoom: readingConfig.pdfZoom ?? 1,
         pdfPreloadRadius: readingConfig.pdfPreloadRadius ?? 3,
@@ -387,6 +391,11 @@ export function ReadingViewer({ book, onBack }: Props) {
     const chapterIndexRef = useRef(0);
     const chaptersLenRef = useRef(0);
     const [txtLayoutVersion, setTxtLayoutVersion] = useState(0);
+    // 外观改了就重排一次。分页那个 effect 已经把 txtLayoutVersion 列进依赖，
+    // 这里只负责把「字体变了」这件事翻译成它认识的信号。
+    useEffect(() => {
+        setTxtLayoutVersion((version) => version + 1);
+    }, [appearanceKey]);
     const [txtPages, setTxtPages] = useState<TxtPageItem[][]>([]);
     const [scrollFraction, setScrollFraction] = useState(0);
     const [flipAnim, setFlipAnim] = useState<{ direction: 'forward' | 'backward'; items: TxtPageItem[] } | null>(null);
@@ -3282,77 +3291,15 @@ export function ReadingViewer({ book, onBack }: Props) {
                     </div>
                 </ContentDialog>
             )}
-            {showReadingSettings && (
+            {showTranslationDialog && (
                 <ContentDialog
-                    title="阅读设置"
+                    title="批注翻译"
                     confirmLabel="完成"
                     cancelLabel="关闭"
-                    onConfirm={handleReadingSettingsConfirm}
-                    onCancel={() => setShowReadingSettings(false)}
+                    onConfirm={() => setShowTranslationDialog(false)}
+                    onCancel={() => setShowTranslationDialog(false)}
                 >
                     <div className="reading-settings-grid">
-                        <button
-                            type="button"
-                            className="ui-btn ui-btn-outline"
-                            onClick={() => { setShowReadingSettings(false); openAnnotationDialog("manual"); }}
-                            disabled={generating || !companionId}
-                        >
-                            现在批注
-                        </button>
-                        <button
-                            type="button"
-                            className="ui-btn ui-btn-outline"
-                            onClick={() => { setShowReadingSettings(false); openAnnotationDialog("auto"); }}
-                        >
-                            {autoAnnotate ? "自动批注：已开启" : "自动批注：已关闭"}
-                        </button>
-                        <button
-                            type="button"
-                            className="ui-btn ui-btn-outline"
-                            onClick={() => { setShowReadingSettings(false); openRangeSummary(); }}
-                            disabled={!companionId}
-                        >
-                            总结内容
-                        </button>
-                        <button
-                            type="button"
-                            className="ui-btn ui-btn-outline"
-                            onClick={() => { void exportAnnotations(); }}
-                        >
-                            导出全书批注（Markdown）
-                        </button>
-                        {exportNote && (
-                            <div className="reading-settings-inline-note"><span>{exportNote}</span></div>
-                        )}
-                        <div className="reading-settings-inline-note">
-                            <span>批注密度</span>
-                            <span className="reading-interval-row">
-                                每
-                                <input
-                                    className="reading-interval-input"
-                                    type="number"
-                                    min={0}
-                                    max={999}
-                                    step={1}
-                                    inputMode="numeric"
-                                    value={readingConfig.annotationInterval}
-                                    onChange={(e) => {
-                                        const parsed = Math.floor(Number(e.target.value));
-                                        const next = {
-                                            ...readingConfig,
-                                            annotationInterval: Number.isFinite(parsed) ? Math.min(999, Math.max(0, parsed)) : 0,
-                                        };
-                                        setReadingConfig(next);
-                                        saveReadingInteractionConfig(next);
-                                    }}
-                                />
-                                段 1 条
-                            </span>
-                        </div>
-                        <div className="reading-settings-inline-note">
-                            <span>说明</span>
-                            <span>批注密度填 0 表示不限，由角色自己决定写多少</span>
-                        </div>
                         <div className="reading-settings-inline-note">
                             <span>启用阅读双语翻译</span>
                             <Toggle
@@ -3409,7 +3356,87 @@ export function ReadingViewer({ book, onBack }: Props) {
                                 />
                             </div>
                         )}
-
+                    </div>
+                </ContentDialog>
+            )}
+            {showReadingSettings && (
+                <ContentDialog
+                    title="阅读设置"
+                    confirmLabel="完成"
+                    cancelLabel="关闭"
+                    onConfirm={handleReadingSettingsConfirm}
+                    onCancel={() => setShowReadingSettings(false)}
+                >
+                    <div className="reading-settings-grid">
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => { setShowReadingSettings(false); openAnnotationDialog("manual"); }}
+                            disabled={generating || !companionId}
+                        >
+                            现在批注
+                        </button>
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => { setShowReadingSettings(false); openAnnotationDialog("auto"); }}
+                        >
+                            {autoAnnotate ? "自动批注：已开启" : "自动批注：已关闭"}
+                        </button>
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => { setShowReadingSettings(false); openRangeSummary(); }}
+                            disabled={!companionId}
+                        >
+                            总结内容
+                        </button>
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => { void exportAnnotations(); }}
+                        >
+                            导出全书批注（Markdown）
+                        </button>
+                        {exportNote && (
+                            <div className="reading-settings-inline-note"><span>{exportNote}</span></div>
+                        )}
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => { setShowReadingSettings(false); setShowTranslationDialog(true); }}
+                        >
+                            批注翻译
+                        </button>
+                        <div className="reading-settings-inline-note">
+                            <span>批注密度</span>
+                            <span className="reading-interval-row">
+                                每
+                                <input
+                                    className="reading-interval-input"
+                                    type="number"
+                                    min={0}
+                                    max={999}
+                                    step={1}
+                                    inputMode="numeric"
+                                    value={readingConfig.annotationInterval}
+                                    onChange={(e) => {
+                                        const parsed = Math.floor(Number(e.target.value));
+                                        const next = {
+                                            ...readingConfig,
+                                            annotationInterval: Number.isFinite(parsed) ? Math.min(999, Math.max(0, parsed)) : 0,
+                                        };
+                                        setReadingConfig(next);
+                                        saveReadingInteractionConfig(next);
+                                    }}
+                                />
+                                段 1 条
+                            </span>
+                        </div>
+                        <div className="reading-settings-inline-note">
+                            <span>说明</span>
+                            <span>批注密度填 0 表示不限，由角色自己决定写多少</span>
+                        </div>
                         {isPdf && (
                             <section className="reading-settings-group">
                                 <div className="reading-settings-heading">

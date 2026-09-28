@@ -3,7 +3,13 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { openIndexedDbAtLeast } from "./idb-open";
 
-export type ReadingFontFamilyId = "system" | "song" | "serif" | "sans" | "custom";
+/** 字体档位。iOS / macOS 自带的中文字体各取一个 id；
+ *  serif / sans 是早期版本留下的 id，只为读得懂老配置，见 READING_FONT_OPTIONS。 */
+export type ReadingFontFamilyId =
+    | "system" | "song" | "kai" | "yuan" | "hannotate" | "hanzipen"
+    | "baoli" | "libian" | "weibei" | "xingkai" | "lanting"
+    | "custom"
+    | "serif" | "sans";
 
 /** 批注字体可以单独指定，也可以跟随正文（默认）。 */
 export type ReadingAnnotationFontFamilyId = "inherit" | ReadingFontFamilyId;
@@ -22,18 +28,63 @@ export type ReadingAppearance = {
     userAnnotationCustomFontName?: string;
 };
 
-export const READING_FONT_OPTIONS: Array<{ id: ReadingFontFamilyId; label: string; cssValue: string }> = [
-    { id: "system", label: "系统阅读", cssValue: "var(--app-font-family)" },
-    { id: "song", label: "宋体", cssValue: "\"Songti SC\", \"STSong\", \"Noto Serif SC\", serif" },
-    { id: "serif", label: "衬线", cssValue: "\"Source Han Serif SC\", \"Noto Serif SC\", serif" },
-    { id: "sans", label: "黑体", cssValue: "\"PingFang SC\", \"Hiragino Sans GB\", \"Noto Sans SC\", sans-serif" },
-    { id: "custom", label: "自定义上传", cssValue: "var(--app-font-family)" },
+export type ReadingFontOption = {
+    id: ReadingFontFamilyId;
+    label: string;
+    cssValue: string;
+    /** 旧 id：不再出现在下拉里，但老配置选中它时仍然显示、仍然按原字体渲染。 */
+    legacy?: true;
+};
+
+/** 可选字体。每一项的首选字体都是 iOS / macOS 自带的中文字体——列表里出现的每个
+ *  名字都必须在手机上真的存在，否则用户切过去屏幕上什么都不变，设置看着就像假的。
+ *
+ *  legacy 的两项是早期版本的遗留：
+ *  - sans「黑体」首选 PingFang SC，而 PingFang SC 正是 --app-font-family 的第一顺位，
+ *    所以它和「系统默认」在苹果设备上渲染完全一致，切换看不出区别；
+ *  - serif「衬线」首选 Source Han Serif SC / Noto Serif SC，这两个 iOS 都没有，
+ *    最后落到通用 serif，结果和「宋体」几乎一样。
+ *  两个 id 保留下来只为让老配置读得出来，不再放进下拉菜单。 */
+export const READING_FONT_OPTIONS: ReadingFontOption[] = [
+    { id: "system", label: "系统默认", cssValue: "var(--app-font-family)" },
+    { id: "song", label: "宋体", cssValue: "\"Songti SC\", \"STSong\", serif" },
+    { id: "kai", label: "楷体", cssValue: "\"Kaiti SC\", \"STKaiti\", serif" },
+    { id: "yuan", label: "圆体", cssValue: "\"Yuanti SC\", \"STYuanti\", sans-serif" },
+    { id: "hannotate", label: "手札体", cssValue: "\"Hannotate SC\", \"HannotateSC\", sans-serif" },
+    { id: "hanzipen", label: "翩翩体", cssValue: "\"HanziPen SC\", \"HanziPenSC\", sans-serif" },
+    { id: "baoli", label: "报隶", cssValue: "\"Baoli SC\", \"BaoliSC\", serif" },
+    { id: "libian", label: "隶变", cssValue: "\"Libian SC\", \"LibianSC\", serif" },
+    { id: "weibei", label: "魏碑", cssValue: "\"Weibei SC\", \"WeibeiSC\", serif" },
+    { id: "xingkai", label: "行楷", cssValue: "\"Xingkai SC\", \"XingkaiSC\", cursive" },
+    { id: "lanting", label: "兰亭黑", cssValue: "\"Lantinghei SC\", \"LantingheiSC\", sans-serif" },
+    { id: "custom", label: "自定义字体", cssValue: "var(--app-font-family)" },
+    { id: "sans", label: "黑体（旧）", cssValue: "\"PingFang SC\", \"Hiragino Sans GB\", \"Noto Sans SC\", sans-serif", legacy: true },
+    { id: "serif", label: "衬线（旧）", cssValue: "\"Source Han Serif SC\", \"Noto Serif SC\", serif", legacy: true },
 ];
 
-export const READING_ANNOTATION_FONT_OPTIONS: Array<{ id: ReadingAnnotationFontFamilyId; label: string }> = [
+export const READING_ANNOTATION_FONT_OPTIONS: Array<{ id: ReadingAnnotationFontFamilyId; label: string; legacy?: true }> = [
     { id: "inherit", label: "跟随正文" },
-    ...READING_FONT_OPTIONS.map((option) => ({ id: option.id as ReadingAnnotationFontFamilyId, label: option.label })),
+    ...READING_FONT_OPTIONS.map((option) => ({
+        id: option.id as ReadingAnnotationFontFamilyId,
+        label: option.label,
+        ...(option.legacy ? { legacy: option.legacy } : {}),
+    })),
 ];
+
+/** 下拉里该显示哪些项：常规项全给，legacy 项只在它正被选中时补进去，
+ *  免得老配置打开设置发现自己选的那一项不见了、下拉却显示成别的字体。 */
+export function listReadingFontOptions(current: ReadingFontFamilyId): ReadingFontOption[] {
+    return READING_FONT_OPTIONS.filter((option) => !option.legacy || option.id === current);
+}
+
+export function listReadingAnnotationFontOptions(
+    current: ReadingAnnotationFontFamilyId,
+): Array<{ id: ReadingAnnotationFontFamilyId; label: string }> {
+    return READING_ANNOTATION_FONT_OPTIONS.filter((option) => !option.legacy || option.id === current);
+}
+
+/** 设置里那行示例文字：中英文数字都有，换字体时一眼能看出变化。 */
+export const READING_FONT_PREVIEW_TEXT = "春江花月夜 Reading 123";
 
 const APPEARANCE_STORAGE_KEY = "ai_phone_reading_appearance_v1";
 registerKvMigration(APPEARANCE_STORAGE_KEY);

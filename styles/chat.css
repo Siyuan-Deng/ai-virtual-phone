@@ -7438,3 +7438,41 @@
   cursor: pointer;
   flex: 0 0 auto;
 }
+
+/* 封面本身就是按钮（点它换封面）。按钮自带的边框/内边距全部抹掉，
+   尺寸仍然由里面的 .reading-list-cover 决定，列表布局和以前一致。 */
+.reading-list-cover-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  flex-shrink: 0;
+  line-height: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.reading-list-cover-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.reading-list-cover-btn .reading-list-cover {
+  transition: transform 0.12s;
+}
+.reading-list-cover-btn:active .reading-list-cover {
+  transform: scale(0.97);
+}
+
+/* 字体设置里的示例行：字体直接写在 style 上（不吃 --reading-font-family），
+   换一项就能当场看出这台设备到底有没有这个字体。 */
+.reading-font-preview {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed rgba(45, 35, 28, 0.16);
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--reading-text-color, var(--reading-warm-ink, #111));
+  font-size: calc(15px*var(--app-text-scale,1));
+  line-height: 1.55;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

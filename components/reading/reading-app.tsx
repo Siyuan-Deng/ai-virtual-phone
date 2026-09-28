@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, type CSSProperties } from "react";
+import { hydrateKvDb } from "@/lib/kv-db";
 import { hydrateReadingStorage } from "@/lib/reading-storage";
 import { ReadingShelf } from "./reading-shelf";
 import { ReadingViewer } from "./reading-viewer";
@@ -21,6 +22,7 @@ import {
     saveReadingUserAnnotationFont,
     type ReadingAppearance,
 } from "@/lib/reading-appearance";
+import type { ReadingAppearanceSaveOptions } from "./reading-appearance-dialog";
 
 type Props = { onClose: () => void };
 
@@ -38,6 +40,11 @@ export default function ReadingApp({ onClose }: Props) {
     const customFontUrlRef = useRef<string | null>(null);
     const annotationFontUrlRef = useRef<string | null>(null);
     const userAnnotationFontUrlRef = useRef<string | null>(null);
+    // 换字体时要把上一张 FontFace 从 document.fonts 摘掉：family 名带时间戳，
+    // 不摘的话每次保存都会往文档里多挂一份字体，字体文件又不小。
+    const customFontFaceRef = useRef<FontFace | null>(null);
+    const annotationFontFaceRef = useRef<FontFace | null>(null);
+    const userAnnotationFontFaceRef = useRef<FontFace | null>(null);
     if (activeBook) lastBookRef.current = activeBook;
 
     const updateBackgroundUrl = (nextUrl: string | null) => {
@@ -51,15 +58,20 @@ export default function ReadingApp({ onClose }: Props) {
     const loadFontFace = async (
         blob: Blob | null,
         urlRef: React.MutableRefObject<string | null>,
+        faceRef: React.MutableRefObject<FontFace | null>,
         setFamily: (family: string | undefined) => void,
         familyPrefix: string,
     ) => {
+        if (faceRef.current) {
+            try { document.fonts.delete(faceRef.current); } catch { /* 老浏览器没有 delete，忽略 */ }
+            faceRef.current = null;
+        }
         if (urlRef.current) {
             URL.revokeObjectURL(urlRef.current);
             urlRef.current = null;
         }
         setFamily(undefined);
-        if (!blob) return;
+        if (!blob || typeof FontFace === "undefined") return;
 
         const url = URL.createObjectURL(blob);
         urlRef.current = url;
@@ -69,6 +81,7 @@ export default function ReadingApp({ onClose }: Props) {
             const face = new FontFace(familyName, `url("${url}")`);
             await face.load();
             document.fonts.add(face);
+            faceRef.current = face;
             setFamily(`"${familyName}"`);
         } catch {
             setFamily(undefined);
@@ -76,20 +89,23 @@ export default function ReadingApp({ onClose }: Props) {
     };
 
     const loadCustomFontFace = (blob: Blob | null) =>
-        loadFontFace(blob, customFontUrlRef, setCustomFontFamily, "AIVirtualPhoneReadingFont");
+        loadFontFace(blob, customFontUrlRef, customFontFaceRef, setCustomFontFamily, "AIVirtualPhoneReadingFont");
 
     const loadAnnotationFontFace = (blob: Blob | null) =>
-        loadFontFace(blob, annotationFontUrlRef, setAnnotationFontFamily, "AIVirtualPhoneReadingAnnotationFont");
+        loadFontFace(blob, annotationFontUrlRef, annotationFontFaceRef, setAnnotationFontFamily, "AIVirtualPhoneReadingAnnotationFont");
 
     const loadUserAnnotationFontFace = (blob: Blob | null) =>
-        loadFontFace(blob, userAnnotationFontUrlRef, setUserAnnotationFontFamily, "AIVirtualPhoneReadingUserAnnotationFont");
+        loadFontFace(blob, userAnnotationFontUrlRef, userAnnotationFontFaceRef, setUserAnnotationFontFamily, "AIVirtualPhoneReadingUserAnnotationFont");
 
     useEffect(() => {
-        hydrateReadingStorage().then(() => setReady(true));
-        setAppearance(loadReadingAppearance());
-        // 串行读取：这几项共用同一个 IndexedDB。并发打开时，若库缺 store 需要升版本补建，
-        // 会被其它尚未关闭的连接 block 掉。顺序执行可以保证同一时刻只有一个连接。
         void (async () => {
+            // 外观存在 kv 里，而 kv 的同步缓存要等 hydrate 完才有内容。先读会拿到空缓存，
+            // 于是整套外观静默退回默认值——用户看到的就是「设置根本没保存上」。
+            await Promise.all([hydrateKvDb(), hydrateReadingStorage()]).catch(() => {});
+            setAppearance(loadReadingAppearance());
+            setReady(true);
+            // 串行读取：这几项共用同一个 IndexedDB。并发打开时，若库缺 store 需要升版本补建，
+            // 会被其它尚未关闭的连接 block 掉。顺序执行可以保证同一时刻只有一个连接。
             const background = await loadReadingBackground();
             updateBackgroundUrl(background ? URL.createObjectURL(background) : null);
             await loadCustomFontFace(await loadReadingCustomFont());
@@ -101,21 +117,17 @@ export default function ReadingApp({ onClose }: Props) {
             if (customFontUrlRef.current) URL.revokeObjectURL(customFontUrlRef.current);
             if (annotationFontUrlRef.current) URL.revokeObjectURL(annotationFontUrlRef.current);
             if (userAnnotationFontUrlRef.current) URL.revokeObjectURL(userAnnotationFontUrlRef.current);
+            for (const faceRef of [customFontFaceRef, annotationFontFaceRef, userAnnotationFontFaceRef]) {
+                if (!faceRef.current) continue;
+                try { document.fonts.delete(faceRef.current); } catch { /* 老浏览器没有 delete，忽略 */ }
+                faceRef.current = null;
+            }
         };
     }, []);
 
     const handleSaveAppearance = async (
         nextAppearance: ReadingAppearance,
-        options: {
-            backgroundFile: File | null;
-            clearBackground: boolean;
-            customFontFile: File | null;
-            clearCustomFont: boolean;
-            annotationFontFile: File | null;
-            clearAnnotationFont: boolean;
-            userAnnotationFontFile: File | null;
-            clearUserAnnotationFont: boolean;
-        },
+        options: ReadingAppearanceSaveOptions,
     ) => {
         const normalized = saveReadingAppearance(nextAppearance);
         setAppearance(normalized);
@@ -177,6 +189,13 @@ export default function ReadingApp({ onClose }: Props) {
         ["--reading-line-height" as "--reading-line-height"]: String(appearance.lineHeight),
         ["--reading-bg-image" as "--reading-bg-image"]: backgroundUrl ? `url("${backgroundUrl}")` : "none",
     } as CSSProperties;
+    // 传给阅读器，让它在字体/字号/行距变化后重新分页
+    const appearanceKey = [
+        appearance.fontFamily,
+        appearance.fontSize,
+        appearance.lineHeight,
+        customFontFamily || "",
+    ].join("|");
     const hiddenViewerStyle = {
         position: "absolute",
         inset: 0,
@@ -194,12 +213,17 @@ export default function ReadingApp({ onClose }: Props) {
                     onClose={onClose}
                     appearance={appearance}
                     backgroundUrl={backgroundUrl}
+                    loadedFonts={{
+                        body: customFontFamily,
+                        annotation: annotationFontFamily,
+                        userAnnotation: userAnnotationFontFamily,
+                    }}
                     onSaveAppearance={handleSaveAppearance}
                 />
             )}
             {lastBookRef.current && (
                 <div style={activeBook ? undefined : hiddenViewerStyle} aria-hidden={!activeBook}>
-                    <ReadingViewer book={lastBookRef.current} onBack={() => setActiveBook(null)} />
+                    <ReadingViewer book={lastBookRef.current} appearanceKey={appearanceKey} onBack={() => setActiveBook(null)} />
                 </div>
             )}
         </div>
