@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { hydrateKvDb } from "@/lib/kv-db";
+import { loadReadingCustomCss, saveReadingCustomCss } from "@/lib/reading-custom-css";
 import { hydrateReadingStorage } from "@/lib/reading-storage";
 import { ReadingShelf } from "./reading-shelf";
 import { ReadingViewer } from "./reading-viewer";
@@ -14,6 +15,8 @@ import {
     loadReadingCustomFont,
     loadReadingUserAnnotationFont,
     readingBackgroundOverlay,
+    readingMarkColor,
+    READING_ANNOTATION_STYLE_DEFAULTS,
     resolveReadingAnnotationFontFamily,
     resolveReadingFontFamily,
     saveReadingAnnotationFont,
@@ -27,10 +30,38 @@ import type { ReadingAppearanceSaveOptions } from "./reading-appearance-dialog";
 
 type Props = { onClose: () => void };
 
+type AnnotationCardStyle = { fontSize: number; lineHeight: number; textColor: string; cardColor: string };
+
+/** 一档批注卡片的样式。suffix 为空是 TA 的批注（也就是所有卡片的基准），
+ *  [data-author="user"] 是用户自己的那档，权重更高，自然盖在基准上面。 */
+function annotationCardCss(suffix: string, style: AnnotationCardStyle): string {
+    const card = `.reading-app-surface .reading-annotation${suffix}`;
+    return [
+        `${card} {`,
+        `  background: ${style.cardColor};`,
+        "}",
+        // 卡片顶上那截「胶带」跟着卡片颜色走，否则换了底色会留下一条不搭的旧色
+        `${card}::before {`,
+        `  background: ${readingMarkColor(style.cardColor, 0.6)};`,
+        "}",
+        `${card} .reading-annotation-text,`,
+        `${card} .reading-annotation-translation {`,
+        `  font-size: calc(${style.fontSize}px * var(--app-text-scale, 1));`,
+        `  line-height: ${style.lineHeight};`,
+        `  color: ${style.textColor};`,
+        "}",
+        `${card} .reading-annotation-name {`,
+        `  font-size: calc(${Math.round(style.fontSize * 0.85 * 10) / 10}px * var(--app-text-scale, 1));`,
+        `  color: ${style.textColor};`,
+        "}",
+    ].join("\n");
+}
+
 export default function ReadingApp({ onClose }: Props) {
     const [ready, setReady] = useState(false);
     const [activeBook, setActiveBook] = useState<Book | null>(null);
     const [appearance, setAppearance] = useState<ReadingAppearance>(DEFAULT_READING_APPEARANCE);
+    const [customCss, setCustomCss] = useState("");
     const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
     const [customFontFamily, setCustomFontFamily] = useState<string | undefined>(undefined);
     const [annotationFontFamily, setAnnotationFontFamily] = useState<string | undefined>(undefined);
@@ -104,6 +135,7 @@ export default function ReadingApp({ onClose }: Props) {
             // 于是整套外观静默退回默认值——用户看到的就是「设置根本没保存上」。
             await Promise.all([hydrateKvDb(), hydrateReadingStorage()]).catch(() => {});
             setAppearance(loadReadingAppearance());
+            setCustomCss(loadReadingCustomCss());
             setReady(true);
             // 串行读取：这几项共用同一个 IndexedDB。并发打开时，若库缺 store 需要升版本补建，
             // 会被其它尚未关闭的连接 block 掉。顺序执行可以保证同一时刻只有一个连接。
@@ -132,6 +164,8 @@ export default function ReadingApp({ onClose }: Props) {
     ) => {
         const normalized = saveReadingAppearance(nextAppearance);
         setAppearance(normalized);
+        // 自定义 CSS 和外观一起保存。放在最前面：下面几个分支会 early return
+        setCustomCss(saveReadingCustomCss(options.customCss));
 
         // 放在下面几个 early return 之前：原有分支里清背景/清字体都会直接 return，
         // 挂在后面的话「同时改背景和批注字体」就会被吞掉。
@@ -184,6 +218,19 @@ export default function ReadingApp({ onClose }: Props) {
     const resolvedUserAnnotationFont = resolveReadingAnnotationFontFamily(appearance.userAnnotationFontFamily, userAnnotationFontFamily);
     const resolvedBodyFont = resolveReadingFontFamily(appearance.fontFamily, customFontFamily);
 
+    const annotationStyle = {
+        fontSize: appearance.annotationFontSize ?? READING_ANNOTATION_STYLE_DEFAULTS.fontSize,
+        lineHeight: appearance.annotationLineHeight ?? READING_ANNOTATION_STYLE_DEFAULTS.lineHeight,
+        textColor: appearance.annotationTextColor || READING_ANNOTATION_STYLE_DEFAULTS.textColor,
+        cardColor: appearance.annotationCardColor || READING_ANNOTATION_STYLE_DEFAULTS.cardColor,
+    };
+    const userAnnotationStyle = {
+        fontSize: appearance.userAnnotationFontSize ?? READING_ANNOTATION_STYLE_DEFAULTS.fontSize,
+        lineHeight: appearance.userAnnotationLineHeight ?? READING_ANNOTATION_STYLE_DEFAULTS.lineHeight,
+        textColor: appearance.userAnnotationTextColor || READING_ANNOTATION_STYLE_DEFAULTS.userTextColor,
+        cardColor: appearance.userAnnotationCardColor || READING_ANNOTATION_STYLE_DEFAULTS.userCardColor,
+    };
+
     // 字体由这段注入的 <style> 统一下发，而不是靠「根节点内联 + 继承」。
     //
     // 起因：用户的全局自定义 CSS 里有一条普通优先级的字体规则，它打不过带声明的
@@ -226,6 +273,19 @@ export default function ReadingApp({ onClose }: Props) {
             "  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;",
             "}",
         ].join("\n"),
+        // 批注卡片：字号、行距、文字颜色、卡片底色。名字那行按正文的 0.85 缩放，
+        // 否则把批注字号调大以后，署名还是原来那么小，看着像没跟上。
+        annotationCardCss("", annotationStyle),
+        annotationCardCss('[data-author="user"]', userAnnotationStyle),
+        // 高亮 / 划线的颜色
+        [
+            '.reading-app-surface .reading-mark[data-style="highlight"] {',
+            `  background: ${readingMarkColor(appearance.highlightColor || READING_ANNOTATION_STYLE_DEFAULTS.highlightColor, 0.72)};`,
+            "}",
+            '.reading-app-surface .reading-mark[data-style="underline"] {',
+            `  border-bottom-color: ${readingMarkColor(appearance.underlineColor || READING_ANNOTATION_STYLE_DEFAULTS.underlineColor, 0.85)};`,
+            "}",
+        ].join("\n"),
     ].filter(Boolean).join("\n");
 
     const appearanceStyle = {
@@ -253,6 +313,11 @@ export default function ReadingApp({ onClose }: Props) {
         resolvedBodyFont,
         resolvedAnnotationFont || "",
         resolvedUserAnnotationFont || "",
+        // 批注的字号和行距也会改变卡片高度，翻页模式得重新分页
+        annotationStyle.fontSize,
+        annotationStyle.lineHeight,
+        userAnnotationStyle.fontSize,
+        userAnnotationStyle.lineHeight,
     ].join("|");
     const hiddenViewerStyle = {
         position: "absolute",
@@ -266,6 +331,8 @@ export default function ReadingApp({ onClose }: Props) {
     return (
         <div className="absolute inset-0" style={appearanceStyle}>
             <style>{readingFontCss}</style>
+            {/* 用户自己写的阅读 CSS 放在最后，才盖得过上面那几条 */}
+            {customCss && <style>{customCss}</style>}
             {!activeBook && (
                 <ReadingShelf
                     onOpenBook={setActiveBook}

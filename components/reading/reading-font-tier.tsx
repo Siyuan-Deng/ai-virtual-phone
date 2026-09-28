@@ -134,8 +134,7 @@ export function ReadingFontTier({
                 <Type size={15} />
                 <span>{heading}</span>
             </div>
-            <label className="reading-settings-label">
-                <span>字体</span>
+            <label className="reading-settings-label reading-settings-label--bare">
                 <Select
                     value={value}
                     onChange={(e) => onChangeFamily(e.target.value as ReadingAnnotationFontFamilyId)}

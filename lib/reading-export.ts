@@ -14,7 +14,7 @@ export type AnnotationExportInput = {
 };
 
 const MARK_LABEL: Record<ReadingMark["style"], string> = {
-    highlight: "荧光笔",
+    highlight: "高亮",
     underline: "划线",
 };
 

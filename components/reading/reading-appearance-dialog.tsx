@@ -1,17 +1,23 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ImagePlus, Palette, Trash2 } from "lucide-react";
+import { Code2, Highlighter, ImagePlus, Palette, Trash2 } from "lucide-react";
 import { ContentDialog } from "@/components/ui/modal";
 import { ColorInput, Slider } from "@/components/ui/form";
 import type { ReadingAnnotationFontFamilyId, ReadingAppearance } from "@/lib/reading-appearance";
 import {
+    READING_ANNOTATION_FONT_SIZE_MAX,
+    READING_ANNOTATION_FONT_SIZE_MIN,
+    READING_ANNOTATION_STYLE_DEFAULTS,
     READING_BG_BRIGHTNESS_MAX,
     READING_BG_BRIGHTNESS_MIN,
     readingBackgroundOverlay,
+    readingMarkColor,
     resolveReadingAnnotationFontFamily,
     resolveReadingFontFamily,
 } from "@/lib/reading-appearance";
+import CSSSchemeBar from "@/components/ui/css-scheme-picker";
+import { READING_CSS_SCHEME_TARGET, loadReadingCustomCss } from "@/lib/reading-custom-css";
 import { ReadingFontTier } from "./reading-font-tier";
 import { ReadingFontDiagnostics } from "./reading-font-diagnostics";
 
@@ -24,6 +30,8 @@ export type ReadingAppearanceSaveOptions = {
     clearAnnotationFont: boolean;
     userAnnotationFontFile: File | null;
     clearUserAnnotationFont: boolean;
+    /** 阅读 app 的自定义 CSS（和外观存在一起保存，空串表示清空） */
+    customCss: string;
 };
 
 /** 已经加载好的三档自定义字体 family（形如 "XxxFont_123"），用来让预览行显示真实字体 */
@@ -53,6 +61,7 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
     const [clearUserAnnotationFont, setClearUserAnnotationFont] = useState(false);
     const [saving, setSaving] = useState(false);
     const [previewUrl, setPreviewUrl] = useState<string | null>(backgroundUrl);
+    const [customCssDraft, setCustomCssDraft] = useState(() => loadReadingCustomCss());
     const fileRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
@@ -108,6 +117,7 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                 clearAnnotationFont,
                 userAnnotationFontFile,
                 clearUserAnnotationFont,
+                customCss: customCssDraft,
             });
             onClose();
         } catch (err) {
@@ -200,7 +210,40 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                         setClearAnnotationFont(true);
                         setDraft((prev) => ({ ...prev, annotationCustomFontName: undefined }));
                     }}
-                />
+                >
+                    <Slider
+                        label="字号"
+                        min={READING_ANNOTATION_FONT_SIZE_MIN}
+                        max={READING_ANNOTATION_FONT_SIZE_MAX}
+                        step={1}
+                        value={draft.annotationFontSize ?? READING_ANNOTATION_STYLE_DEFAULTS.fontSize}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, annotationFontSize: Number(e.target.value) }))}
+                        displayValue={`${draft.annotationFontSize ?? READING_ANNOTATION_STYLE_DEFAULTS.fontSize}px`}
+                    />
+                    <Slider
+                        label="行间距"
+                        min={1.2}
+                        max={2.4}
+                        step={0.02}
+                        value={draft.annotationLineHeight ?? READING_ANNOTATION_STYLE_DEFAULTS.lineHeight}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, annotationLineHeight: Number(e.target.value) }))}
+                        displayValue={(draft.annotationLineHeight ?? READING_ANNOTATION_STYLE_DEFAULTS.lineHeight).toFixed(2)}
+                    />
+                    <div className="reading-settings-color-row">
+                        <span className="reading-settings-label-inline">文字颜色</span>
+                        <ColorInput
+                            value={draft.annotationTextColor || READING_ANNOTATION_STYLE_DEFAULTS.textColor}
+                            onChange={(annotationTextColor) => setDraft((prev) => ({ ...prev, annotationTextColor }))}
+                        />
+                    </div>
+                    <div className="reading-settings-color-row">
+                        <span className="reading-settings-label-inline">卡片颜色</span>
+                        <ColorInput
+                            value={draft.annotationCardColor || READING_ANNOTATION_STYLE_DEFAULTS.cardColor}
+                            onChange={(annotationCardColor) => setDraft((prev) => ({ ...prev, annotationCardColor }))}
+                        />
+                    </div>
+                </ReadingFontTier>
 
                 <ReadingFontTier
                     heading="我的批注样式"
@@ -229,7 +272,73 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                         setClearUserAnnotationFont(true);
                         setDraft((prev) => ({ ...prev, userAnnotationCustomFontName: undefined }));
                     }}
-                />
+                >
+                    <Slider
+                        label="字号"
+                        min={READING_ANNOTATION_FONT_SIZE_MIN}
+                        max={READING_ANNOTATION_FONT_SIZE_MAX}
+                        step={1}
+                        value={draft.userAnnotationFontSize ?? READING_ANNOTATION_STYLE_DEFAULTS.fontSize}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, userAnnotationFontSize: Number(e.target.value) }))}
+                        displayValue={`${draft.userAnnotationFontSize ?? READING_ANNOTATION_STYLE_DEFAULTS.fontSize}px`}
+                    />
+                    <Slider
+                        label="行间距"
+                        min={1.2}
+                        max={2.4}
+                        step={0.02}
+                        value={draft.userAnnotationLineHeight ?? READING_ANNOTATION_STYLE_DEFAULTS.lineHeight}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, userAnnotationLineHeight: Number(e.target.value) }))}
+                        displayValue={(draft.userAnnotationLineHeight ?? READING_ANNOTATION_STYLE_DEFAULTS.lineHeight).toFixed(2)}
+                    />
+                    <div className="reading-settings-color-row">
+                        <span className="reading-settings-label-inline">文字颜色</span>
+                        <ColorInput
+                            value={draft.userAnnotationTextColor || READING_ANNOTATION_STYLE_DEFAULTS.userTextColor}
+                            onChange={(userAnnotationTextColor) => setDraft((prev) => ({ ...prev, userAnnotationTextColor }))}
+                        />
+                    </div>
+                    <div className="reading-settings-color-row">
+                        <span className="reading-settings-label-inline">卡片颜色</span>
+                        <ColorInput
+                            value={draft.userAnnotationCardColor || READING_ANNOTATION_STYLE_DEFAULTS.userCardColor}
+                            onChange={(userAnnotationCardColor) => setDraft((prev) => ({ ...prev, userAnnotationCardColor }))}
+                        />
+                    </div>
+                </ReadingFontTier>
+
+                <section className="reading-settings-group">
+                    <div className="reading-settings-heading">
+                        <Highlighter size={15} />
+                        <span>高亮与划线</span>
+                    </div>
+                    <div className="reading-settings-color-row">
+                        <span className="reading-settings-label-inline">高亮颜色</span>
+                        <ColorInput
+                            value={draft.highlightColor || READING_ANNOTATION_STYLE_DEFAULTS.highlightColor}
+                            onChange={(highlightColor) => setDraft((prev) => ({ ...prev, highlightColor }))}
+                        />
+                    </div>
+                    <div className="reading-settings-color-row">
+                        <span className="reading-settings-label-inline">划线颜色</span>
+                        <ColorInput
+                            value={draft.underlineColor || READING_ANNOTATION_STYLE_DEFAULTS.underlineColor}
+                            onChange={(underlineColor) => setDraft((prev) => ({ ...prev, underlineColor }))}
+                        />
+                    </div>
+                    <div className="reading-mark-preview">
+                        <span
+                            className="reading-mark"
+                            data-style="highlight"
+                            style={{ background: readingMarkColor(draft.highlightColor || READING_ANNOTATION_STYLE_DEFAULTS.highlightColor, 0.72) }}
+                        >高亮效果</span>
+                        <span
+                            className="reading-mark"
+                            data-style="underline"
+                            style={{ borderBottomColor: readingMarkColor(draft.underlineColor || READING_ANNOTATION_STYLE_DEFAULTS.underlineColor, 0.85) }}
+                        >划线效果</span>
+                    </div>
+                </section>
 
                 <section className="reading-settings-group">
                     <div className="reading-settings-heading">
@@ -290,6 +399,50 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                             setClearBackground(false);
                         }}
                     />
+                </section>
+
+                <section className="reading-settings-group">
+                    <div className="reading-settings-heading">
+                        <Code2 size={15} />
+                        <span>自定义 CSS</span>
+                    </div>
+                    <p className="reading-settings-inline-note">
+                        <span>只作用在阅读 app 内部。常用类名：.reading-line（正文）、.reading-annotation（批注卡片）、.reading-list-item（书架条目）。</span>
+                    </p>
+                    <textarea
+                        className="reading-custom-css-input"
+                        value={customCssDraft}
+                        onChange={(e) => setCustomCssDraft(e.target.value)}
+                        placeholder={".reading-annotation { border-radius: 10px; }"}
+                        spellCheck={false}
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        disabled={saving}
+                    />
+                    <div className="reading-settings-actions">
+                        <CSSSchemeBar
+                            target={READING_CSS_SCHEME_TARGET}
+                            currentCSS={customCssDraft}
+                            onLoad={setCustomCssDraft}
+                            btnStyle={{
+                                width: 34,
+                                height: 34,
+                                borderRadius: 8,
+                                border: "1px solid var(--reading-warm-card-border, #f0e8da)",
+                                background: "rgba(255, 255, 255, 0.6)",
+                                color: "var(--reading-warm-ink, #111)",
+                            }}
+                        />
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-ghost"
+                            onClick={() => setCustomCssDraft("")}
+                            disabled={saving || !customCssDraft}
+                        >
+                            <Trash2 size={14} />
+                            <span>清空</span>
+                        </button>
+                    </div>
                 </section>
 
                 <ReadingFontDiagnostics appearance={appearance} loadedFonts={loadedFonts} />

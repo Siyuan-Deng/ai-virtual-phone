@@ -23,12 +23,54 @@ export type ReadingAppearance = {
     /** 缺省即「跟随正文」，老配置读出来就是这个，行为与改动前一致。 */
     annotationFontFamily?: ReadingAnnotationFontFamilyId;
     annotationCustomFontName?: string;
+    /** TA 的批注：字号 / 行距 / 颜色。缺省时用 READING_ANNOTATION_STYLE_DEFAULTS，
+     *  也就是加这些设置之前 CSS 里写死的那套值。 */
+    annotationFontSize?: number;
+    annotationLineHeight?: number;
+    annotationTextColor?: string;
+    /** TA 的批注卡片底色 */
+    annotationCardColor?: string;
     /** 用户自己写的批注再单独一档；缺省时跟随角色批注的字体。 */
     userAnnotationFontFamily?: ReadingAnnotationFontFamilyId;
     userAnnotationCustomFontName?: string;
+    userAnnotationFontSize?: number;
+    userAnnotationLineHeight?: number;
+    userAnnotationTextColor?: string;
+    userAnnotationCardColor?: string;
+    /** 高亮 / 划线的颜色 */
+    highlightColor?: string;
+    underlineColor?: string;
     /** 背景图亮度：1 = 原图，<1 压暗，>1 提亮。缺省即 1（和加这个设置之前一样）。 */
     backgroundBrightness?: number;
 };
+
+/** 批注卡片的出厂配色和字号。这几个数原来写死在 chat.css 里，
+ *  现在搬出来当默认值：用户没调过时渲染结果和以前一模一样。 */
+export const READING_ANNOTATION_STYLE_DEFAULTS = {
+    fontSize: 12,
+    lineHeight: 1.72,
+    textColor: "#4a3d1a",
+    cardColor: "#fff1a8",
+    userTextColor: "#1e3050",
+    userCardColor: "#e7f0ff",
+    highlightColor: "#ffe278",
+    underlineColor: "#be8c3c",
+} as const;
+
+export const READING_ANNOTATION_FONT_SIZE_MIN = 9;
+export const READING_ANNOTATION_FONT_SIZE_MAX = 22;
+
+/** 高亮和划线要留一点透明度，底下的背景图/底色还能透出来。
+ *  颜色选择器给的是十六进制，这里补上原来 CSS 里那档透明度。 */
+export function readingMarkColor(hex: string, alpha: number): string {
+    const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+    if (!match) return hex;
+    const value = parseInt(match[1], 16);
+    const r = (value >> 16) & 255;
+    const g = (value >> 8) & 255;
+    const b = value & 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 export const READING_BG_BRIGHTNESS_MIN = 0.4;
 export const READING_BG_BRIGHTNESS_MAX = 1.6;
@@ -158,10 +200,35 @@ function normalizeAppearance(raw: Partial<ReadingAppearance> | null | undefined)
         READING_BG_BRIGHTNESS_MAX,
     );
 
+    // 批注的字号/行距/颜色：没存过就落到出厂值，存过就夹到合法区间
+    const annotationSize = (value: unknown) => clamp(
+        Number(value ?? READING_ANNOTATION_STYLE_DEFAULTS.fontSize) || READING_ANNOTATION_STYLE_DEFAULTS.fontSize,
+        READING_ANNOTATION_FONT_SIZE_MIN,
+        READING_ANNOTATION_FONT_SIZE_MAX,
+    );
+    const annotationLine = (value: unknown) => clamp(
+        Number(value ?? READING_ANNOTATION_STYLE_DEFAULTS.lineHeight) || READING_ANNOTATION_STYLE_DEFAULTS.lineHeight,
+        1.1,
+        2.6,
+    );
+    const color = (value: unknown, fallback: string) => (
+        typeof value === "string" && value.trim() ? value.trim() : fallback
+    );
+
     return {
         fontFamily, fontSize, textColor, lineHeight, customFontName,
         annotationFontFamily, annotationCustomFontName,
+        annotationFontSize: annotationSize(raw?.annotationFontSize),
+        annotationLineHeight: annotationLine(raw?.annotationLineHeight),
+        annotationTextColor: color(raw?.annotationTextColor, READING_ANNOTATION_STYLE_DEFAULTS.textColor),
+        annotationCardColor: color(raw?.annotationCardColor, READING_ANNOTATION_STYLE_DEFAULTS.cardColor),
         userAnnotationFontFamily, userAnnotationCustomFontName,
+        userAnnotationFontSize: annotationSize(raw?.userAnnotationFontSize),
+        userAnnotationLineHeight: annotationLine(raw?.userAnnotationLineHeight),
+        userAnnotationTextColor: color(raw?.userAnnotationTextColor, READING_ANNOTATION_STYLE_DEFAULTS.userTextColor),
+        userAnnotationCardColor: color(raw?.userAnnotationCardColor, READING_ANNOTATION_STYLE_DEFAULTS.userCardColor),
+        highlightColor: color(raw?.highlightColor, READING_ANNOTATION_STYLE_DEFAULTS.highlightColor),
+        underlineColor: color(raw?.underlineColor, READING_ANNOTATION_STYLE_DEFAULTS.underlineColor),
         backgroundBrightness,
     };
 }

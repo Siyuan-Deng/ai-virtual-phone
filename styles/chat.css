@@ -3939,14 +3939,17 @@
   margin-top: 3px;
 }
 /* 用户批注：与角色批注左右错开、配色区分，便于一眼分辨是谁写的 */
+/* 我的批注和 TA 的批注只差颜色：以前这里还额外缩进 22px、右边留 4px，
+   于是同一屏上两种卡片一宽一窄，看着像两个组件。几何尺寸一律对齐基准卡片，
+   底色和文字颜色则由阅读外观里的设置下发。 */
 .reading-annotation[data-author="user"] {
-  margin-left: 22px;
-  margin-right: 4px;
   background: #e7f0ff;
-  transform: rotate(0.3deg);
   box-shadow:
     1px 2px 6px rgba(20, 40, 80, 0.08),
     inset 0 -1px 0 rgba(60, 100, 170, 0.1);
+}
+.reading-annotation[data-author="user"]::before {
+  background: rgba(190, 214, 250, 0.6);
 }
 .reading-annotation[data-author="user"] .reading-annotation-name {
   color: #33507f;
@@ -7560,4 +7563,37 @@
   font-size: calc(10px*var(--app-text-scale,1));
   letter-spacing: 0.1em;
   color: var(--reading-warm-ink-tertiary, #999);
+}
+
+/* 下拉自己就说明了是什么，上面不再顶一行「字体」 */
+.reading-settings-label--bare {
+  gap: 0;
+}
+/* 高亮/划线取色的实时样张 */
+.reading-mark-preview {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: calc(12px*var(--app-text-scale,1));
+  color: var(--reading-warm-ink, #111);
+}
+/* 阅读 app 的自定义 CSS 输入框 */
+.reading-custom-css-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 120px;
+  resize: vertical;
+  padding: 10px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--reading-warm-card-border, #f0e8da);
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--reading-warm-ink, #111);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
+  font-size: calc(11px*var(--app-text-scale,1));
+  line-height: 1.6;
+  outline: none;
+}
+.reading-custom-css-input::placeholder {
+  color: var(--reading-warm-ink-tertiary, #b3a898);
 }
