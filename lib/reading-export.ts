@@ -1,6 +1,7 @@
 "use client";
 
 import type { Book, BookChapter, ReadingAnnotation, ReadingMark } from "./reading-types";
+import { readingMarkGroupId } from "./reading-marks";
 import { isUserAnnotation } from "./reading-types";
 
 export type AnnotationExportInput = {
@@ -30,7 +31,7 @@ export function buildAnnotationMarkdown(input: AnnotationExportInput): string {
         `# 《${book.title}》批注`,
         "",
         `> 导出于 ${formatDate(input.exportedAt ?? new Date())}`,
-        `> 批注 ${annotations.length} 条 · 标记 ${marks.length} 处`,
+        `> 批注 ${annotations.length} 条 · 标记 ${new Set(marks.map(readingMarkGroupId)).size} 处`,
         "",
     ];
 
@@ -57,8 +58,17 @@ export function buildAnnotationMarkdown(input: AnnotationExportInput): string {
 
         if (chapterMarks.length > 0) {
             lines.push("### 标记", "");
+            // 跨段划出来的那几条是一次划选，导出时合成一条，别拆成三行
+            const groups = new Map<string, ReadingMark[]>();
             for (const mark of chapterMarks) {
-                lines.push(`- ${MARK_LABEL[mark.style]}：${mark.text.replace(/\n+/g, " ")}`);
+                const key = readingMarkGroupId(mark);
+                const existing = groups.get(key);
+                if (existing) existing.push(mark);
+                else groups.set(key, [mark]);
+            }
+            for (const group of groups.values()) {
+                const text = group.map(mark => mark.text.replace(/\n+/g, " ")).join(" ");
+                lines.push(`- ${MARK_LABEL[group[0].style]}：${text}`);
             }
             lines.push("");
         }

@@ -75,6 +75,10 @@ export type ReadingMark = {
     text: string;
     style: ReadingMarkStyle;
     createdAt: string;
+    /** 跨段划选时，同一次划出来的若干段共用一个 groupId：存储和渲染仍按段落切开
+     *  （渲染就不用改），但删除、批注、分享都按整组处理。老数据没有这个字段，
+     *  自己就是一组。 */
+    groupId?: string;
 };
 
 export function isUserAnnotation(annotation: Pick<ReadingAnnotation, "authorType">): boolean {

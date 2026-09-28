@@ -18,7 +18,7 @@ import {
     DEFAULT_READING_INTERACTION_CONFIG,
 } from "@/lib/reading-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
-import { loadReadingMarks, saveReadingMark, deleteReadingMark } from "@/lib/reading-marks";
+import { loadReadingMarks, saveReadingMark, deleteReadingMark, readingMarkGroup } from "@/lib/reading-marks";
 import {
     appendReadingAnnotationMemos,
     deleteReadingAnnotationMemo,
@@ -27,7 +27,7 @@ import {
 } from "@/lib/reading-memory";
 import { annotationExportFileName, buildAnnotationMarkdown } from "@/lib/reading-export";
 import { downloadFile } from "@/lib/download-utils";
-import { textOffsetWithin } from "./reading-selection";
+import { collectSelectionSegments, type ReadingSelectionSegment } from "./reading-selection";
 import { isUserAnnotation, type ReadingMark, type ReadingMarkStyle } from "@/lib/reading-types";
 import { generateAnnotationBatch, generateReadingChat, parseReadingDiscussResponse, summarizeReadingRange, type ReadingDiscussAction, type ReadingDiscussContext } from "@/lib/reading-engine";
 import { loadChatMessages, pushChatMessage, deleteChatMessage, editChatMessage, loadChatContacts, createOrGetSession, isReadingDiscussMessage } from "@/lib/chat-storage";
@@ -38,6 +38,7 @@ import { MessageBubble } from "@/components/chat/message-bubble";
 import { ContentDialog } from "@/components/ui/modal";
 import { Select, Toggle } from "@/components/ui/form";
 import { PdfPageRenderer } from "./reading-pdf-viewer";
+import { ReadingShareDialog } from "./reading-share-dialog";
 import { decodeTxtArrayBuffer, parsePdfPageRange, PDF_PAGES_PER_CHAPTER, parseTxtContent, parseEpubFile, parseMobiFile } from "@/lib/reading-parser";
 import type { Book, BookChapter, ReadingAnnotation, ReadingProgress } from "@/lib/reading-types";
 import type { Character } from "@/lib/character-types";
@@ -294,13 +295,16 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     const [inlineImageUrls, setInlineImageUrls] = useState<Record<number, string>>({});
     const [selectionInfo, setSelectionInfo] = useState<
         {
-            text: string; chapterIndex: number; paragraphIndex: number; start: number; end: number;
+            text: string;
+            /** 划选覆盖的每一段。跨段划选时不止一条，按阅读顺序排好 */
+            segments: ReadingSelectionSegment[];
             /** 菜单落点：系统菜单永远紧贴选区，所以我们去屏幕另一端 */
             placeAtTop: boolean; topOffset: number;
         } | null
     >(null);
     /** 点到已有的荧光笔/划线时弹出的删除菜单 */
     const [markMenu, setMarkMenu] = useState<{ mark: ReadingMark; x: number; y: number } | null>(null);
+    const [shareTarget, setShareTarget] = useState<ReadingMark[] | null>(null);
     /** 选字菜单要停在页脚正上方，页脚高度随安全区/字号变，量出来最稳 */
     const footerRef = useRef<HTMLElement | null>(null);
     const headerRef = useRef<HTMLElement | null>(null);
@@ -564,29 +568,25 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     }, []);
 
 
-    /** 松手后读取选区：定位到所属段落，换算成段落内字符区间 */
+    /** 松手后读取选区：定位到覆盖的每一段，换算成段落内字符区间 */
     const captureSelection = useCallback(() => {
         const sel = typeof window !== "undefined" ? window.getSelection() : null;
         if (!sel || sel.isCollapsed || sel.rangeCount === 0) { setSelectionInfo(null); return; }
-        const text = sel.toString().trim();
-        if (text.length < 2) { setSelectionInfo(null); return; }
 
         const range = sel.getRangeAt(0);
-        const startLine = (range.startContainer.nodeType === 1 ? range.startContainer as Element : range.startContainer.parentElement)
-            ?.closest<HTMLElement>("[data-paragraph]");
-        const endLine = (range.endContainer.nodeType === 1 ? range.endContainer as Element : range.endContainer.parentElement)
-            ?.closest<HTMLElement>("[data-paragraph]");
-        if (!startLine || !endLine) { setSelectionInfo(null); return; }
-        // 跨段选取暂不支持：锚点无法落在单一段落上
-        if (startLine.dataset.paragraph !== endLine.dataset.paragraph) { setSelectionInfo(null); return; }
-
-        const paragraphIndex = Number(startLine.dataset.paragraph);
-        const lineChapter = Number(startLine.dataset.chapter);
-        const lineStart = Number(startLine.dataset.charstart || 0);
-        const endLineStart = Number(endLine.dataset.charstart || 0);
-        const startOffset = lineStart + textOffsetWithin(startLine, range.startContainer, range.startOffset);
-        const end = endLineStart + textOffsetWithin(endLine, range.endContainer, range.endOffset);
-        if (!(end > startOffset)) { setSelectionInfo(null); return; }
+        const surface = surfaceRef.current;
+        if (!surface) { setSelectionInfo(null); return; }
+        // 跨段划选：拆成「每段一条」。批注卡片不带 data-paragraph，不会被算进来，
+        // 所以从正文划到下一段时，中间那张批注卡片的文字不会混进摘抄。
+        const segments = collectSelectionSegments(range, surface);
+        if (segments.length === 0) { setSelectionInfo(null); return; }
+        // 正文按数据里的段落切，不从 DOM 取：翻页模式下一段可能被切成好几行，
+        // 中间还可能夹着批注卡片
+        const selectedText = segments
+            .map((segment) => (chapters[segment.chapterIndex]?.paragraphs[segment.paragraphIndex] || "").slice(segment.start, segment.end))
+            .filter(Boolean)
+            .join("\n");
+        if (selectedText.trim().length < 2) { setSelectionInfo(null); return; }
 
         const surfaceRect = surfaceRef.current?.getBoundingClientRect();
         const rect = range.getBoundingClientRect();
@@ -595,11 +595,12 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         const headerRect = headerRef.current?.getBoundingClientRect();
         const selectionCenterY = (rect.top + rect.bottom) / 2 - originY;
         setSelectionInfo({
-            text, chapterIndex: lineChapter, paragraphIndex, start: startOffset, end,
+            text: selectedText,
+            segments,
             placeAtTop: selectionCenterY > surfaceHeight / 2,
             topOffset: (headerRect ? headerRect.bottom - originY : 56) + 12,
         });
-    }, []);
+    }, [chapters]);
 
     /** 点已有标记：iOS 的系统菜单只在有选区时出现，这里是单纯点击，就近弹自己的菜单 */
     const handleSurfaceClick = (e: React.MouseEvent) => {
@@ -614,27 +615,39 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         setMarkMenu({ mark, x: clampMenuX(rect.left + rect.width / 2, viewportWidth), y: rect.bottom });
     };
 
+    const openShareDialog = (mark: ReadingMark) => {
+        setShareTarget(readingMarkGroup(marks, mark));
+        setMarkMenu(null);
+    };
+
     const removeMark = (mark: ReadingMark) => {
-        deleteReadingMark(book.id, mark.id);
-        setMarks(prev => prev.filter(item => item.id !== mark.id));
+        // 跨段划出来的那几条是一体的，删一条就该整组消失
+        const group = readingMarkGroup(marks, mark);
+        const ids = new Set(group.map(item => item.id));
+        group.forEach(item => deleteReadingMark(book.id, item.id));
+        setMarks(prev => prev.filter(item => !ids.has(item.id)));
         setMarkMenu(null);
     };
 
     const addMark = (style: ReadingMarkStyle) => {
-        if (!selectionInfo) return;
-        const mark: ReadingMark = {
-            id: `mk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        if (!selectionInfo || selectionInfo.segments.length === 0) return;
+        // 跨段划选存成一组：渲染仍按段落切开，删除/批注/分享时按整组处理
+        const groupId = `mg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const createdAt = new Date().toISOString();
+        const created: ReadingMark[] = selectionInfo.segments.map((segment, index) => ({
+            id: `mk_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 6)}`,
             bookId: book.id,
-            chapterIndex: selectionInfo.chapterIndex,
-            paragraphIndex: selectionInfo.paragraphIndex,
-            start: selectionInfo.start,
-            end: selectionInfo.end,
-            text: selectionInfo.text,
+            chapterIndex: segment.chapterIndex,
+            paragraphIndex: segment.paragraphIndex,
+            start: segment.start,
+            end: segment.end,
+            text: (chapters[segment.chapterIndex]?.paragraphs[segment.paragraphIndex] || "").slice(segment.start, segment.end),
             style,
-            createdAt: new Date().toISOString(),
-        };
-        saveReadingMark(mark);
-        setMarks(prev => [...prev, mark]);
+            createdAt,
+            groupId,
+        }));
+        created.forEach(saveReadingMark);
+        setMarks(prev => [...prev, ...created]);
         clearSelection();
     };
 
@@ -3236,11 +3249,14 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => e.stopPropagation()}
                 >
+                    <button type="button" onClick={() => openShareDialog(markMenu.mark)}>分享</button>
                     <button type="button" onClick={() => {
+                        const group = readingMarkGroup(marks, markMenu.mark);
                         setPendingQuote({
-                            text: markMenu.mark.text,
-                            chapterIndex: markMenu.mark.chapterIndex,
-                            paragraphIndex: markMenu.mark.paragraphIndex,
+                            // 跨段划选时整段引用，锚点落在第一段
+                            text: group.map(item => item.text).join("\n"),
+                            chapterIndex: group[0].chapterIndex,
+                            paragraphIndex: group[0].paragraphIndex,
                         });
                         setMyAnnotationText("");
                         setMarkMenu(null);
@@ -3250,6 +3266,36 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                     <button type="button" onClick={() => setMarkMenu(null)}>取消</button>
                 </div>
             )}
+            {shareTarget && shareTarget.length > 0 && (() => {
+                const first = shareTarget[0];
+                const chapter = chapters[first.chapterIndex];
+                // 这段话在全书的位置：章内按「这一段之前有多少字」算，再换算到全书
+                const charsBefore = (chapter?.paragraphs || [])
+                    .slice(0, first.paragraphIndex)
+                    .reduce((sum, paragraph) => sum + paragraph.length, 0) + first.start;
+                const chapterChars = chapterCharStats.lengths[first.chapterIndex] || 0;
+                const withinChapter = chapterChars > 0 ? charsBefore / chapterChars : 0;
+                // 这几段上已有的批注也能一起带进图里
+                const markedParagraphs = new Set(shareTarget.map(item => `${item.chapterIndex}:${item.paragraphIndex}`));
+                const relatedAnnotations = annotations
+                    .filter(annotation => markedParagraphs.has(`${annotation.chapterIndex}:${annotation.paragraphIndex}`))
+                    .sort((a, b) => a.paragraphIndex - b.paragraphIndex || a.createdAt.localeCompare(b.createdAt))
+                    .map(annotation => ({
+                        name: isUserAnnotation(annotation) ? (userDisplayName || "我") : (annotation.characterName || "TA"),
+                        content: annotation.content,
+                    }));
+                return (
+                    <ReadingShareDialog
+                        quoteParagraphs={shareTarget.map(item => item.text)}
+                        bookTitle={book.title}
+                        chapterTitle={chapter?.title || ""}
+                        progressPercent={toBookFraction(first.chapterIndex, withinChapter) * 100}
+                        annotations={relatedAnnotations}
+                        markStyle={first.style}
+                        onClose={() => setShareTarget(null)}
+                    />
+                );
+            })()}
             {showCharAnnotationMenu && (
                 <ContentDialog
                     title="TA的批注"

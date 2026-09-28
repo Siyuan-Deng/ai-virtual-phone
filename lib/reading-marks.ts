@@ -31,6 +31,19 @@ export function saveReadingMark(mark: ReadingMark): void {
     kvSet(MARKS_KEY, JSON.stringify(all));
 }
 
+/** 这条标记属于哪一组。老数据没有 groupId，自己就是一组。 */
+export function readingMarkGroupId(mark: ReadingMark): string {
+    return mark.groupId || mark.id;
+}
+
+/** 同一次划选产生的所有标记，按阅读顺序排好 */
+export function readingMarkGroup(marks: ReadingMark[], mark: ReadingMark): ReadingMark[] {
+    const groupId = readingMarkGroupId(mark);
+    return marks
+        .filter(item => readingMarkGroupId(item) === groupId)
+        .sort((x, y) => x.chapterIndex - y.chapterIndex || x.paragraphIndex - y.paragraphIndex || x.start - y.start);
+}
+
 export function deleteReadingMark(bookId: string, markId: string): void {
     if (typeof window === "undefined") return;
     const all = loadAll();
