@@ -75,6 +75,11 @@ export type ReadingMark = {
     text: string;
     style: ReadingMarkStyle;
     createdAt: string;
+    /** 谁划的。角色也能在正文上划重点；老数据没有这个字段，都是用户自己划的。 */
+    authorType?: "user" | "character";
+    /** 角色划的线记下是哪个角色，列表里好显示 */
+    characterId?: string;
+    characterName?: string;
     /** 跨段划选时，同一次划出来的若干段共用一个 groupId：存储和渲染仍按段落切开
      *  （渲染就不用改），但删除、批注、分享都按整组处理。老数据没有这个字段，
      *  自己就是一组。 */

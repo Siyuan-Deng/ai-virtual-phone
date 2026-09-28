@@ -62,6 +62,19 @@ export function loadReadingSummaryMemos(bookId: string, bookTitle: string): Read
         .reverse();
 }
 
+/** 批注被手动改过之后，记忆区那条要跟着变——否则角色记得的还是旧话。 */
+export function updateReadingAnnotationMemoContent(annotationId: string, content: string): void {
+    if (typeof window === "undefined") return;
+    const existing = loadReadingAnnotationMemos();
+    let changed = false;
+    const next = existing.map(memo => {
+        if (memo.id !== annotationId || memo.content === content) return memo;
+        changed = true;
+        return { ...memo, content };
+    });
+    if (changed) persist(next);
+}
+
 export function deleteReadingAnnotationMemo(annotationId: string): void {
     if (typeof window === "undefined") return;
     const existing = loadReadingAnnotationMemos();

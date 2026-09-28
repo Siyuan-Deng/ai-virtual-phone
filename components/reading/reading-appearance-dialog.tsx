@@ -312,32 +312,49 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                         <Highlighter size={15} />
                         <span>高亮与划线</span>
                     </div>
-                    <div className="reading-settings-color-row">
-                        <span className="reading-settings-label-inline">高亮颜色</span>
-                        <ColorInput
-                            value={draft.highlightColor || READING_ANNOTATION_STYLE_DEFAULTS.highlightColor}
-                            onChange={(highlightColor) => setDraft((prev) => ({ ...prev, highlightColor }))}
-                        />
-                    </div>
-                    <div className="reading-settings-color-row">
-                        <span className="reading-settings-label-inline">划线颜色</span>
-                        <ColorInput
-                            value={draft.underlineColor || READING_ANNOTATION_STYLE_DEFAULTS.underlineColor}
-                            onChange={(underlineColor) => setDraft((prev) => ({ ...prev, underlineColor }))}
-                        />
-                    </div>
-                    <div className="reading-mark-preview">
-                        <span
-                            className="reading-mark"
-                            data-style="highlight"
-                            style={{ background: readingMarkColor(draft.highlightColor || READING_ANNOTATION_STYLE_DEFAULTS.highlightColor, 0.72) }}
-                        >高亮效果</span>
-                        <span
-                            className="reading-mark"
-                            data-style="underline"
-                            style={{ borderBottomColor: readingMarkColor(draft.underlineColor || READING_ANNOTATION_STYLE_DEFAULTS.underlineColor, 0.85) }}
-                        >划线效果</span>
-                    </div>
+                    <p className="reading-settings-inline-note">
+                        <span>自己划的和 TA 划的分开配色，一眼看得出这道线是谁划的。</span>
+                    </p>
+                    {([
+                        {
+                            title: "我划的",
+                            highlight: draft.highlightColor || READING_ANNOTATION_STYLE_DEFAULTS.highlightColor,
+                            underline: draft.underlineColor || READING_ANNOTATION_STYLE_DEFAULTS.underlineColor,
+                            onHighlight: (highlightColor: string) => setDraft((prev) => ({ ...prev, highlightColor })),
+                            onUnderline: (underlineColor: string) => setDraft((prev) => ({ ...prev, underlineColor })),
+                        },
+                        {
+                            title: "TA 划的",
+                            highlight: draft.charHighlightColor || READING_ANNOTATION_STYLE_DEFAULTS.charHighlightColor,
+                            underline: draft.charUnderlineColor || READING_ANNOTATION_STYLE_DEFAULTS.charUnderlineColor,
+                            onHighlight: (charHighlightColor: string) => setDraft((prev) => ({ ...prev, charHighlightColor })),
+                            onUnderline: (charUnderlineColor: string) => setDraft((prev) => ({ ...prev, charUnderlineColor })),
+                        },
+                    ]).map((tier) => (
+                        <div key={tier.title} className="reading-mark-tier">
+                            <span className="reading-settings-label-inline">{tier.title}</span>
+                            <div className="reading-settings-color-row">
+                                <span className="reading-settings-label-inline">高亮颜色</span>
+                                <ColorInput value={tier.highlight} onChange={tier.onHighlight} />
+                            </div>
+                            <div className="reading-settings-color-row">
+                                <span className="reading-settings-label-inline">划线颜色</span>
+                                <ColorInput value={tier.underline} onChange={tier.onUnderline} />
+                            </div>
+                            <div className="reading-mark-preview">
+                                <span
+                                    className="reading-mark"
+                                    data-style="highlight"
+                                    style={{ background: readingMarkColor(tier.highlight, 0.72) }}
+                                >高亮效果</span>
+                                <span
+                                    className="reading-mark"
+                                    data-style="underline"
+                                    style={{ borderBottomColor: readingMarkColor(tier.underline, 0.85) }}
+                                >划线效果</span>
+                            </div>
+                        </div>
+                    ))}
                 </section>
 
                 <section className="reading-settings-group">

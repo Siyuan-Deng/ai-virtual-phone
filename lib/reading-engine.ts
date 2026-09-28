@@ -1,7 +1,7 @@
 // lib/reading-engine.ts — LLM integration for Reading feature.
 // All prompts go through the preset system via assemblePromptPayload. No extra message push.
 
-import type { Book, BookChapter, ReadingAnnotation } from "./reading-types";
+import type { Book, BookChapter, ReadingAnnotation, ReadingMark, ReadingMarkStyle } from "./reading-types";
 import type { ChatSession } from "./chat-storage";
 import { loadChatMessages, pushChatMessage } from "./chat-storage";
 import { loadCharacters } from "./character-storage";
@@ -236,6 +236,23 @@ function formatAnnotationAnchorHint(): string {
     ].join("\n");
 }
 
+/** 划线/高亮的用法。和上面两段一样拼在 chapterContent 末尾，对所有预设生效。 */
+function formatAnnotationMarkHint(): string {
+    return [
+        "",
+        "",
+        "<annotation_marks>",
+        "除了写批注，你也可以直接在原文上划重点，让{{user}}看见你读到哪儿会停下来：",
+        "[高亮:段落序号|原文片段]  给这句话加高亮",
+        "[划线:段落序号|原文片段]  给这句话画下划线",
+        `片段同样逐字抄自该段原文，${ANCHOR_MIN_LENGTH} 到 ${ANCHOR_PROMPT_MAX_LENGTH} 字，不要跨段。`,
+        "这两个标记不需要闭合，单独一行给出就行。",
+        "可以只划不写（默默划一道），也可以划完再写批注（两个标记都给出，指向同一句）；",
+        "当然也可以只写批注不划线。看你读到这句时是什么反应。",
+        "</annotation_marks>",
+    ].join("\n");
+}
+
 function formatBatchAnnotationHistory(annotations: ReadingAnnotation[], targets: AnnotationTarget[]): string {
     if (annotations.length === 0) return "（暂无批注）";
 
@@ -337,7 +354,7 @@ export async function generateAnnotations(
     chapter: BookChapter,
     existingAnnotations: ReadingAnnotation[],
     characterId: string,
-): Promise<ReadingAnnotation[]> {
+): Promise<AnnotationBatchResult> {
     return generateAnnotationBatch(
         book,
         chapter.title,
@@ -437,10 +454,34 @@ export function parseAnnotationMarkers(responseText: string): ParsedAnnotationMa
     return markers;
 }
 
+/** 模型给的一道划线/高亮 */
+export type ParsedAnnotationMark = { index: number; quote: string; style: ReadingMarkStyle };
+
+/** 拆 [高亮:N|原文片段] / [划线:N|原文片段]。不需要闭合标签，单独一行就算数。
+ *  方括号和冒号照例放宽到全角。 */
+export function parseAnnotationMarkTags(responseText: string): ParsedAnnotationMark[] {
+    const pattern = /[[［](高亮|划线)[:：]\s*(\d+)\s*[|｜]\s*([^\]］]+?)\s*[\]］]/g;
+    const marks: ParsedAnnotationMark[] = [];
+    let match;
+    while ((match = pattern.exec(responseText)) !== null) {
+        const index = parseInt(match[2], 10) - 1;
+        const quote = match[3].trim();
+        if (!Number.isFinite(index) || index < 0 || !quote) continue;
+        marks.push({ index, quote, style: match[1] === "高亮" ? "highlight" : "underline" });
+    }
+    return marks;
+}
+
 /** 模型明确表示「这批没什么可写的」 */
 export function hasNoAnnotationMarker(responseText: string): boolean {
     return /[[［]\s*无批注\s*[\]］]/.test(responseText);
 }
+
+export type AnnotationBatchResult = {
+    annotations: ReadingAnnotation[];
+    /** 角色顺手在原文上划的重点。模型没划就是空数组。 */
+    marks: ReadingMark[];
+};
 
 export async function generateAnnotationBatch(
     book: Book,
@@ -448,17 +489,18 @@ export async function generateAnnotationBatch(
     targets: AnnotationTarget[],
     existingAnnotations: ReadingAnnotation[],
     characterId: string,
-): Promise<ReadingAnnotation[]> {
+): Promise<AnnotationBatchResult> {
     const character = loadCharacters().find(c => c.id === characterId);
     if (!character) throw new Error("角色不存在");
-    if (targets.length === 0) return [];
+    if (targets.length === 0) return { annotations: [], marks: [] };
 
     const resolved = await resolveReadingInput(characterId, ["reading", "annotate"], {
         bookTitle: book.title,
         chapterTitle: batchTitle,
         chapterContent: formatBatchChapterContent(targets)
             + formatAnnotationDensityHint(targets.length, loadReadingInteractionConfig().annotationInterval)
-            + formatAnnotationAnchorHint(),
+            + formatAnnotationAnchorHint()
+            + formatAnnotationMarkHint(),
         annotationHistory: formatBatchAnnotationHistory(existingAnnotations, targets),
     });
     if (!resolved) throw new Error("未找到 API 配置，请在设置中绑定 API");
@@ -508,10 +550,38 @@ export async function generateAnnotationBatch(
         });
     }
 
+    // 角色划的重点。锚不到原文的直接丢掉——没有位置就画不上去。
+    const marks: ReadingMark[] = [];
+    const seenMarks = new Set<string>();
+    for (const parsed of parseAnnotationMarkTags(responseText)) {
+        const target = targets[parsed.index];
+        if (!target) continue;
+        const anchor = locateAnchor(target.text, parsed.quote);
+        if (!anchor) continue;
+        const key = `${target.chapterIndex}:${target.paragraphIndex}:${anchor.start}:${anchor.end}:${parsed.style}`;
+        if (seenMarks.has(key)) continue;
+        seenMarks.add(key);
+        marks.push({
+            id: `mk_ai_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            bookId: book.id,
+            chapterIndex: target.chapterIndex,
+            paragraphIndex: target.paragraphIndex,
+            start: anchor.start,
+            end: anchor.end,
+            text: anchor.quote,
+            style: parsed.style,
+            createdAt: new Date().toISOString(),
+            authorType: "character",
+            characterId,
+            characterName: character.name,
+        });
+    }
+
     // 一条都没解析出来才认 [无批注]：模型有时会一边写批注一边解释「否则我会输出[无批注]」，
-    // 先判断会把写出来的批注全扔掉。
+    // 先判断会把写出来的批注全扔掉。角色只划了线没写批注也算正常一批，不该报错。
     if (results.length === 0) {
-        if (hasNoAnnotationMarker(responseText)) return [];
+        if (marks.length > 0) return { annotations: [], marks };
+        if (hasNoAnnotationMarker(responseText)) return { annotations: [], marks: [] };
         // 走到这里说明模型答了，但没按格式答。抛出去让重试接手，并把它到底说了什么带上，
         // 否则用户只能看到「没有返回批注」，无从判断是模型、预设还是正则的问题。
         throw new Error(
@@ -519,7 +589,7 @@ export async function generateAnnotationBatch(
             + `它的开头是：「${responseText.trim().slice(0, 60)}」`,
         );
     }
-    return results;
+    return { annotations: results, marks };
 }
 
 /** 批注提示词必须真的带上正文。带不上只有一个原因：绑定的预设里没有「▸ 阅读·批注」

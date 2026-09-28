@@ -1,70 +1,89 @@
 "use client";
 
-import type { ReadingMarkStyle } from "./reading-types";
 import { readingMarkColor } from "./reading-appearance";
 
-/** 摘抄图的排版模板。差别只在配色和「正文怎么摆」，画法是同一套。 */
-export type ReadingShareTemplate = "paper" | "note" | "night" | "minimal";
+/** 摘抄图的排版模板。每个模板是一套完整的版面，不是同一套版面换配色。 */
+export type ReadingShareTemplate =
+    | "poster"    // 大字报：首段放大成主视觉，底部色带压住
+    | "bookmark"  // 书签条：窄长一条，像夹在书里的那张纸
+    | "magazine"  // 杂志双栏：分栏正文 + 巨大的百分比
+    | "minimal"   // 极简留白：居中，大量留白
+    | "collage"   // 色块拼贴：不对称色块压字
+    | "letter"    // 横格信笺：正文压在格线上
+    | "sticky";   // 便利贴：白纸 + 两张贴上去的批注
 
-export const READING_SHARE_TEMPLATES: Array<{ id: ReadingShareTemplate; label: string; hint: string }> = [
-    { id: "paper", label: "素笺", hint: "米色纸面，左对齐" },
-    { id: "note", label: "便签", hint: "和书里的批注卡片一个样子" },
-    { id: "night", label: "夜读", hint: "深色底，浅色字" },
-    { id: "minimal", label: "留白", hint: "白底居中，只留必要信息" },
+export const READING_SHARE_TEMPLATES: Array<{ id: ReadingShareTemplate; label: string }> = [
+    { id: "poster", label: "大字报" },
+    { id: "bookmark", label: "书签条" },
+    { id: "magazine", label: "杂志" },
+    { id: "minimal", label: "留白" },
+    { id: "collage", label: "色块" },
+    { id: "letter", label: "信笺" },
+    { id: "sticky", label: "便利贴" },
 ];
 
-export type ReadingShareAnnotation = { name: string; content: string };
+export type ReadingShareAnnotation = {
+    name: string;
+    content: string;
+    /** 自己写的和角色写的各用各自配置的字体和便签色 */
+    authorType: "user" | "character";
+};
+
+export type ReadingShareFonts = {
+    /** 正文——以及除批注外的一切文字 */
+    body: string;
+    userAnnotation: string;
+    charAnnotation: string;
+};
+
+export type ReadingSharePalette = {
+    background: string;
+    ink: string;
+    sub: string;
+    accent: string;
+};
 
 export type ReadingShareCardInput = {
     template: ReadingShareTemplate;
     /** 摘抄正文，一段一条 */
     quoteParagraphs: string[];
     bookTitle: string;
+    bookAuthor: string;
     chapterTitle: string;
-    /** 阅读账号里的 ID；空着就不画署名那一行 */
+    /** 阅读账号里的 ID；空着就写「读者」，署名位始终在 */
     userName: string;
     avatar: CanvasImageSource | null;
     /** 这段话在全书的位置，0-100 */
     progressPercent: number;
     annotations: ReadingShareAnnotation[];
-    /** 正文字体，跟阅读设置走 */
-    fontFamily: string;
-    markStyle: ReadingMarkStyle;
-    markColor: string;
+    /** 批注便签的底色，和阅读界面里的批注卡片一致 */
+    annotationColors: { user: string; character: string };
+    fonts: ReadingShareFonts;
+    timestamp: Date;
+    /** 用户在分享界面上改过的配色；没改就用模板自己的 */
+    palette?: Partial<ReadingSharePalette>;
+    /** 正文对齐；没给就用模板默认 */
+    align?: "left" | "center";
 };
 
-type Palette = {
-    background: string;
-    ink: string;
-    sub: string;
-    accent: string;
-    /** 正文是否画在一张卡片上（便签模板） */
-    card?: string;
-    align: "left" | "center";
-    /** 正文首尾的引号装饰 */
-    quoteMark: boolean;
-};
-
-const PALETTES: Record<ReadingShareTemplate, Palette> = {
-    paper: { background: "#f5efe1", ink: "#33291d", sub: "#8b7c66", accent: "#bb9b5e", align: "left", quoteMark: true },
-    note: { background: "#ece3d0", ink: "#3a3120", sub: "#857349", accent: "#c3a45c", card: "#fff1a8", align: "left", quoteMark: false },
-    night: { background: "#17171c", ink: "#eae6dd", sub: "#8b857a", accent: "#c9a768", align: "left", quoteMark: true },
-    minimal: { background: "#ffffff", ink: "#1b1b1b", sub: "#a2a2a2", accent: "#1b1b1b", align: "center", quoteMark: false },
+/** 每个模板的出厂配色和默认对齐 */
+export const READING_SHARE_TEMPLATE_PRESETS: Record<
+    ReadingShareTemplate,
+    ReadingSharePalette & { align: "left" | "center" }
+> = {
+    poster: { background: "#141414", ink: "#f4f1ea", sub: "#b0aa9d", accent: "#e4c15a", align: "left" },
+    bookmark: { background: "#ded8cc", ink: "#2f2a20", sub: "#9b8f78", accent: "#c0a463", align: "left" },
+    magazine: { background: "#ffffff", ink: "#161616", sub: "#8f8f8f", accent: "#161616", align: "left" },
+    minimal: { background: "#fcfcfc", ink: "#171717", sub: "#a8a8a8", accent: "#cfcfcf", align: "center" },
+    collage: { background: "#f4f1ec", ink: "#f3efe7", sub: "#4a453c", accent: "#2b4a6f", align: "left" },
+    letter: { background: "#fdfcf7", ink: "#2b2720", sub: "#9b8f78", accent: "#e4dcc8", align: "left" },
+    sticky: { background: "#efeae1", ink: "#262119", sub: "#8a8071", accent: "#b9a98c", align: "left" },
 };
 
 const WIDTH = 1080;
-const PADDING = 88;
-const QUOTE_SIZE = 40;
-const QUOTE_LINE = 1.9;
-const META_SIZE = 25;
-const NAME_SIZE = 30;
-const ANNOTATION_SIZE = 26;
-const AVATAR = 84;
-const META_FONT = '"PingFang SC", "Hiragino Sans GB", "Noto Sans SC", system-ui, sans-serif';
 
-/** 不该出现在行首的标点。中文排版里把它们拽回上一行，比断在行首好看得多。 */
+/** 不该出现在行首 / 行尾的标点。中文排版的基本禁则。 */
 const NO_LINE_START = "，。、；：？！）】》」』”’…—·,.;:?!)]}>";
-/** 不该出现在行尾的标点 */
 const NO_LINE_END = "（【《「『“‘([{<";
 
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
@@ -75,12 +94,10 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
         if (current && ctx.measureText(candidate).width > maxWidth) {
             let line = current;
             let carry = char;
-            // 行首禁则：把标点留在上一行
             if (NO_LINE_START.includes(char)) {
                 line = candidate;
                 carry = "";
             } else if (line.length > 1 && NO_LINE_END.includes(line[line.length - 1])) {
-                // 行尾禁则：把开引号一类的符号挪到下一行
                 carry = line[line.length - 1] + carry;
                 line = line.slice(0, -1);
             }
@@ -94,236 +111,630 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
     return lines.length > 0 ? lines : [""];
 }
 
-type Block =
-    | { kind: "quote"; lines: string[] }
-    | { kind: "annotation"; name: string; lines: string[] };
+/** 画布笔。dry = true 时只走版面计算不落笔——用同一段代码量高度再画，
+ *  所以「量出来的高度」和「画出来的内容」不可能对不上。 */
+class Pen {
+    constructor(readonly ctx: CanvasRenderingContext2D, readonly dry: boolean) {}
 
-/** 先排一遍版算出总高度，再真正开画——画布高度必须在画之前定下来。 */
-function layout(ctx: CanvasRenderingContext2D, input: ReadingShareCardInput, innerWidth: number) {
-    const palette = PALETTES[input.template];
-    const cardPadding = palette.card ? 40 : 0;
-    const quoteWidth = innerWidth - cardPadding * 2;
-
-    ctx.font = `${QUOTE_SIZE}px ${input.fontFamily}`;
-    const quoteBlocks: Block[] = input.quoteParagraphs
-        .map((paragraph) => paragraph.trim())
-        .filter(Boolean)
-        .map((paragraph) => ({ kind: "quote" as const, lines: wrapText(ctx, paragraph, quoteWidth) }));
-
-    ctx.font = `${ANNOTATION_SIZE}px ${META_FONT}`;
-    const annotationBlocks: Block[] = input.annotations
-        .filter((annotation) => annotation.content.trim())
-        .map((annotation) => ({
-            kind: "annotation" as const,
-            name: annotation.name,
-            lines: wrapText(ctx, annotation.content.trim(), innerWidth - 40),
-        }));
-
-    const quoteLineHeight = Math.round(QUOTE_SIZE * QUOTE_LINE);
-    const annotationLineHeight = Math.round(ANNOTATION_SIZE * 1.7);
-
-    let height = PADDING;
-    height += META_SIZE + 44;                                    // 书名 / 章节
-    if (palette.quoteMark) height += 46;                         // 开引号
-    height += cardPadding;
-    quoteBlocks.forEach((block, index) => {
-        height += block.lines.length * quoteLineHeight;
-        if (index < quoteBlocks.length - 1) height += Math.round(quoteLineHeight * 0.45);
-    });
-    height += cardPadding;
-    if (palette.quoteMark) height += 24;
-    if (annotationBlocks.length > 0) {
-        height += 52;                                            // 分隔线
-        annotationBlocks.forEach((block) => {
-            height += ANNOTATION_SIZE + 18;                       // 署名
-            height += block.lines.length * annotationLineHeight;
-            height += 30;
-        });
-    }
-    height += 56;                                                // 页脚上方留白
-    height += Math.max(AVATAR, NAME_SIZE + META_SIZE + 10);      // 页脚
-    height += PADDING;
-
-    return { palette, quoteBlocks, annotationBlocks, quoteLineHeight, annotationLineHeight, cardPadding, height: Math.round(height) };
-}
-
-function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
-}
-
-/** 画出摘抄图。返回的 canvas 已经是最终像素，直接 toBlob 就能存。 */
-export function renderReadingShareCard(input: ReadingShareCardInput): HTMLCanvasElement {
-    const measureCanvas = document.createElement("canvas");
-    const measureCtx = measureCanvas.getContext("2d");
-    if (!measureCtx) throw new Error("当前浏览器不支持生成图片");
-
-    const innerWidth = WIDTH - PADDING * 2;
-    const plan = layout(measureCtx, input, innerWidth);
-    const { palette } = plan;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = WIDTH;
-    canvas.height = plan.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("当前浏览器不支持生成图片");
-
-    ctx.fillStyle = palette.background;
-    ctx.fillRect(0, 0, WIDTH, plan.height);
-    ctx.textBaseline = "alphabetic";
-
-    const centerX = WIDTH / 2;
-    const left = PADDING;
-    const alignX = palette.align === "center" ? centerX : left;
-    ctx.textAlign = palette.align === "center" ? "center" : "left";
-
-    let y = PADDING + META_SIZE;
-
-    // ── 书名 · 章节 ──
-    ctx.font = `${META_SIZE}px ${META_FONT}`;
-    ctx.fillStyle = palette.sub;
-    const heading = [input.bookTitle, input.chapterTitle].filter(Boolean).join(" · ");
-    ctx.fillText(heading, alignX, y);
-    y += 44;
-
-    // ── 正文 ──
-    if (palette.quoteMark) {
-        ctx.font = `64px ${META_FONT}`;
-        ctx.fillStyle = palette.accent;
-        ctx.globalAlpha = 0.5;
-        ctx.fillText("“", alignX, y + 30);
-        ctx.globalAlpha = 1;
-        y += 46;
+    font(size: number, family: string, weight = ""): void {
+        this.ctx.font = `${weight ? `${weight} ` : ""}${size}px ${family}`;
     }
 
-    if (palette.card) {
-        const cardTop = y;
-        const cardHeight = plan.cardPadding * 2 + plan.quoteBlocks.reduce(
-            (sum, block, index) => sum + block.lines.length * plan.quoteLineHeight
-                + (index < plan.quoteBlocks.length - 1 ? Math.round(plan.quoteLineHeight * 0.45) : 0),
-            0,
-        );
-        ctx.fillStyle = palette.card;
-        roundedRect(ctx, left, cardTop, innerWidth, cardHeight, 6);
+    measure(text: string): number {
+        return this.ctx.measureText(text).width;
+    }
+
+    text(content: string, x: number, baseline: number, color: string, align: CanvasTextAlign = "left"): void {
+        if (this.dry) return;
+        this.ctx.fillStyle = color;
+        this.ctx.textAlign = align;
+        this.ctx.fillText(content, x, baseline);
+        this.ctx.textAlign = "left";
+    }
+
+    rect(x: number, y: number, w: number, h: number, color: string): void {
+        if (this.dry) return;
+        this.ctx.fillStyle = color;
+        this.ctx.fillRect(x, y, w, h);
+    }
+
+    roundRect(x: number, y: number, w: number, h: number, r: number, color: string): void {
+        if (this.dry) return;
+        const ctx = this.ctx;
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+        ctx.fillStyle = color;
         ctx.fill();
-        // 卡片顶上那截胶带，和阅读界面里的批注卡片保持一致
-        ctx.fillStyle = readingMarkColor(palette.card, 0.55);
+    }
+
+    circleText(cx: number, cy: number, radius: number, label: string, fill: string, color: string, family: string): void {
+        if (this.dry) return;
+        const ctx = this.ctx;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fillStyle = fill;
+        ctx.fill();
+        ctx.font = `${Math.round(radius)}px ${family}`;
+        ctx.fillStyle = color;
+        ctx.textAlign = "center";
+        ctx.fillText(label, cx, cy + radius / 3);
+        ctx.textAlign = "left";
+    }
+
+    avatar(image: CanvasImageSource, x: number, y: number, size: number): void {
+        if (this.dry) return;
+        const ctx = this.ctx;
         ctx.save();
-        ctx.translate(left + 56, cardTop - 10);
-        ctx.rotate(0.02);
-        ctx.fillRect(0, 0, 120, 26);
+        ctx.beginPath();
+        ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(image, x, y, size, size);
         ctx.restore();
     }
 
-    y += plan.cardPadding;
-    ctx.font = `${QUOTE_SIZE}px ${input.fontFamily}`;
-    plan.quoteBlocks.forEach((block, blockIndex) => {
-        block.lines.forEach((line) => {
-            const lineWidth = ctx.measureText(line).width;
-            const lineLeft = palette.align === "center" ? centerX - lineWidth / 2 : left + plan.cardPadding;
-            const baseline = y + QUOTE_SIZE;
-            if (input.markStyle === "highlight") {
-                ctx.fillStyle = readingMarkColor(input.markColor, 0.45);
-                ctx.fillRect(lineLeft - 6, baseline - QUOTE_SIZE + 4, lineWidth + 12, QUOTE_SIZE + 10);
-            } else {
-                ctx.fillStyle = readingMarkColor(input.markColor, 0.85);
-                ctx.fillRect(lineLeft, baseline + 12, lineWidth, 3);
-            }
-            ctx.fillStyle = palette.ink;
-            ctx.fillText(line, palette.align === "center" ? centerX : left + plan.cardPadding, baseline);
-            y += plan.quoteLineHeight;
-        });
-        if (blockIndex < plan.quoteBlocks.length - 1) y += Math.round(plan.quoteLineHeight * 0.45);
-    });
-    y += plan.cardPadding;
-    if (palette.quoteMark) y += 24;
-
-    // ── 批注 ──
-    if (plan.annotationBlocks.length > 0) {
-        y += 26;
-        ctx.strokeStyle = palette.sub;
-        ctx.globalAlpha = 0.28;
-        ctx.beginPath();
-        ctx.moveTo(left, y);
-        ctx.lineTo(WIDTH - PADDING, y);
+    dashedLine(x1: number, y: number, x2: number, color: string): void {
+        if (this.dry) return;
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.setLineDash([7, 7]);
+        ctx.strokeStyle = color;
         ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x1, y + 0.5);
+        ctx.lineTo(x2, y + 0.5);
         ctx.stroke();
-        ctx.globalAlpha = 1;
-        y += 26;
-
-        plan.annotationBlocks.forEach((block) => {
-            if (block.kind !== "annotation") return;
-            ctx.font = `600 ${ANNOTATION_SIZE}px ${META_FONT}`;
-            ctx.fillStyle = palette.accent;
-            ctx.fillText(block.name, alignX, y + ANNOTATION_SIZE);
-            y += ANNOTATION_SIZE + 18;
-            ctx.font = `${ANNOTATION_SIZE}px ${META_FONT}`;
-            ctx.fillStyle = palette.sub;
-            block.lines.forEach((line) => {
-                ctx.fillText(line, alignX, y + ANNOTATION_SIZE);
-                y += plan.annotationLineHeight;
-            });
-            y += 30;
-        });
+        ctx.restore();
     }
 
-    // ── 页脚：头像 + ID + 进度 ──
-    // 刚开头的那几句算出来是 0%，「读到全书 0%」读起来像没读，最少给 1%
-    const progressText = `读到全书 ${Math.min(100, Math.max(1, Math.round(input.progressPercent)))}%`;
-    y = plan.height - PADDING - Math.max(AVATAR, NAME_SIZE + META_SIZE + 10);
-    const footerCenterY = y + AVATAR / 2;
-    const hasAvatarSlot = Boolean(input.userName || input.avatar);
+    circleOutline(cx: number, cy: number, radius: number, color: string): void {
+        if (this.dry) return;
+        const ctx = this.ctx;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
 
-    // 居中模板里页脚也要居中，不然正文居中、署名贴左，看着像没排完
-    ctx.font = `${NAME_SIZE}px ${META_FONT}`;
-    const nameWidth = input.userName ? ctx.measureText(input.userName).width : 0;
-    ctx.font = `${META_SIZE}px ${META_FONT}`;
-    const progressWidth = ctx.measureText(progressText).width;
-    const textWidth = Math.max(nameWidth, progressWidth);
-    const footerWidth = (hasAvatarSlot ? AVATAR + 24 : 0) + textWidth;
-    const footerLeft = palette.align === "center" ? Math.round(centerX - footerWidth / 2) : left;
+    rotated(cx: number, cy: number, radians: number, draw: () => void): void {
+        if (this.dry) { draw(); return; }
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(radians);
+        ctx.translate(-cx, -cy);
+        draw();
+        ctx.restore();
+    }
 
-    if (hasAvatarSlot) {
-        if (input.avatar) {
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(footerLeft + AVATAR / 2, footerCenterY, AVATAR / 2, 0, Math.PI * 2);
-            ctx.closePath();
-            ctx.clip();
-            ctx.drawImage(input.avatar, footerLeft, y, AVATAR, AVATAR);
-            ctx.restore();
-        } else {
-            ctx.beginPath();
-            ctx.arc(footerLeft + AVATAR / 2, footerCenterY, AVATAR / 2, 0, Math.PI * 2);
-            ctx.fillStyle = readingMarkColor(palette.accent, 0.25);
-            ctx.fill();
-            ctx.textAlign = "center";
-            ctx.font = `${NAME_SIZE}px ${META_FONT}`;
-            ctx.fillStyle = palette.accent;
-            ctx.fillText(Array.from(input.userName || "读")[0], footerLeft + AVATAR / 2, footerCenterY + NAME_SIZE / 3);
+    /** 把已经画好的内容垫底色/垫白纸：等内容画完再补一层在下面 */
+    underlay(x: number, y: number, w: number, h: number, color: string): void {
+        if (this.dry) return;
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.globalCompositeOperation = "destination-over";
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y, w, h);
+        ctx.restore();
+    }
+}
+
+type Ctx = {
+    pen: Pen;
+    input: ReadingShareCardInput;
+    palette: ReadingSharePalette;
+    align: "left" | "center";
+    fonts: ReadingShareFonts;
+};
+
+function annotationFont(ctx: Ctx, annotation: ReadingShareAnnotation): string {
+    return annotation.authorType === "user" ? ctx.fonts.userAnnotation : ctx.fonts.charAnnotation;
+}
+
+function metaLine(input: ReadingShareCardInput): string {
+    return [input.bookTitle, input.bookAuthor, input.chapterTitle].filter(Boolean).join(" · ");
+}
+
+function stampText(input: ReadingShareCardInput): string {
+    const pad = (value: number) => String(value).padStart(2, "0");
+    const t = input.timestamp;
+    return `${t.getFullYear()}.${pad(t.getMonth() + 1)}.${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}`;
+}
+
+function percentValue(input: ReadingShareCardInput): number {
+    return Math.min(100, Math.max(1, Math.round(input.progressPercent)));
+}
+
+function progressText(input: ReadingShareCardInput): string {
+    return `读到全书 ${percentValue(input)}%`;
+}
+
+function displayName(input: ReadingShareCardInput): string {
+    return input.userName.trim() || "读者";
+}
+
+/** 正文段落，返回落笔后的 y */
+function drawQuote(
+    ctx: Ctx,
+    x: number,
+    y: number,
+    width: number,
+    size: number,
+    lineHeight: number,
+    color: string,
+    align: "left" | "center" = ctx.align,
+): number {
+    const { pen, input } = ctx;
+    pen.font(size, ctx.fonts.body);
+    let cursor = y;
+    const paragraphs = input.quoteParagraphs.map(p => p.trim()).filter(Boolean);
+    paragraphs.forEach((paragraph, index) => {
+        for (const line of wrapText(pen.ctx, paragraph, width)) {
+            pen.text(
+                line,
+                align === "center" ? x + width / 2 : x,
+                cursor + size,
+                color,
+                align === "center" ? "center" : "left",
+            );
+            cursor += lineHeight;
+        }
+        if (index < paragraphs.length - 1) cursor += Math.round(lineHeight * 0.4);
+    });
+    return cursor;
+}
+
+/** 批注区。style 决定长相：plain 纯文字 / rule 左侧竖线 / strip 整条底色 */
+function drawAnnotations(
+    ctx: Ctx,
+    x: number,
+    y: number,
+    width: number,
+    style: "plain" | "rule" | "strip",
+): number {
+    const { pen, input, palette } = ctx;
+    if (input.annotations.length === 0) return y;
+    const size = 25;
+    const lineHeight = Math.round(size * 1.8);
+    const inset = style === "plain" ? 0 : 24;
+    const centered = ctx.align === "center" && style === "plain";
+    let cursor = y;
+
+    for (const annotation of input.annotations) {
+        const font = annotationFont(ctx, annotation);
+        pen.font(size, font);
+        const lines = wrapText(pen.ctx, annotation.content.trim(), width - inset * (style === "strip" ? 2 : 1));
+        const blockHeight = size + 12 + lines.length * lineHeight;
+
+        if (style === "strip") {
+            const tint = annotation.authorType === "user" ? input.annotationColors.user : input.annotationColors.character;
+            pen.rect(x, cursor - 16, width, blockHeight + 24, readingMarkColor(tint, 0.45));
+            pen.rect(x, cursor - 16, 5, blockHeight + 24, readingMarkColor(tint, 1));
+        } else if (style === "rule") {
+            pen.rect(x, cursor - 4, 3, blockHeight + 4, palette.accent);
+        }
+
+        const textX = centered ? x + width / 2 : x + inset;
+        const textAlign: CanvasTextAlign = centered ? "center" : "left";
+        pen.font(size, font, "600");
+        pen.text(annotation.name, textX, cursor + size, palette.accent, textAlign);
+        cursor += size + 12;
+        pen.font(size, font);
+        for (const line of lines) {
+            pen.text(line, textX, cursor + size, palette.sub, textAlign);
+            cursor += lineHeight;
+        }
+        cursor += style === "strip" ? 34 : 26;
+    }
+    return cursor;
+}
+
+/** 头像 + ID。没设 ID 就写「读者」——署名位每个模板都有。 */
+function drawSignature(
+    ctx: Ctx,
+    x: number,
+    centerY: number,
+    size: number,
+    nameColor: string,
+    subColor: string,
+    subline: string | null,
+    avatarFallbackInk = ctx.palette.accent,
+): void {
+    const { pen, input } = ctx;
+    const name = displayName(input);
+    if (input.avatar) {
+        pen.avatar(input.avatar, x, centerY - size / 2, size);
+    } else {
+        pen.circleText(
+            x + size / 2, centerY, size / 2, Array.from(name)[0],
+            readingMarkColor(avatarFallbackInk, 0.3), avatarFallbackInk, ctx.fonts.body,
+        );
+    }
+
+    const textX = x + size + 20;
+    pen.font(28, ctx.fonts.body);
+    if (subline) {
+        pen.text(name, textX, centerY - 2, nameColor);
+        pen.font(21, ctx.fonts.body);
+        pen.text(subline, textX, centerY + 28, subColor);
+    } else {
+        pen.text(name, textX, centerY + 10, nameColor);
+    }
+}
+
+// ── 模板 ────────────────────────────────────────────────
+
+function renderPoster(ctx: Ctx): number {
+    const { pen, input, palette } = ctx;
+    const pad = 72;
+    const inner = WIDTH - pad * 2;
+    const paragraphs = input.quoteParagraphs.map(p => p.trim()).filter(Boolean);
+    const [lead, ...rest] = paragraphs;
+    let y = pad;
+
+    pen.font(21, ctx.fonts.body);
+    pen.text(metaLine(input), pad, y + 21, palette.sub);
+    y += 62;
+
+    if (lead) {
+        pen.font(50, ctx.fonts.body, "600");
+        for (const line of wrapText(pen.ctx, lead, inner)) {
+            pen.text(line, pad, y + 50, palette.ink);
+            y += 76;
+        }
+    }
+    if (rest.length > 0) {
+        y += 20;
+        pen.font(26, ctx.fonts.body);
+        for (const paragraph of rest) {
+            for (const line of wrapText(pen.ctx, paragraph, inner)) {
+                pen.text(line, pad, y + 26, palette.sub);
+                y += 50;
+            }
+            y += 16;
         }
     }
 
-    const textLeft = footerLeft + (hasAvatarSlot ? AVATAR + 24 : 0);
-    ctx.textAlign = "left";
-    if (input.userName) {
-        ctx.font = `${NAME_SIZE}px ${META_FONT}`;
-        ctx.fillStyle = palette.ink;
-        ctx.fillText(input.userName, textLeft, footerCenterY - 4);
-        ctx.font = `${META_SIZE}px ${META_FONT}`;
-        ctx.fillStyle = palette.sub;
-        ctx.fillText(progressText, textLeft, footerCenterY + META_SIZE + 4);
-    } else {
-        ctx.font = `${META_SIZE}px ${META_FONT}`;
-        ctx.fillStyle = palette.sub;
-        ctx.fillText(progressText, textLeft, footerCenterY + META_SIZE / 3);
+    if (input.annotations.length > 0) {
+        y += 26;
+        y = drawAnnotations({ ...ctx, align: "left" }, pad, y, inner, "rule");
     }
 
+    y += 46;
+    const barHeight = 120;
+    pen.rect(0, y, WIDTH, barHeight, palette.accent);
+    const centerY = y + barHeight / 2;
+    drawSignature(
+        { ...ctx, palette: { ...palette, accent: palette.background } },
+        pad, centerY, 58, palette.background, readingMarkColor(palette.background, 0.7), null, palette.background,
+    );
+    pen.font(21, ctx.fonts.body);
+    pen.text(`${progressText(input)} · ${stampText(input)}`, WIDTH - pad, centerY + 8, palette.background, "right");
+    return y + barHeight;
+}
+
+function renderBookmark(ctx: Ctx): number {
+    const { pen, input, palette } = ctx;
+    const outer = 58;
+    const cardWidth = 660;
+    const cardX = (WIDTH - cardWidth) / 2;
+    const pad = 54;
+    const inner = cardWidth - pad * 2;
+    const cardTop = outer;
+    let y = cardTop + pad;
+
+    pen.rect(cardX + cardWidth / 2 - 22, y + 6, 44, 3, palette.accent);
+    y += 42;
+    y = drawQuote(ctx, cardX + pad, y, inner, 26, 56, palette.ink, "left");
+
+    if (input.annotations.length > 0) {
+        y += 24;
+        y = drawAnnotations({ ...ctx, align: "left" }, cardX + pad, y, inner, "rule");
+    }
+
+    y += 22;
+    pen.dashedLine(cardX + pad, y, cardX + cardWidth - pad, palette.sub);
+    y += 40;
+
+    const avatarSize = 62;
+    if (input.avatar) pen.avatar(input.avatar, cardX + cardWidth / 2 - avatarSize / 2, y, avatarSize);
+    else pen.circleText(cardX + cardWidth / 2, y + avatarSize / 2, avatarSize / 2, Array.from(displayName(input))[0], readingMarkColor(palette.accent, 0.3), palette.accent, ctx.fonts.body);
+    y += avatarSize + 20;
+
+    pen.font(25, ctx.fonts.body);
+    pen.text(displayName(input), cardX + cardWidth / 2, y + 25, palette.ink, "center");
+    y += 42;
+    pen.font(19, ctx.fonts.body);
+    pen.text(metaLine(input), cardX + cardWidth / 2, y + 19, palette.sub, "center");
+    y += 30;
+    pen.text(`${progressText(input)} · ${stampText(input)}`, cardX + cardWidth / 2, y + 19, palette.sub, "center");
+    y += 40;
+    pen.circleOutline(cardX + cardWidth / 2, y + 8, 7, palette.sub);
+    y += 30;
+
+    pen.underlay(cardX, cardTop, cardWidth, y - cardTop, "#fbf7ee");
+    return y + outer;
+}
+
+function renderMagazine(ctx: Ctx): number {
+    const { pen, input, palette } = ctx;
+    const pad = 66;
+    const inner = WIDTH - pad * 2;
+    let y = pad;
+
+    pen.font(19, ctx.fonts.body);
+    pen.text(input.bookTitle, pad, y + 19, palette.sub);
+    if (input.bookAuthor) pen.text(input.bookAuthor, WIDTH / 2, y + 19, palette.sub, "center");
+    if (input.chapterTitle) pen.text(input.chapterTitle, WIDTH - pad, y + 19, palette.sub, "right");
+    y += 34;
+    pen.rect(pad, y, inner, 3, palette.ink);
+    y += 44;
+
+    // 两栏：先把行排完，再对半分到左右两栏
+    const gap = 44;
+    const columnWidth = (inner - gap) / 2;
+    const size = 25;
+    const lineHeight = 50;
+    pen.font(size, ctx.fonts.body);
+    const allLines: string[] = [];
+    const paragraphs = input.quoteParagraphs.map(p => p.trim()).filter(Boolean);
+    paragraphs.forEach((paragraph, index) => {
+        allLines.push(...wrapText(pen.ctx, paragraph, columnWidth));
+        if (index < paragraphs.length - 1) allLines.push("");
+    });
+    const half = Math.max(1, Math.ceil(allLines.length / 2));
+    [allLines.slice(0, half), allLines.slice(half)].forEach((lines, columnIndex) => {
+        let cursor = y;
+        const x = pad + columnIndex * (columnWidth + gap);
+        for (const line of lines) {
+            if (line) pen.text(line, x, cursor + size, palette.ink);
+            cursor += lineHeight;
+        }
+    });
+    y += half * lineHeight + 20;
+
+    if (input.annotations.length > 0) {
+        pen.rect(pad, y, inner, 1, readingMarkColor(palette.sub, 0.45));
+        y += 34;
+        y = drawAnnotations({ ...ctx, align: "left" }, pad, y, inner, "plain");
+    }
+
+    pen.rect(pad, y, inner, 1, readingMarkColor(palette.sub, 0.45));
+    y += 42;
+    const footerHeight = 112;
+    const centerY = y + 40;
+    drawSignature(ctx, pad, centerY, 58, palette.ink, palette.sub, stampText(input));
+    pen.font(94, ctx.fonts.body, "300");
+    const percent = String(percentValue(input));
+    const percentWidth = pen.measure(percent);
+    pen.font(26, ctx.fonts.body);
+    const unitWidth = pen.measure("%");
+    pen.font(94, ctx.fonts.body, "300");
+    pen.text(percent, WIDTH - pad - unitWidth - 6, y + 86, palette.ink, "right");
+    pen.font(26, ctx.fonts.body);
+    pen.text("%", WIDTH - pad, y + 86, palette.ink, "right");
+    void percentWidth;
+    return y + footerHeight + 30;
+}
+
+function renderMinimal(ctx: Ctx): number {
+    const { pen, input, palette } = ctx;
+    const pad = 108;
+    const inner = WIDTH - pad * 2;
+    let y = pad + 24;
+
+    y = drawQuote(ctx, pad, y, inner, 28, 66, palette.ink);
+    if (input.annotations.length > 0) {
+        y += 36;
+        y = drawAnnotations(ctx, pad, y, inner, "plain");
+    }
+
+    y += 36;
+    pen.rect(WIDTH / 2, y, 1, 56, palette.accent);
+    y += 96;
+
+    const avatarSize = 58;
+    if (input.avatar) pen.avatar(input.avatar, WIDTH / 2 - avatarSize / 2, y, avatarSize);
+    else pen.circleText(WIDTH / 2, y + avatarSize / 2, avatarSize / 2, Array.from(displayName(input))[0], readingMarkColor(palette.accent, 0.5), palette.sub, ctx.fonts.body);
+    y += avatarSize + 22;
+
+    pen.font(25, ctx.fonts.body);
+    pen.text(displayName(input), WIDTH / 2, y + 25, palette.ink, "center");
+    y += 42;
+    pen.font(19, ctx.fonts.body);
+    pen.text(metaLine(input), WIDTH / 2, y + 19, palette.sub, "center");
+    y += 30;
+    pen.text(`${progressText(input)} · ${stampText(input)}`, WIDTH / 2, y + 19, palette.sub, "center");
+    return y + 30 + pad;
+}
+
+function renderCollage(ctx: Ctx): number {
+    const { pen, input, palette } = ctx;
+    const pad = 64;
+    const blockLeft = 156;
+    const blockWidth = WIDTH - blockLeft;
+    const quotePad = 54;
+    const blockTop = 122;
+
+    pen.font(26, ctx.fonts.body);
+    const quoteWidth = blockWidth - quotePad * 2;
+    const lines: string[] = [];
+    const paragraphs = input.quoteParagraphs.map(p => p.trim()).filter(Boolean);
+    paragraphs.forEach((paragraph, index) => {
+        lines.push(...wrapText(pen.ctx, paragraph, quoteWidth));
+        if (index < paragraphs.length - 1) lines.push("");
+    });
+    const lineHeight = 54;
+    const blockHeight = quotePad * 2 + lines.length * lineHeight;
+
+    pen.rect(blockLeft, blockTop, blockWidth, blockHeight, palette.accent);
+    pen.rect(pad, blockTop + 84, 128, 128, readingMarkColor(palette.accent, 0.3));
+
+    let y = blockTop + quotePad;
+    for (const line of lines) {
+        if (line) pen.text(line, blockLeft + quotePad, y + 26, palette.ink);
+        y += lineHeight;
+    }
+    y = blockTop + blockHeight + 52;
+
+    if (input.annotations.length > 0) {
+        y = drawAnnotations({ ...ctx, align: "left" }, pad, y, WIDTH - pad * 2, "rule");
+        y += 10;
+    }
+
+    const centerY = y + 30;
+    drawSignature(ctx, pad, centerY, 58, palette.sub, palette.sub, null, palette.accent);
+    pen.font(20, ctx.fonts.body);
+    pen.text(metaLine(input), pad, centerY + 62, palette.sub);
+    pen.text(`${progressText(input)} · ${stampText(input)}`, pad, centerY + 92, palette.sub);
+    pen.font(56, ctx.fonts.body, "300");
+    pen.text(`${percentValue(input)}%`, WIDTH - pad, centerY + 92, palette.accent, "right");
+    return centerY + 92 + pad;
+}
+
+function renderLetter(ctx: Ctx): number {
+    const { pen, input, palette } = ctx;
+    const pad = 72;
+    const inner = WIDTH - pad * 2;
+    const ruleGap = 56;
+    let y = pad;
+
+    pen.font(20, ctx.fonts.body);
+    pen.text(metaLine(input), pad, y + 20, palette.sub);
+    y += 54;
+
+    pen.font(26, ctx.fonts.body);
+    const lines: string[] = [];
+    const paragraphs = input.quoteParagraphs.map(p => p.trim()).filter(Boolean);
+    paragraphs.forEach((paragraph, index) => {
+        lines.push(...wrapText(pen.ctx, paragraph, inner));
+        if (index < paragraphs.length - 1) lines.push("");
+    });
+    for (const line of lines) {
+        pen.rect(pad, y + ruleGap - 10, inner, 1, palette.accent);
+        if (line) pen.text(line, pad, y + 34, palette.ink);
+        y += ruleGap;
+    }
+
+    if (input.annotations.length > 0) {
+        y += 38;
+        y = drawAnnotations({ ...ctx, align: "left" }, pad, y, inner, "strip");
+    }
+
+    y += 26;
+    const centerY = y + 30;
+    drawSignature(ctx, pad, centerY, 58, palette.ink, palette.sub, `${progressText(input)} · ${stampText(input)}`);
+    return centerY + 40 + pad;
+}
+
+function renderSticky(ctx: Ctx): number {
+    const { pen, input, palette } = ctx;
+    const outer = 46;
+    const paperX = outer;
+    const paperWidth = WIDTH - outer * 2;
+    const pad = 48;
+    const inner = paperWidth - pad * 2;
+    const paperTop = outer;
+
+    let y = paperTop + pad;
+    y = drawQuote(ctx, paperX + pad, y, inner, 26, 54, palette.ink, "left");
+
+    // 批注做成贴上去的便签，用的就是阅读界面里那两张卡片的颜色
+    if (input.annotations.length > 0) {
+        y += 36;
+        const noteGap = 20;
+        const perRow = input.annotations.length > 1 ? 2 : 1;
+        const noteWidth = perRow > 1 ? (inner - noteGap) / 2 : inner;
+        const heights = input.annotations.map((annotation) => {
+            pen.font(24, annotationFont(ctx, annotation));
+            const lines = wrapText(pen.ctx, annotation.content.trim(), noteWidth - 36);
+            return { lines, height: 36 + lines.length * 40 + 26 };
+        });
+
+        let rowTop = y;
+        for (let index = 0; index < input.annotations.length; index += perRow) {
+            const row = input.annotations.slice(index, index + perRow);
+            const rowHeight = Math.max(...row.map((_, i) => heights[index + i].height));
+            row.forEach((annotation, column) => {
+                const plan = heights[index + column];
+                const x = paperX + pad + column * (noteWidth + noteGap);
+                const tint = annotation.authorType === "user" ? input.annotationColors.user : input.annotationColors.character;
+                const font = annotationFont(ctx, annotation);
+                pen.rotated(x + noteWidth / 2, rowTop + rowHeight / 2, (column === 0 ? -1 : 1) * 0.012, () => {
+                    pen.roundRect(x, rowTop, noteWidth, rowHeight, 4, tint);
+                    pen.font(19, font, "600");
+                    pen.text(annotation.name, x + 18, rowTop + 34, readingMarkColor(palette.ink, 0.7));
+                    pen.font(24, font);
+                    let cursor = rowTop + 56;
+                    for (const line of plan.lines) {
+                        pen.text(line, x + 18, cursor + 24, palette.ink);
+                        cursor += 40;
+                    }
+                });
+            });
+            rowTop += rowHeight + noteGap;
+        }
+        y = rowTop - noteGap;
+    }
+
+    y += 42;
+    const centerY = y + 28;
+    drawSignature(ctx, paperX + pad, centerY, 54, palette.ink, palette.sub, metaLine(input));
+    pen.font(20, ctx.fonts.body);
+    pen.text(`${progressText(input)} · ${stampText(input)}`, paperX + paperWidth - pad, centerY + 10, palette.sub, "right");
+    y = centerY + 40 + pad;
+
+    pen.underlay(paperX, paperTop, paperWidth, y - paperTop, "#ffffff");
+    return y + outer;
+}
+
+const RENDERERS: Record<ReadingShareTemplate, (ctx: Ctx) => number> = {
+    poster: renderPoster,
+    bookmark: renderBookmark,
+    magazine: renderMagazine,
+    minimal: renderMinimal,
+    collage: renderCollage,
+    letter: renderLetter,
+    sticky: renderSticky,
+};
+
+/** 画出摘抄图。返回的 canvas 已经是最终像素，直接 toBlob 就能存。 */
+export function renderReadingShareCard(input: ReadingShareCardInput): HTMLCanvasElement {
+    const preset = READING_SHARE_TEMPLATE_PRESETS[input.template];
+    const palette: ReadingSharePalette = {
+        background: input.palette?.background || preset.background,
+        ink: input.palette?.ink || preset.ink,
+        sub: input.palette?.sub || preset.sub,
+        accent: input.palette?.accent || preset.accent,
+    };
+    const align = input.align || preset.align;
+
+    const measureCanvas = document.createElement("canvas");
+    measureCanvas.width = WIDTH;
+    measureCanvas.height = 10;
+    const measureCtx = measureCanvas.getContext("2d");
+    if (!measureCtx) throw new Error("当前浏览器不支持生成图片");
+    measureCtx.textBaseline = "alphabetic";
+
+    const render = RENDERERS[input.template];
+    const base = { input, palette, align, fonts: input.fonts };
+    const height = Math.max(420, Math.round(render({ ...base, pen: new Pen(measureCtx, true) })));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = WIDTH;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("当前浏览器不支持生成图片");
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = palette.background;
+    ctx.fillRect(0, 0, WIDTH, height);
+    render({ ...base, pen: new Pen(ctx, false) });
     return canvas;
 }
 

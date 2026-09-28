@@ -7599,40 +7599,30 @@
 }
 
 /* ── 分享摘抄 ── */
+/* 模板选择放在图下面，一排小按钮就够，不需要描述 */
 .reading-share-templates {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 .reading-share-template {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 10px 12px;
-  border-radius: 10px;
+  padding: 6px 14px;
+  border-radius: 999px;
   border: 1px solid var(--reading-warm-card-border, #f0e8da);
   background: rgba(255, 255, 255, 0.55);
-  text-align: left;
   color: var(--reading-warm-ink, #111);
+  font-size: calc(11px*var(--app-text-scale,1));
   -webkit-tap-highlight-color: transparent;
 }
 .reading-share-template.is-active {
   border-color: var(--reading-warm-brown, #8a6b3d);
-  background: rgba(138, 107, 61, 0.1);
-}
-.reading-share-template-label {
-  font-size: calc(12px*var(--app-text-scale,1));
+  background: rgba(138, 107, 61, 0.12);
   font-weight: 600;
-}
-.reading-share-template-hint {
-  font-size: calc(9.6px*var(--app-text-scale,1));
-  color: var(--reading-warm-ink-tertiary, #a3968a);
-  line-height: 1.4;
 }
 .reading-share-preview {
   display: flex;
   justify-content: center;
-  max-height: 46vh;
+  max-height: 52vh;
   overflow-y: auto;
   border-radius: 10px;
   background: rgba(45, 35, 28, 0.06);
@@ -7644,4 +7634,45 @@
   display: block;
   border-radius: 6px;
   box-shadow: 0 2px 10px rgba(40, 30, 20, 0.12);
+}
+
+/* 批注卡片的长按菜单挂在卡片下沿外面：菜单打开时把整张卡片抬上来，
+   否则会被紧随其后的另一张批注卡片盖住。 */
+.reading-annotation.is-menu-open {
+  z-index: 60;
+}
+
+/* 高亮/划线配色分「我划的」「TA 划的」两档 */
+.reading-mark-tier {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid var(--reading-warm-card-border, #f0e8da);
+}
+
+/* 分享摘抄：配色和对齐的调节区 */
+.reading-share-knobs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.reading-share-colors {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.reading-share-color {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: calc(10px*var(--app-text-scale,1));
+  color: var(--reading-warm-ink-secondary, #6b5f52);
+}
+.reading-share-aligns {
+  display: flex;
+  gap: 6px;
 }

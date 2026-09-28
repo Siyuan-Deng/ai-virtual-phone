@@ -18,11 +18,12 @@ import {
     DEFAULT_READING_INTERACTION_CONFIG,
 } from "@/lib/reading-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
-import { loadReadingMarks, saveReadingMark, deleteReadingMark, readingMarkGroup } from "@/lib/reading-marks";
+import { loadReadingMarks, saveReadingMark, deleteReadingMark, readingMarkGroup, readingMarkGroupId } from "@/lib/reading-marks";
 import {
     appendReadingAnnotationMemos,
     deleteReadingAnnotationMemo,
     loadReadingSummaryMemos,
+    updateReadingAnnotationMemoContent,
     type ReadingAnnotationMemo,
 } from "@/lib/reading-memory";
 import { annotationExportFileName, buildAnnotationMarkdown } from "@/lib/reading-export";
@@ -378,6 +379,9 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     const [editingDiscussMessage, setEditingDiscussMessage] = useState<ChatMessage | null>(null);
     const [editingDiscussContent, setEditingDiscussContent] = useState("");
     const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
+    /** 正在手动编辑的批注（自己写的和角色写的都能改） */
+    const [editingAnnotation, setEditingAnnotation] = useState<ReadingAnnotation | null>(null);
+    const [editingText, setEditingText] = useState("");
     const [annotationTranslationOverrides, setAnnotationTranslationOverrides] = useState<Record<string, boolean>>({});
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     const readingMessagePressStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -752,11 +756,25 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         setPendingQuote(null);
     };
 
-    // 批注块（翻页与滚动模式共用）：长按呼出 复制/删除 菜单
+    /** 手动改批注。记忆区那条要一起改，否则角色嘴上记得的还是旧话。 */
+    const saveEditedAnnotation = async () => {
+        if (!editingAnnotation) return;
+        const content = editingText.trim();
+        if (!content || content === editingAnnotation.content) { setEditingAnnotation(null); return; }
+        const updated = { ...editingAnnotation, content };
+        await saveAnnotation(updated);
+        updateReadingAnnotationMemoContent(updated.id, content);
+        setAnnotations(prev => prev.map(item => (item.id === updated.id ? updated : item)));
+        setEditingAnnotation(null);
+        setEditingText("");
+    };
+
+    // 批注块（翻页与滚动模式共用）：长按呼出 编辑/复制/删除 菜单
     const renderAnnotationItem = (annotation: ReadingAnnotation) => (
         <div
             key={annotation.id}
-            className="reading-annotation reading-annotation-interactive"
+            // 菜单挂在卡片下沿外面，不抬层就会被下一张批注卡片盖住
+            className={`reading-annotation reading-annotation-interactive${activeAnnotationId === annotation.id ? " is-menu-open" : ""}`}
             data-author={annotation.authorType === "user" ? "user" : "character"}
             data-no-nav="true"
             onPointerDown={() => {
@@ -784,6 +802,16 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             />
             {activeAnnotationId === annotation.id && (
                 <div className="ctx-menu reading-annotation-menu" onClick={(e) => e.stopPropagation()}>
+                    <button
+                        onClick={() => {
+                            setEditingAnnotation(annotation);
+                            setEditingText(annotation.content);
+                            setActiveAnnotationId(null);
+                        }}
+                        className="ctx-menu-btn"
+                    >
+                        编辑
+                    </button>
                     <button
                         onClick={() => {
                             copyToClipboard(annotation.content);
@@ -830,7 +858,13 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             if (from > cursor) nodes.push(item.text.slice(cursor - lineStart, from - lineStart));
             if (to > from) {
                 nodes.push(
-                    <span key={`${mark.id}-${i}`} className="reading-mark" data-style={mark.style} data-mark-id={mark.id}>
+                    <span
+                        key={`${mark.id}-${i}`}
+                        className="reading-mark"
+                        data-style={mark.style}
+                        data-author={mark.authorType === "character" ? "character" : "user"}
+                        data-mark-id={mark.id}
+                    >
                         {item.text.slice(from - lineStart, to - lineStart)}
                     </span>,
                 );
@@ -1296,7 +1330,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             // 「本次阅读体验内不重复」由 generatedBatchesRef（内存）保证。
             const existing = await loadExistingAnnotationsForItems(request.items);
 
-            const newAnnotations = await withAnnotationRetry(
+            const { annotations: newAnnotations, marks: newMarks } = await withAnnotationRetry(
                 () => generateAnnotationBatch(
                     book,
                     request.title,
@@ -1313,6 +1347,15 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
 
             generatedBatchesRef.current.add(batchKey);
 
+            // 角色顺手划的重点：只划线不写批注也算这一批有产出
+            if (newMarks.length > 0) {
+                newMarks.forEach(saveReadingMark);
+                setMarks((prev) => {
+                    const seen = new Set(prev.map(mark => mark.id));
+                    return [...prev, ...newMarks.filter(mark => !seen.has(mark.id))];
+                });
+            }
+
             if (newAnnotations.length > 0) {
                 await saveAnnotations(newAnnotations);
                 appendReadingAnnotationMemos(toAnnotationMemos(newAnnotations));
@@ -1321,7 +1364,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                     for (const annotation of newAnnotations) merged.set(annotation.id, annotation);
                     return [...merged.values()];
                 });
-            } else {
+            } else if (newMarks.length === 0) {
                 // 解析失败、预设缺条目、接口报错现在都会抛出带原因的错误（见 generateAnnotationBatch），
                 // 能走到这里就只剩一种情况：模型看完了，但这一批它没什么想说的。
                 setAnnotationError(`${companion?.name || "AI"}这一批没有想写的批注（模型返回了「无批注」），可以换个范围再试`);
@@ -3283,15 +3326,16 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                     .map(annotation => ({
                         name: isUserAnnotation(annotation) ? (userDisplayName || "我") : (annotation.characterName || "TA"),
                         content: annotation.content,
+                        authorType: (isUserAnnotation(annotation) ? "user" : "character") as "user" | "character",
                     }));
                 return (
                     <ReadingShareDialog
                         quoteParagraphs={shareTarget.map(item => item.text)}
                         bookTitle={book.title}
+                        bookAuthor={book.author || ""}
                         chapterTitle={chapter?.title || ""}
                         progressPercent={toBookFraction(first.chapterIndex, withinChapter) * 100}
                         annotations={relatedAnnotations}
-                        markStyle={first.style}
                         onClose={() => setShareTarget(null)}
                     />
                 );
@@ -3354,11 +3398,21 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                                 const mine = panelAnnotations
                                     .filter(a => a.chapterIndex === index && isUserAnnotation(a))
                                     .sort((a, b) => a.paragraphIndex - b.paragraphIndex);
+                                // 跨段划选出来的几条是一次划选，这里按组合成一行，
+                                // 否则一次跨三段的高亮会在列表里排成三条，看着像划了三次
+                                const groupedMarks = new Map<string, ReadingMark[]>();
+                                for (const mark of marks.filter(m => m.chapterIndex === index)) {
+                                    const key = readingMarkGroupId(mark);
+                                    const bucket = groupedMarks.get(key);
+                                    if (bucket) bucket.push(mark);
+                                    else groupedMarks.set(key, [mark]);
+                                }
                                 // 已经写了批注的标记不再单独列一条：批注那条里就带着这段原文
-                                const annotated = new Set(mine.map(a => `${a.paragraphIndex}:${a.quote ?? ""}`));
-                                const chapterMarks = marks
-                                    .filter(m => m.chapterIndex === index && !annotated.has(`${m.paragraphIndex}:${m.text}`))
-                                    .sort((a, b) => a.paragraphIndex - b.paragraphIndex || a.start - b.start);
+                                const annotatedQuotes = new Set(mine.map(a => (a.quote ?? "").replace(/\s+/g, "")));
+                                const chapterMarks = [...groupedMarks.values()]
+                                    .map(group => group.sort((a, b) => a.paragraphIndex - b.paragraphIndex || a.start - b.start))
+                                    .filter(group => !annotatedQuotes.has(group.map(m => m.text).join("").replace(/\s+/g, "")))
+                                    .sort((a, b) => a[0].paragraphIndex - b[0].paragraphIndex || a[0].start - b[0].start);
                                 return {
                                     index,
                                     count: mine.length + chapterMarks.length,
@@ -3373,12 +3427,15 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                                                     <button type="button" onClick={() => { void removeAnnotationEverywhere(annotation.id); }}>删除</button>
                                                 </div>
                                             ))}
-                                            {chapterMarks.map(mark => (
-                                                <div key={mark.id} className="reading-mark-row">
-                                                    <span className="reading-mark" data-style={mark.style}>{mark.text.slice(0, 40)}</span>
+                                            {chapterMarks.map(group => (
+                                                <div key={group[0].id} className="reading-mark-row">
+                                                    <span className="reading-mark" data-style={group[0].style}>
+                                                        {group.map(mark => mark.text).join("").slice(0, 40)}
+                                                    </span>
                                                     <button type="button" onClick={() => {
-                                                        deleteReadingMark(book.id, mark.id);
-                                                        setMarks(prev => prev.filter(item => item.id !== mark.id));
+                                                        const ids = new Set(group.map(mark => mark.id));
+                                                        group.forEach(mark => deleteReadingMark(book.id, mark.id));
+                                                        setMarks(prev => prev.filter(item => !ids.has(item.id)));
                                                     }}>删除</button>
                                                 </div>
                                             ))}
@@ -3389,6 +3446,32 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
 
                             return renderChapterFoldList(sections, "这本书还没有你的批注或标记");
                                                 })()}
+                    </div>
+                </ContentDialog>
+            )}
+            {editingAnnotation && (
+                <ContentDialog
+                    title={isUserAnnotation(editingAnnotation) ? "编辑我的批注" : `编辑${editingAnnotation.characterName || "TA"}的批注`}
+                    confirmLabel="保存"
+                    cancelLabel="取消"
+                    onConfirm={() => { void saveEditedAnnotation(); }}
+                    onCancel={() => { setEditingAnnotation(null); setEditingText(""); }}
+                >
+                    <div className="reading-settings-grid">
+                        {editingAnnotation.quote && (
+                            <div className="reading-my-annotation-quote">{editingAnnotation.quote}</div>
+                        )}
+                        <textarea
+                            className="reading-my-annotation-input"
+                            value={editingText}
+                            onChange={(e) => setEditingText(e.target.value)}
+                            rows={5}
+                            autoFocus
+                        />
+                        <div className="reading-settings-inline-note">
+                            <span>说明</span>
+                            <span>改完之后记忆区里那条也会跟着改。</span>
+                        </div>
                     </div>
                 </ContentDialog>
             )}

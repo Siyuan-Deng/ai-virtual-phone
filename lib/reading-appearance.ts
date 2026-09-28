@@ -37,9 +37,12 @@ export type ReadingAppearance = {
     userAnnotationLineHeight?: number;
     userAnnotationTextColor?: string;
     userAnnotationCardColor?: string;
-    /** 高亮 / 划线的颜色 */
+    /** 我划的高亮 / 划线颜色 */
     highlightColor?: string;
     underlineColor?: string;
+    /** TA 划的高亮 / 划线颜色，和我的分开配 */
+    charHighlightColor?: string;
+    charUnderlineColor?: string;
     /** 背景图亮度：1 = 原图，<1 压暗，>1 提亮。缺省即 1（和加这个设置之前一样）。 */
     backgroundBrightness?: number;
 };
@@ -55,6 +58,9 @@ export const READING_ANNOTATION_STYLE_DEFAULTS = {
     userCardColor: "#e7f0ff",
     highlightColor: "#ffe278",
     underlineColor: "#be8c3c",
+    /** TA 划的默认换一个色系，和自己划的一眼分得开 */
+    charHighlightColor: "#bfe3d0",
+    charUnderlineColor: "#5c9b7a",
 } as const;
 
 export const READING_ANNOTATION_FONT_SIZE_MIN = 9;
@@ -229,6 +235,8 @@ function normalizeAppearance(raw: Partial<ReadingAppearance> | null | undefined)
         userAnnotationCardColor: color(raw?.userAnnotationCardColor, READING_ANNOTATION_STYLE_DEFAULTS.userCardColor),
         highlightColor: color(raw?.highlightColor, READING_ANNOTATION_STYLE_DEFAULTS.highlightColor),
         underlineColor: color(raw?.underlineColor, READING_ANNOTATION_STYLE_DEFAULTS.underlineColor),
+        charHighlightColor: color(raw?.charHighlightColor, READING_ANNOTATION_STYLE_DEFAULTS.charHighlightColor),
+        charUnderlineColor: color(raw?.charUnderlineColor, READING_ANNOTATION_STYLE_DEFAULTS.charUnderlineColor),
         backgroundBrightness,
     };
 }

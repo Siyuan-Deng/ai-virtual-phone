@@ -32,6 +32,24 @@ type Props = { onClose: () => void };
 
 type AnnotationCardStyle = { fontSize: number; lineHeight: number; textColor: string; cardColor: string };
 
+/** 一档标记（我的 / TA 的）的高亮底色和划线颜色。
+ *  高亮留 0.72、划线留 0.85 的透明度，底下的背景图还透得出来。 */
+function markColorCss(suffix: string, highlight?: string, underline?: string, isChar = false): string {
+    const mark = `.reading-app-surface .reading-mark${suffix}`;
+    const highlightColor = highlight
+        || (isChar ? READING_ANNOTATION_STYLE_DEFAULTS.charHighlightColor : READING_ANNOTATION_STYLE_DEFAULTS.highlightColor);
+    const underlineColor = underline
+        || (isChar ? READING_ANNOTATION_STYLE_DEFAULTS.charUnderlineColor : READING_ANNOTATION_STYLE_DEFAULTS.underlineColor);
+    return [
+        `${mark}[data-style="highlight"] {`,
+        `  background: ${readingMarkColor(highlightColor, 0.72)};`,
+        "}",
+        `${mark}[data-style="underline"] {`,
+        `  border-bottom-color: ${readingMarkColor(underlineColor, 0.85)};`,
+        "}",
+    ].join("\n");
+}
+
 /** 一档批注卡片的样式。suffix 为空是 TA 的批注（也就是所有卡片的基准），
  *  [data-author="user"] 是用户自己的那档，权重更高，自然盖在基准上面。 */
 function annotationCardCss(suffix: string, style: AnnotationCardStyle): string {
@@ -277,15 +295,10 @@ export default function ReadingApp({ onClose }: Props) {
         // 否则把批注字号调大以后，署名还是原来那么小，看着像没跟上。
         annotationCardCss("", annotationStyle),
         annotationCardCss('[data-author="user"]', userAnnotationStyle),
-        // 高亮 / 划线的颜色
-        [
-            '.reading-app-surface .reading-mark[data-style="highlight"] {',
-            `  background: ${readingMarkColor(appearance.highlightColor || READING_ANNOTATION_STYLE_DEFAULTS.highlightColor, 0.72)};`,
-            "}",
-            '.reading-app-surface .reading-mark[data-style="underline"] {',
-            `  border-bottom-color: ${readingMarkColor(appearance.underlineColor || READING_ANNOTATION_STYLE_DEFAULTS.underlineColor, 0.85)};`,
-            "}",
-        ].join("\n"),
+        // 高亮 / 划线的颜色。自己划的和角色划的分开配，默认也不是一个色系，
+        // 一眼看得出这道线是谁划的。没有 data-author 的老数据算自己划的。
+        markColorCss("", appearance.highlightColor, appearance.underlineColor),
+        markColorCss('[data-author="character"]', appearance.charHighlightColor, appearance.charUnderlineColor, true),
     ].filter(Boolean).join("\n");
 
     const appearanceStyle = {
