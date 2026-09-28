@@ -17,11 +17,13 @@ import {
     resolveAuxiliaryApiConfig,
 } from "./settings-storage";
 import {
+    applyOutputRegex,
     assemblePromptPayload,
     ensureTrailingUserTurn,
     type AssemblerInput,
     type LLMMessage,
 } from "./llm-prompt-assembler";
+import { MacroEngine } from "./macro-engine";
 import type { ApiConfig, PresetConfig, RegexConfig } from "./settings-types";
 import { loadMemoryConfig } from "./memory-storage";
 import { retrieveCoreMemoriesForPrompt, retrieveMemoriesForPrompt } from "./memory-service";
@@ -144,6 +146,7 @@ async function callReadingLLM(
     regexes?: RegexConfig[],
     appTags?: string[],
     userName?: string,
+    options?: { skipOutputRegex?: boolean },
 ): Promise<string> {
     return sendLLMRequest(
         config,
@@ -151,7 +154,7 @@ async function callReadingLLM(
         messages,
         regexes ?? [],
         { characterName, userName },
-        { appId: "reading", appTags },
+        { appId: "reading", appTags, skipOutputRegex: options?.skipOutputRegex },
     );
 }
 
@@ -414,6 +417,31 @@ export async function summarizeReadingRange(
     return { summary, rangeLabel, truncated };
 }
 
+/** 模型回复里的一条批注标记。index 是「本批第几段」，已经换成 0 起。 */
+export type ParsedAnnotationMarker = { index: number; quote?: string; content: string };
+
+/** 拆 [批注:N|原文片段]批注内容[/批注]。片段可省略，老格式 [批注:N] 照样认。
+ *  方括号、冒号、竖线都放宽到全角——有些模型会把整段标点全角化，内容其实是对的，
+ *  为这个把整批批注丢掉太亏。 */
+export function parseAnnotationMarkers(responseText: string): ParsedAnnotationMarker[] {
+    const pattern = /[[［]批注[:：]\s*(\d+)\s*(?:[|｜]\s*([^\]］]*?)\s*)?[\]］]([\s\S]*?)[[［]\s*\/\s*批注\s*[\]］]/g;
+    const markers: ParsedAnnotationMarker[] = [];
+    let match;
+    while ((match = pattern.exec(responseText)) !== null) {
+        const index = parseInt(match[1], 10) - 1;
+        if (!Number.isFinite(index) || index < 0) continue;
+        const content = match[3].trim();
+        if (!content) continue;
+        markers.push({ index, ...(match[2] ? { quote: match[2] } : {}), content });
+    }
+    return markers;
+}
+
+/** 模型明确表示「这批没什么可写的」 */
+export function hasNoAnnotationMarker(responseText: string): boolean {
+    return /[[［]\s*无批注\s*[\]］]/.test(responseText);
+}
+
 export async function generateAnnotationBatch(
     book: Book,
     batchTitle: string,
@@ -437,6 +465,11 @@ export async function generateAnnotationBatch(
 
     const { input, apiConfig, preset } = resolved;
     const llmMessages = assemblePromptPayload(input);
+    assertAnnotationPromptCarriesChapter(llmMessages);
+
+    // 批注走的是「标记协议」而不是给人看的正文，所以先拿未经输出正则处理的原文来解析：
+    // 用户的正则里常有清理方括号/行动描写的规则，套在这里会把 [批注:N] 标记本身吃掉，
+    // 于是无论换什么模型、什么中转站都解析不出批注。正则改为只作用在每条批注的内容上。
     const responseText = await callReadingLLM(
         apiConfig!,
         preset,
@@ -445,34 +478,63 @@ export async function generateAnnotationBatch(
         input.regexes,
         input.appTags,
         input.userIdentity?.name,
+        { skipOutputRegex: true },
     );
     if (!responseText) throw new Error("API 返回空内容");
-    if (responseText.includes("[无批注]")) return [];
 
-    // Parse [批注:N|原文片段]...[/批注]；片段可省略，老格式 [批注:N] 照样认
-    const pattern = /\[批注[:：](\d+)(?:\s*[|｜]\s*([^\]]*))?\]([\s\S]*?)\[\/批注\]/g;
+    const macroEngine = new MacroEngine(character.name, input.userIdentity?.name ?? "用户");
+    const cleanContent = (text: string) => applyOutputRegex(
+        text,
+        input.regexes ?? [],
+        { macroEngine, activeTags: input.appTags ?? ["reading", "annotate"] },
+    ).trim();
+
     const results: ReadingAnnotation[] = [];
-    let match;
-    while ((match = pattern.exec(responseText)) !== null) {
-        const relativeIndex = parseInt(match[1], 10) - 1;
-        const content = match[3].trim();
-        const target = targets[relativeIndex];
-        if (content && target) {
-            const anchor = match[2] ? locateAnchor(target.text, match[2]) : null;
-            results.push({
-                id: `ra_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-                bookId: book.id,
-                chapterIndex: target.chapterIndex,
-                paragraphIndex: target.paragraphIndex,
-                characterId,
-                characterName: character.name,
-                content,
-                createdAt: new Date().toISOString(),
-                ...(anchor ? { quote: anchor.quote, quoteStart: anchor.start, quoteEnd: anchor.end } : {}),
-            });
-        }
+    for (const parsed of parseAnnotationMarkers(responseText)) {
+        const target = targets[parsed.index];
+        const content = cleanContent(parsed.content);
+        if (!content || !target) continue;
+        const anchor = parsed.quote ? locateAnchor(target.text, parsed.quote) : null;
+        results.push({
+            id: `ra_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            bookId: book.id,
+            chapterIndex: target.chapterIndex,
+            paragraphIndex: target.paragraphIndex,
+            characterId,
+            characterName: character.name,
+            content,
+            createdAt: new Date().toISOString(),
+            ...(anchor ? { quote: anchor.quote, quoteStart: anchor.start, quoteEnd: anchor.end } : {}),
+        });
+    }
+
+    // 一条都没解析出来才认 [无批注]：模型有时会一边写批注一边解释「否则我会输出[无批注]」，
+    // 先判断会把写出来的批注全扔掉。
+    if (results.length === 0) {
+        if (hasNoAnnotationMarker(responseText)) return [];
+        // 走到这里说明模型答了，但没按格式答。抛出去让重试接手，并把它到底说了什么带上，
+        // 否则用户只能看到「没有返回批注」，无从判断是模型、预设还是正则的问题。
+        throw new Error(
+            `模型没有按 [批注:段落序号]…[/批注] 的格式回复，这一批解析不出批注。`
+            + `它的开头是：「${responseText.trim().slice(0, 60)}」`,
+        );
     }
     return results;
+}
+
+/** 批注提示词必须真的带上正文。带不上只有一个原因：绑定的预设里没有「▸ 阅读·批注」
+ *  这一条（或被关掉了）——正文和格式要求都写在那条的 {{chapterContent}} 周围，
+ *  条目不在，模型就只收到人设，然后回一段普通聊天，看起来像「批注生成不出来」。
+ *  锚点要求是引擎侧拼在 chapterContent 末尾的，用它当探针最准。 */
+function assertAnnotationPromptCarriesChapter(messages: LLMMessage[]): void {
+    const hasChapter = messages.some((message) => (
+        typeof message.content === "string" && message.content.includes("<annotation_anchor>")
+    ));
+    if (hasChapter) return;
+    throw new Error(
+        "当前「阅读」绑定的预设里没有启用「▸ 阅读·批注」条目，模型收不到正文和批注格式要求。"
+        + "请到 设置 → 预设 里启用这一条（或把阅读改绑内置预设）后重试。",
+    );
 }
 
 export async function previewReadingAnnotationPrompt(

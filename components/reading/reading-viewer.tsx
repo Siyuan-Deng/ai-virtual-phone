@@ -1243,6 +1243,26 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         return buildPdfBatchRequest(size, mode, refs);
     }, [buildPdfBatchRequest, buildTxtBatchRequest, ensurePdfPageRangeParsed, getPdfBatchWindow, isPdf]);
 
+    /** 对话框里那行「本次范围」。用的就是真正生成时的那套算法（buildTxtBatchRequest /
+     *  getPdfBatchWindow），不是另算一遍，免得显示的范围和实际批注的范围对不上。 */
+    const annotationRangePreview = useMemo(() => {
+        if (!annotationDialogMode) return "";
+        const size = clampBatchSize(Number(annotationBatchInput));
+        const mode: AnnotationBatchMode = annotationDialogMode === "manual" ? "manual" : "auto-current";
+        if (isPdf) {
+            const window = getPdfBatchWindow(size, mode);
+            return window ? window.title : "";
+        }
+        const request = buildTxtBatchRequest(size, mode);
+        if (!request) return "";
+        const startChapter = chapters[request.items[0].chapterIndex]?.title;
+        const endChapter = chapters[request.items[request.items.length - 1].chapterIndex]?.title;
+        const chapterHint = startChapter && endChapter && startChapter !== endChapter
+            ? `（${startChapter} → ${endChapter}）`
+            : startChapter ? `（${startChapter}）` : "";
+        return `${request.title}${chapterHint}`;
+    }, [annotationBatchInput, annotationDialogMode, buildTxtBatchRequest, chapters, clampBatchSize, getPdfBatchWindow, isPdf]);
+
     const executeBatchAnnotation = useCallback(async (request: AnnotationBatchRequest, options?: { force?: boolean }): Promise<boolean> => {
         if (!companionId) return false;
         const batchKey = `${book.id}:${companionId}:${request.key}`;
@@ -1289,7 +1309,9 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                     return [...merged.values()];
                 });
             } else {
-                setAnnotationError("AI 没有返回批注（可能返回了[无批注]或API调用失败）");
+                // 解析失败、预设缺条目、接口报错现在都会抛出带原因的错误（见 generateAnnotationBatch），
+                // 能走到这里就只剩一种情况：模型看完了，但这一批它没什么想说的。
+                setAnnotationError(`${companion?.name || "AI"}这一批没有想写的批注（模型返回了「无批注」），可以换个范围再试`);
             }
             return true;
         } catch (err) {
@@ -3129,11 +3151,11 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                                     <span>
                                         {annotationDialogMode === "manual"
                                             ? (isPdf
-                                                ? `确认让${companion?.name || "AI"}为接下来几页生成批注`
-                                                : `确认让${companion?.name || "AI"}为接下来几个段落生成批注`)
+                                                ? `从当前页开始，往后几页交给${companion?.name || "AI"}批注`
+                                                : `从这一屏的第一段开始，往后几段交给${companion?.name || "AI"}批注（读完本章会接着下一章）`)
                                             : (isPdf
-                                                ? `开启后，先生成当前页所在批次；之后翻到新批次第一页时自动生成批注`
-                                                : `开启后，先生成当前段落所在批次；之后翻到新批次第一页时自动生成批注`)}
+                                                ? `每批几页。开启后先生成当前页所在的一批，之后翻到新一批的第一页时自动生成`
+                                                : `每批几段。开启后先生成当前段落所在的一批，之后读到新一批时自动生成`)}
                                     </span>
                                     <input
                                         value={annotationBatchInput}
@@ -3142,6 +3164,10 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                                         inputMode="numeric"
                                     />
                                 </label>
+                                <div className="reading-settings-inline-note">
+                                    <span>本次范围</span>
+                                    <span>{annotationRangePreview || "（翻到正文页后才能算范围）"}</span>
+                                </div>
                                 <div className="reading-settings-inline-note">
                                     <span>默认值</span>
                                     <span>{isPdf ? "5 页" : "50 段"}</span>
@@ -3198,7 +3224,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                     style={selectionMenuStyle(selectionInfo.placeAtTop, selectionInfo.topOffset, footerHeight)}
                     onPointerDown={(e) => e.stopPropagation()}
                 >
-                    <button type="button" onClick={() => addMark("highlight")}>荧光笔</button>
+                    <button type="button" onClick={() => addMark("highlight")}>高亮</button>
                     <button type="button" onClick={() => addMark("underline")}>划线</button>
                     <button type="button" onClick={clearSelection}>取消</button>
                 </div>

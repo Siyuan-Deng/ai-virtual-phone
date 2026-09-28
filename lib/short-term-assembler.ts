@@ -820,7 +820,7 @@ export function loadNativeTimeline(
 }
 
 // Fixed order — lower = further from LLM output (appears higher in prompt)
-const FEATURE_ORDER: Record<string, number> = { map: 0, game: 0.5, moments: 1, xiaohongshu: 1.5, checkphone: 1.7, story: 2, vn: 2, theater: 2.2, interview: 2.35, cocreate: 2.4, diary_entry: 2.45, notewall: 2.5, custom_app: 2.6, group_chat: 3, chat: 4 };
+const FEATURE_ORDER: Record<string, number> = { map: 0, game: 0.5, moments: 1, xiaohongshu: 1.5, checkphone: 1.7, story: 2, vn: 2, theater: 2.2, interview: 2.35, cocreate: 2.4, diary_entry: 2.45, notewall: 2.5, custom_app: 2.6, reading: 2.7, group_chat: 3, chat: 4 };
 // Map appId → XML tag name for the "current feature" wrapper
 const FEATURE_TAG: Record<string, string> = {
     chat: "recent_chat",
@@ -835,6 +835,7 @@ const FEATURE_TAG: Record<string, string> = {
     checkphone: "recent_checkphone",
     interview_magazine: "recent_interview",
     cocreate: "recent_cocreate",
+    reading: "recent_reading",
 };
 
 function getFeatureTag(appId: string): string {
@@ -1090,6 +1091,14 @@ export function prepareShortTermContext(
     const customAppEntries = timeline.filter(e => e.sourceApp === "custom_app");
     if (customAppEntries.length > 0) {
         raw.push({ tag: "recent_custom_app", order: FEATURE_ORDER.custom_app, entries: customAppEntries });
+    }
+
+    // 共读批注 / 区间总结。时间线里一直有它们（记忆区就是读时间线），但没有任何一条
+    // raw.push 把它们收进提示词块，于是角色「记得」只体现在记忆区，模型一个字都收不到
+    // ——问角色书里的批注，它只能说没看见。
+    const readingEntries = timeline.filter(e => e.sourceApp === "reading");
+    if (readingEntries.length > 0) {
+        raw.push({ tag: "recent_reading", order: FEATURE_ORDER.reading, entries: readingEntries });
     }
 
     const groupChatEntries = timeline.filter(e =>
@@ -1350,6 +1359,14 @@ export function prepareGroupShortTermContext(
         raw.push({ tag: "recent_custom_app", order: FEATURE_ORDER.custom_app, entries: customAppEntries });
     }
 
+    // 共读批注 / 区间总结。时间线里一直有它们（记忆区就是读时间线），但没有任何一条
+    // raw.push 把它们收进提示词块，于是角色「记得」只体现在记忆区，模型一个字都收不到
+    // ——问角色书里的批注，它只能说没看见。
+    const readingEntries = timeline.filter(e => e.sourceApp === "reading");
+    if (readingEntries.length > 0) {
+        raw.push({ tag: "recent_reading", order: FEATURE_ORDER.reading, entries: readingEntries });
+    }
+
     const groupChatEntries = timeline.filter(e => e.sourceApp === "chat" && e.sourceDetail === "group");
     if (groupChatEntries.length > 0) {
         raw.push({ tag: "recent_group_chat", order: FEATURE_ORDER.group_chat, entries: groupChatEntries });
@@ -1444,6 +1461,7 @@ export function prepareGroupShortTermContext(
                                         entry.sourceApp === "interview_magazine" ? "recent_interview" :
                                                 entry.sourceApp === "cocreate" ? "recent_cocreate" :
                                                     entry.sourceApp === "custom_app" ? "recent_custom_app" :
+                                                        entry.sourceApp === "reading" ? "recent_reading" :
                                                         entry.sourceApp === "story" && entry.sourceDetail === "black_market_theater" ? "recent_theater" :
                                                             entry.sourceApp === "diary" && entry.sourceDetail === "diary_entry" ? "recent_diary" :
                                                                 entry.sourceApp === "diary" && entry.sourceDetail === "notewall" ? "recent_notewall" :
