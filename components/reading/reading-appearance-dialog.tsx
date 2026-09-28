@@ -13,6 +13,7 @@ import {
     resolveReadingFontFamily,
 } from "@/lib/reading-appearance";
 import { ReadingFontTier } from "./reading-font-tier";
+import { ReadingFontDiagnostics } from "./reading-font-diagnostics";
 
 export type ReadingAppearanceSaveOptions = {
     backgroundFile: File | null;
@@ -290,6 +291,8 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                         }}
                     />
                 </section>
+
+                <ReadingFontDiagnostics appearance={appearance} loadedFonts={loadedFonts} />
             </div>
         </ContentDialog>
     );

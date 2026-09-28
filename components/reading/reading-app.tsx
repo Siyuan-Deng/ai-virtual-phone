@@ -208,6 +208,16 @@ export default function ReadingApp({ onClose }: Props) {
 
     const appearanceStyle = {
         fontFamily: resolvedBodyFont,
+        // 三个字体变量继续下发：新版 CSS 已经不读它们了，但用户手机上可能还缓存着
+        // 旧版 CSS（PWA 的 Service Worker 会把整套静态资源存下来）。旧规则读到变量
+        // 就还能正常显示，读不到则回落成系统字体——正是「换了字体没反应」的样子。
+        ["--reading-font-family" as "--reading-font-family"]: resolvedBodyFont,
+        ...(resolvedAnnotationFont
+            ? { ["--reading-annotation-font-family" as "--reading-annotation-font-family"]: resolvedAnnotationFont }
+            : {}),
+        ...(resolvedUserAnnotationFont
+            ? { ["--reading-user-annotation-font-family" as "--reading-user-annotation-font-family"]: resolvedUserAnnotationFont }
+            : {}),
         ["--reading-font-size" as "--reading-font-size"]: `${appearance.fontSize}px`,
         ["--reading-text-color" as "--reading-text-color"]: appearance.textColor,
         ["--reading-line-height" as "--reading-line-height"]: String(appearance.lineHeight),

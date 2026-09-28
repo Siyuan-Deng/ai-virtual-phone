@@ -3357,7 +3357,13 @@
   color: var(--reading-warm-ink-tertiary, #999);
 }
 .reading-list-meta .reading-list-badge {
-  max-width: 100%;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* 伴读的角色名可能很长，和「13章」一样是普通文本，但要能被截断 */
+.reading-list-meta-value {
+  min-width: 0;
+  max-width: 10em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -7478,4 +7484,18 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 字体诊断面板：报告用等宽小字，能直接截图看 */
+.reading-font-diag-report {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(45, 35, 28, 0.06);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: calc(10px*var(--app-text-scale,1));
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: rgba(60, 48, 35, 0.9);
 }

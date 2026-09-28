@@ -619,10 +619,16 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                                             <span className="reading-list-badge">{formatBadge(book.format)}</span>
                                             <span>{book.totalChapters}章</span>
                                             {annotationCounts[book.id] ? (
-                                                <span className="reading-list-badge">批注 {annotationCounts[book.id]}条</span>
+                                                <>
+                                                    <span className="reading-list-badge">批注</span>
+                                                    <span>{annotationCounts[book.id]}条</span>
+                                                </>
                                             ) : null}
                                             {companionNames[book.id] ? (
-                                                <span className="reading-list-badge">伴读 {companionNames[book.id]}</span>
+                                                <>
+                                                    <span className="reading-list-badge">伴读</span>
+                                                    <span className="reading-list-meta-value">{companionNames[book.id]}</span>
+                                                </>
                                             ) : null}
                                         </div>
                                         <div className="reading-list-progress-row">
@@ -689,7 +695,7 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                         </button>
                         <button
                             type="button"
-                            className="ui-btn ui-btn-ghost"
+                            className="ui-btn ui-btn-outline"
                             disabled={coverBusy}
                             onClick={() => {
                                 const target = coverMenuBook.id;
