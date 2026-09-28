@@ -309,8 +309,15 @@ function annotationFont(ctx: Ctx, annotation: ReadingShareAnnotation): string {
     return annotation.authorType === "user" ? ctx.fonts.userAnnotation : ctx.fonts.charAnnotation;
 }
 
+/** 书名带上书名号 */
+function bookTitleText(input: ReadingShareCardInput): string {
+    const title = input.bookTitle.trim();
+    if (!title) return "";
+    return /^《.*》$/.test(title) ? title : `《${title}》`;
+}
+
 function metaLine(input: ReadingShareCardInput): string {
-    return [input.bookTitle, input.bookAuthor, input.chapterTitle].filter(Boolean).join(" · ");
+    return [bookTitleText(input), input.bookAuthor, input.chapterTitle].filter(Boolean).join(" · ");
 }
 
 function stampText(input: ReadingShareCardInput): string {
@@ -559,24 +566,26 @@ function renderPoster(ctx: Ctx): number {
 
 function renderBookmark(ctx: Ctx): number {
     const { pen, input, palette } = ctx;
-    // 整张图就是那张书签：不再在外面套一圈底色，四边留白就够了
-    const pad = 92;
+    // 整张图就是那张书签：不再在外面套一圈底色。左右留得多、正文窄一条，
+    // 才是书签那个瘦长比例——铺满整宽会变成一张方图。
+    const padX = 206;
+    const padY = 96;
     const cardWidth = WIDTH;
     const cardX = 0;
-    const inner = cardWidth - pad * 2;
-    let y = pad;
+    const inner = cardWidth - padX * 2;
+    let y = padY;
 
     pen.rect(cardX + cardWidth / 2 - 22, y + 6, 44, 3, palette.accent);
     y += 42;
-    y = drawQuote(ctx, cardX + pad, y, inner, 28, 62, palette.ink);
+    y = drawQuote(ctx, cardX + padX, y, inner, 26, 56, palette.ink);
 
     if (input.annotations.length > 0) {
         y += 24;
-        y = drawAnnotations({ ...ctx, align: "left" }, cardX + pad, y, inner, "rule");
+        y = drawAnnotations({ ...ctx, align: "left" }, cardX + padX, y, inner, "rule");
     }
 
     y += 22;
-    pen.dashedLine(cardX + pad, y, cardX + cardWidth - pad, palette.sub);
+    pen.dashedLine(cardX + padX, y, cardX + cardWidth - padX, palette.sub);
     y += 40;
 
     const avatarSize = 62;
@@ -593,7 +602,7 @@ function renderBookmark(ctx: Ctx): number {
     pen.text(`${progressText(input)} · ${stampText(input)}`, cardX + cardWidth / 2, y + 19, palette.sub, "center");
     y += 40;
     pen.circleOutline(cardX + cardWidth / 2, y + 8, 7, palette.sub);
-    return y + 38 + pad;
+    return y + 38 + padY;
 }
 
 function renderMagazine(ctx: Ctx): number {
@@ -603,7 +612,7 @@ function renderMagazine(ctx: Ctx): number {
     let y = pad;
 
     pen.font(19, ctx.fonts.body);
-    pen.text(input.bookTitle, pad, y + 19, palette.sub);
+    pen.text(bookTitleText(input), pad, y + 19, palette.sub);
     if (input.bookAuthor) pen.text(input.bookAuthor, WIDTH / 2, y + 19, palette.sub, "center");
     if (input.chapterTitle) pen.text(input.chapterTitle, WIDTH - pad, y + 19, palette.sub, "right");
     y += 34;
