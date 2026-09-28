@@ -7704,3 +7704,100 @@
   gap: 12px;
   padding: 4px 14px 14px;
 }
+
+/* 配色方案 chips */
+.reading-share-schemes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.reading-share-scheme {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--reading-warm-card-border, #f0e8da);
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--reading-warm-ink, #111);
+  font-size: calc(10.5px*var(--app-text-scale,1));
+  -webkit-tap-highlight-color: transparent;
+}
+.reading-share-scheme.is-active {
+  border-color: var(--reading-warm-brown, #8a6b3d);
+  background: rgba(138, 107, 61, 0.12);
+  font-weight: 600;
+}
+.reading-share-scheme-swatch {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(45, 35, 28, 0.15);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.reading-share-scheme-swatch i {
+  position: absolute;
+  display: block;
+  width: 11px;
+  height: 22px;
+  top: 0;
+}
+.reading-share-scheme-swatch i:first-child { left: 0; }
+.reading-share-scheme-swatch i:last-child { right: 0; height: 11px; bottom: 0; top: auto; }
+
+/* 存档条：存一档 / 调出来 */
+.reading-preset-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.reading-preset-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.reading-preset-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: calc(10px*var(--app-text-scale,1));
+  color: var(--reading-warm-ink-tertiary, #a3968a);
+}
+.reading-preset-naming {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.reading-preset-naming .ui-input { flex: 1; min-width: 0; }
+.reading-preset-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.reading-preset-item {
+  display: flex;
+  align-items: stretch;
+  border-radius: 999px;
+  border: 1px solid var(--reading-warm-card-border, #f0e8da);
+  background: rgba(255, 255, 255, 0.55);
+  overflow: hidden;
+}
+.reading-preset-name {
+  padding: 5px 10px;
+  font-size: calc(10.5px*var(--app-text-scale,1));
+  color: var(--reading-warm-ink, #111);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reading-preset-delete {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  color: var(--c-danger, #fa5151);
+  font-size: calc(10px*var(--app-text-scale,1));
+  border-left: 1px solid var(--reading-warm-card-border, #f0e8da);
+}

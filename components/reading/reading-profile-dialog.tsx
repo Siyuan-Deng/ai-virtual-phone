@@ -98,10 +98,6 @@ export function ReadingProfileDialog({ onClose, onSaved }: Props) {
                         />
                     </div>
                 </div>
-                <div className="reading-settings-inline-note">
-                    <span>说明</span>
-                    <span>只用于阅读 app 里的署名（比如之后分享摘抄图片），和手机账号没有关系。</span>
-                </div>
                 {showAvatar && (
                     <div className="reading-settings-actions">
                         <button

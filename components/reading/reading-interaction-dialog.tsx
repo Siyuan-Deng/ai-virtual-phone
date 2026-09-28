@@ -4,6 +4,7 @@ import { useState } from "react";
 import { BookOpenText, LocateFixed, Minus, PenLine, Plus, Repeat2, Rocket, RotateCcw, ScrollText, Settings } from "lucide-react";
 import { ContentDialog } from "@/components/ui/modal";
 import { ReadingSettingsSection } from "./reading-settings-section";
+import { ReadingPresetBar } from "./reading-preset-bar";
 import { DEFAULT_READING_ANNOTATION_GUIDANCE, DEFAULT_READING_SUMMARY_PROMPT } from "@/lib/reading-prompt-defaults";
 import { Toggle } from "@/components/ui/form";
 import {
@@ -75,7 +76,7 @@ export function ReadingInteractionDialog({ onClose }: Props) {
             onCancel={onClose}
         >
             <div className="reading-settings-grid">
-                <ReadingSettingsSection icon={<PenLine size={15} />} title="批注要求" summary="决定 TA 写什么样的批注">
+                <ReadingSettingsSection icon={<PenLine size={15} />} title="批注要求">
                     <p className="reading-settings-inline-note">
                         <span>这段会接在提示词最后，离模型的输出最近；和预设里原有的批注条目冲突时以这里为准。
                         批注的格式要求（[批注:段落序号|原文片段]、[高亮]、[划线]）不在这里，改坏了也不会把批注格式弄坏。</span>
@@ -98,9 +99,14 @@ export function ReadingInteractionDialog({ onClose }: Props) {
                             onChange={(event) => setConfig((prev) => ({ ...prev, annotationGuidancePrompt: event.target.value }))}
                         />
                     </div>
+                    <ReadingPresetBar<string>
+                        kind="annotationPrompt"
+                        current={() => config.annotationGuidancePrompt}
+                        onLoad={(text) => setConfig((prev) => ({ ...prev, annotationGuidancePrompt: text }))}
+                    />
                 </ReadingSettingsSection>
 
-                <ReadingSettingsSection icon={<ScrollText size={15} />} title="总结要求" summary="决定区间总结怎么写">
+                <ReadingSettingsSection icon={<ScrollText size={15} />} title="总结要求">
                     <p className="reading-settings-inline-note">
                         <span>「总结内容」用的提示词。正文前面会自动带上一句「以下是《书名》某某章的正文」，这里只写要求。</span>
                     </p>
@@ -119,6 +125,11 @@ export function ReadingInteractionDialog({ onClose }: Props) {
                             onChange={(event) => setConfig((prev) => ({ ...prev, summaryPrompt: event.target.value }))}
                         />
                     </div>
+                    <ReadingPresetBar<string>
+                        kind="summaryPrompt"
+                        current={() => config.summaryPrompt}
+                        onLoad={(text) => setConfig((prev) => ({ ...prev, summaryPrompt: text }))}
+                    />
                 </ReadingSettingsSection>
 
                 <ReadingSettingsSection icon={<BookOpenText size={15} />} title="阅读模式">

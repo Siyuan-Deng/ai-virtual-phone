@@ -6,15 +6,18 @@ import { Toggle } from "@/components/ui/form";
 import { downloadFile } from "@/lib/download-utils";
 import { loadReadingProfile, loadReadingProfileAvatar } from "@/lib/reading-profile";
 import {
+    READING_SHARE_PALETTES,
     READING_SHARE_TEMPLATES,
     READING_SHARE_TEMPLATE_PRESETS,
     readingShareCardToBlob,
     renderReadingShareCard,
+    type ReadingShareAlign,
     type ReadingShareAnnotation,
     type ReadingShareFonts,
     type ReadingSharePalette,
     type ReadingShareTemplate,
 } from "@/lib/reading-share-card";
+import { ReadingPresetBar } from "./reading-preset-bar";
 import { ColorInput } from "@/components/ui/form";
 import {
     READING_ANNOTATION_STYLE_DEFAULTS,
@@ -78,7 +81,7 @@ export function ReadingShareDialog({
 }: Props) {
     const [template, setTemplate] = useState<ReadingShareTemplate>("poster");
     const [palette, setPalette] = useState<ReadingSharePalette>(READING_SHARE_TEMPLATE_PRESETS.poster);
-    const [align, setAlign] = useState<"left" | "center">(READING_SHARE_TEMPLATE_PRESETS.poster.align);
+    const [align, setAlign] = useState<ReadingShareAlign>(READING_SHARE_TEMPLATE_PRESETS.poster.align);
 
     /** 换模板时配色和对齐回到那个模板的出厂值——深色版面套上浅色底会直接糊掉 */
     const pickTemplate = (next: ReadingShareTemplate) => {
@@ -86,6 +89,15 @@ export function ReadingShareDialog({
         setTemplate(next);
         setPalette({ background: preset.background, ink: preset.ink, sub: preset.sub, accent: preset.accent });
         setAlign(preset.align);
+    };
+
+    /** 存一档 = 模板 + 配色 + 对齐 */
+    type ShareStyle = { template: ReadingShareTemplate; palette: ReadingSharePalette; align: ReadingShareAlign };
+    const applyStyle = (style: ShareStyle) => {
+        if (!style?.template || !READING_SHARE_TEMPLATE_PRESETS[style.template]) return;
+        setTemplate(style.template);
+        if (style.palette) setPalette(style.palette);
+        if (style.align) setAlign(style.align);
     };
     const hasMine = annotations.some((annotation) => annotation.authorType === "user");
     const hasTheirs = annotations.some((annotation) => annotation.authorType === "character");
@@ -192,6 +204,28 @@ export function ReadingShareDialog({
                 </div>
 
                 <div className="reading-share-knobs">
+                    <div className="reading-share-schemes">
+                        {READING_SHARE_PALETTES[template].map((scheme) => {
+                            const active = scheme.palette.background === palette.background
+                                && scheme.palette.ink === palette.ink
+                                && scheme.palette.accent === palette.accent;
+                            return (
+                                <button
+                                    key={scheme.name}
+                                    type="button"
+                                    className={`reading-share-scheme${active ? " is-active" : ""}`}
+                                    onClick={() => setPalette(scheme.palette)}
+                                    title={scheme.name}
+                                >
+                                    <span className="reading-share-scheme-swatch" style={{ background: scheme.palette.background }}>
+                                        <i style={{ background: scheme.palette.accent }} />
+                                        <i style={{ background: scheme.palette.ink }} />
+                                    </span>
+                                    <span>{scheme.name}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
                     <div className="reading-share-colors">
                         {([
                             ["背景", "background"],
@@ -209,7 +243,7 @@ export function ReadingShareDialog({
                         ))}
                     </div>
                     <div className="reading-share-aligns">
-                        {([["左对齐", "left"], ["居中", "center"]] as Array<[string, "left" | "center"]>).map(([label, value]) => (
+                        {([["左对齐", "left"], ["居中", "center"], ["右对齐", "right"]] as Array<[string, ReadingShareAlign]>).map(([label, value]) => (
                             <button
                                 key={value}
                                 type="button"
@@ -218,6 +252,12 @@ export function ReadingShareDialog({
                             >{label}</button>
                         ))}
                     </div>
+                    <ReadingPresetBar<ShareStyle>
+                        kind="share"
+                        current={() => ({ template, palette, align })}
+                        onLoad={applyStyle}
+                        defaultName={READING_SHARE_TEMPLATES.find(t => t.id === template)?.label || "我的样式"}
+                    />
                 </div>
 
                 {hasMine && (
