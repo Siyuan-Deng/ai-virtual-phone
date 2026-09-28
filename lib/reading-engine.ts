@@ -6,6 +6,7 @@ import type { ChatSession } from "./chat-storage";
 import { loadChatMessages, pushChatMessage } from "./chat-storage";
 import { loadCharacters } from "./character-storage";
 import { loadReadingInteractionConfig } from "./reading-storage";
+import { DEFAULT_READING_ANNOTATION_GUIDANCE, DEFAULT_READING_SUMMARY_PROMPT } from "./reading-prompt-defaults";
 import {
     resolveBinding,
     loadBindingConfig,
@@ -418,10 +419,10 @@ export async function summarizeReadingRange(
     const rangeLabel = chapters.length === 1 ? nameOf(first) : `${nameOf(first)}—${nameOf(last)}`;
 
     const { text, truncated } = buildRangeText(chapters);
+    const configuredSummaryPrompt = loadReadingInteractionConfig().summaryPrompt?.trim();
     const instruction = [
         `以下是《${book.title}》${rangeLabel}的正文。`,
-        "请用中文把它概括成 50 字左右的一段话，说清楚发生了什么、谁做了什么。",
-        "保持客观陈述，不要评论、不要代入任何人的口吻、不要分点、不要加标题或前后缀，只输出摘要本身。",
+        configuredSummaryPrompt || DEFAULT_READING_SUMMARY_PROMPT,
     ].join("\n");
 
     const result = await simpleLLMCall(
@@ -506,7 +507,10 @@ export async function generateAnnotationBatch(
     if (!resolved) throw new Error("未找到 API 配置，请在设置中绑定 API");
 
     const { input, apiConfig, preset } = resolved;
-    const llmMessages = assemblePromptPayload(input);
+    const llmMessages = appendAnnotationGuidance(
+        assemblePromptPayload(input),
+        loadReadingInteractionConfig().annotationGuidancePrompt,
+    );
     assertAnnotationPromptCarriesChapter(llmMessages);
 
     // 批注走的是「标记协议」而不是给人看的正文，所以先拿未经输出正则处理的原文来解析：
@@ -592,6 +596,18 @@ export async function generateAnnotationBatch(
     return { annotations: results, marks };
 }
 
+/** 把「批注要求」接在提示词最后一条消息的末尾。
+ *  接在最后而不是塞进预设条目：预设属于用户数据，克隆过预设的人拿不到预设侧的改动；
+ *  而且放在最后离模型的输出最近，和预设里原有的批注条目冲突时以这段为准。 */
+function appendAnnotationGuidance(messages: LLMMessage[], guidance: string | undefined): LLMMessage[] {
+    const text = (guidance ?? DEFAULT_READING_ANNOTATION_GUIDANCE).trim();
+    if (!text || messages.length === 0) return messages;
+    const block = `\n\n<annotation_guidance>\n${text}\n</annotation_guidance>`;
+    const last = messages[messages.length - 1];
+    if (typeof last.content !== "string") return messages;
+    return [...messages.slice(0, -1), { ...last, content: last.content + block }];
+}
+
 /** 批注提示词必须真的带上正文。带不上只有一个原因：绑定的预设里没有「▸ 阅读·批注」
  *  这一条（或被关掉了）——正文和格式要求都写在那条的 {{chapterContent}} 周围，
  *  条目不在，模型就只收到人设，然后回一段普通聊天，看起来像「批注生成不出来」。
@@ -621,17 +637,23 @@ export async function previewReadingAnnotationPrompt(
         paragraphIndex,
         text,
     }));
+    // 预览必须和真正发出去的那份逐字一致，否则看了也白看
+    const config = loadReadingInteractionConfig();
     const resolved = await resolveReadingInput(characterId, ["reading", "annotate"], {
         bookTitle: book.title,
         chapterTitle: chapter.title,
         chapterContent: formatBatchChapterContent(targets)
-            + formatAnnotationDensityHint(targets.length, loadReadingInteractionConfig().annotationInterval)
-            + formatAnnotationAnchorHint(),
+            + formatAnnotationDensityHint(targets.length, config.annotationInterval)
+            + formatAnnotationAnchorHint()
+            + formatAnnotationMarkHint(),
         annotationHistory: formatBatchAnnotationHistory(existingAnnotations, targets),
     });
     if (!resolved?.apiConfig) throw new Error("未找到 API 配置，请在设置中绑定 API");
 
-    const llmMessages = assemblePromptPayload(resolved.input);
+    const llmMessages = appendAnnotationGuidance(
+        assemblePromptPayload(resolved.input),
+        config.annotationGuidancePrompt,
+    );
     return {
         messages: previewMessagesForApi(resolved.apiConfig, resolved.preset, llmMessages),
         characterName: `阅读:${character.name}`,

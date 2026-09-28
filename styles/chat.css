@@ -7676,3 +7676,31 @@
   display: flex;
   gap: 6px;
 }
+
+/* 阅读设置/外观里的折叠块：默认收起，点开再调 */
+.reading-settings-fold .reading-fold-summary {
+  font-size: calc(13px*var(--app-text-scale,1));
+  color: var(--reading-warm-ink, #111);
+  padding: 12px 14px;
+}
+.reading-settings-fold-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.reading-settings-fold-hint {
+  font-size: calc(10.5px*var(--app-text-scale,1));
+  color: var(--reading-warm-ink-tertiary, #a3968a);
+  font-weight: 400;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+}
+.reading-settings-fold[open] .reading-settings-fold-hint { display: none; }
+.reading-settings-fold .reading-fold-body {
+  gap: 12px;
+  padding: 4px 14px 14px;
+}

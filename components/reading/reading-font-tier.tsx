@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Trash2, Type } from "lucide-react";
 import { Select } from "@/components/ui/form";
+import { ReadingSettingsSection } from "./reading-settings-section";
 import {
     READING_FONT_OPTIONS,
     READING_FONT_PREVIEW_TEXT,
@@ -129,11 +130,7 @@ export function ReadingFontTier({
     const pickedName = pendingFile?.name || customFontName;
 
     return (
-        <section className="reading-settings-group">
-            <div className="reading-settings-heading">
-                <Type size={15} />
-                <span>{heading}</span>
-            </div>
+        <ReadingSettingsSection icon={<Type size={15} />} title={heading}>
             <label className="reading-settings-label reading-settings-label--bare">
                 <Select
                     value={value}
@@ -195,6 +192,6 @@ export function ReadingFontTier({
             )}
 
             {children}
-        </section>
+        </ReadingSettingsSection>
     );
 }

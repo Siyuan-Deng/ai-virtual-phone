@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { BookOpenText, LocateFixed, Minus, Plus, Repeat2, Rocket, RotateCcw, Settings } from "lucide-react";
+import { BookOpenText, LocateFixed, Minus, PenLine, Plus, Repeat2, Rocket, RotateCcw, ScrollText, Settings } from "lucide-react";
 import { ContentDialog } from "@/components/ui/modal";
+import { ReadingSettingsSection } from "./reading-settings-section";
+import { DEFAULT_READING_ANNOTATION_GUIDANCE, DEFAULT_READING_SUMMARY_PROMPT } from "@/lib/reading-prompt-defaults";
 import { Toggle } from "@/components/ui/form";
 import {
     loadReadingInteractionConfig,
@@ -73,57 +75,53 @@ export function ReadingInteractionDialog({ onClose }: Props) {
             onCancel={onClose}
         >
             <div className="reading-settings-grid">
-                <section className="reading-settings-group">
-                    <div className="reading-settings-heading">
-                        <Settings size={15} />
-                        <span>导入段落划分</span>
-                    </div>
+                <ReadingSettingsSection icon={<PenLine size={15} />} title="批注要求" summary="决定 TA 写什么样的批注">
                     <p className="reading-settings-inline-note">
-                        <span>导入 TXT 小说时如何划分段落。选错可在导入后重新导入生效。</span>
+                        <span>这段会接在提示词最后，离模型的输出最近；和预设里原有的批注条目冲突时以这里为准。
+                        批注的格式要求（[批注:段落序号|原文片段]、[高亮]、[划线]）不在这里，改坏了也不会把批注格式弄坏。</span>
                     </p>
-                    <div className="reading-option-grid">
-                        {PARAGRAPH_MODE_OPTIONS.map((opt) => (
+                    <div className="reading-settings-prompt">
+                        <div className="reading-settings-prompt-head">
+                            <span>批注提示词</span>
                             <button
-                                key={opt.value}
                                 type="button"
-                                className={`reading-option-card ${config.paragraphMode === opt.value ? "is-active" : ""}`}
-                                onClick={() => setConfig((prev) => ({ ...prev, paragraphMode: opt.value }))}
-                            >
-                                <span className="reading-option-card-label">{opt.label}</span>
-                                <span className="reading-option-card-desc">{opt.desc}</span>
-                            </button>
-                        ))}
+                                onClick={() => setConfig((prev) => ({
+                                    ...prev,
+                                    annotationGuidancePrompt: DEFAULT_READING_ANNOTATION_GUIDANCE,
+                                }))}
+                            >恢复默认</button>
+                        </div>
+                        <textarea
+                            className="ui-input"
+                            rows={9}
+                            value={config.annotationGuidancePrompt}
+                            onChange={(event) => setConfig((prev) => ({ ...prev, annotationGuidancePrompt: event.target.value }))}
+                        />
                     </div>
-                </section>
+                </ReadingSettingsSection>
 
-                <section className="reading-settings-group">
-                    <div className="reading-settings-heading">
-                        <Settings size={15} />
-                        <span>导入 TXT 编码</span>
-                    </div>
+                <ReadingSettingsSection icon={<ScrollText size={15} />} title="总结要求" summary="决定区间总结怎么写">
                     <p className="reading-settings-inline-note">
-                        <span>导入 TXT 小说时按哪种编码解析。自动识别一般够用；个别 TXT 自动识别出错导致乱码时，可手动指定其真实编码后重新导入。</span>
+                        <span>「总结内容」用的提示词。正文前面会自动带上一句「以下是《书名》某某章的正文」，这里只写要求。</span>
                     </p>
-                    <div className="reading-option-grid">
-                        {TXT_ENCODING_OPTIONS.map((opt) => (
+                    <div className="reading-settings-prompt">
+                        <div className="reading-settings-prompt-head">
+                            <span>总结提示词</span>
                             <button
-                                key={opt.value}
                                 type="button"
-                                className={`reading-option-card ${config.txtEncoding === opt.value ? "is-active" : ""}`}
-                                onClick={() => setConfig((prev) => ({ ...prev, txtEncoding: opt.value }))}
-                            >
-                                <span className="reading-option-card-label">{opt.label}</span>
-                                <span className="reading-option-card-desc">{opt.desc}</span>
-                            </button>
-                        ))}
+                                onClick={() => setConfig((prev) => ({ ...prev, summaryPrompt: DEFAULT_READING_SUMMARY_PROMPT }))}
+                            >恢复默认</button>
+                        </div>
+                        <textarea
+                            className="ui-input"
+                            rows={5}
+                            value={config.summaryPrompt}
+                            onChange={(event) => setConfig((prev) => ({ ...prev, summaryPrompt: event.target.value }))}
+                        />
                     </div>
-                </section>
+                </ReadingSettingsSection>
 
-                <section className="reading-settings-group">
-                    <div className="reading-settings-heading">
-                        <BookOpenText size={15} />
-                        <span>阅读模式</span>
-                    </div>
+                <ReadingSettingsSection icon={<BookOpenText size={15} />} title="阅读模式">
                     <p className="reading-settings-inline-note">
                         <span>切换后重新打开书籍生效。</span>
                     </p>
@@ -150,13 +148,9 @@ export function ReadingInteractionDialog({ onClose }: Props) {
                     <p className="reading-settings-inline-note">
                         <span>关掉就直接切到下一页，没有翻页动效。只影响翻页模式。</span>
                     </p>
-                </section>
+                </ReadingSettingsSection>
 
-                <section className="reading-settings-group">
-                    <div className="reading-settings-heading">
-                        <Repeat2 size={15} />
-                        <span>自动批注失败重试</span>
-                    </div>
+                <ReadingSettingsSection icon={<Repeat2 size={15} />} title="自动批注失败重试">
                     <p className="reading-settings-inline-note">
                         <span>生成失败时静默重试的次数，全部失败后才提示错误。</span>
                     </p>
@@ -184,13 +178,9 @@ export function ReadingInteractionDialog({ onClose }: Props) {
                             <Plus size={15} strokeWidth={2} />
                         </button>
                     </div>
-                </section>
+                </ReadingSettingsSection>
 
-                <section className="reading-settings-group">
-                    <div className="reading-settings-heading">
-                        <Rocket size={15} />
-                        <span>批注预生成</span>
-                    </div>
+                <ReadingSettingsSection icon={<Rocket size={15} />} title="批注预生成">
                     <div className="reading-settings-toggle-row">
                         <span className="reading-settings-toggle-label">
                             TXT 预批注
@@ -232,13 +222,9 @@ export function ReadingInteractionDialog({ onClose }: Props) {
                     <p className="reading-settings-inline-note">
                         <span>TXT 预批注按段落分批，PDF 预批注按页分批，批次大小与自动批注一致（可在批注对话框里调整）。利用读上一批批注的时间生成下一批，不会重复批注。</span>
                     </p>
-                </section>
+                </ReadingSettingsSection>
 
-                <section className="reading-settings-group">
-                    <div className="reading-settings-heading">
-                        <LocateFixed size={15} />
-                        <span>悬浮聊天窗</span>
-                    </div>
+                <ReadingSettingsSection icon={<LocateFixed size={15} />} title="悬浮聊天窗">
                     <div className="reading-settings-toggle-row">
                         <span className="reading-settings-toggle-label">
                             展开时自动滚动到最新消息
@@ -266,13 +252,9 @@ export function ReadingInteractionDialog({ onClose }: Props) {
                         <RotateCcw size={15} strokeWidth={2} />
                         重置悬浮球位置
                     </button>
-                </section>
+                </ReadingSettingsSection>
 
-                <section className="reading-settings-group">
-                    <div className="reading-settings-heading">
-                        <Settings size={15} />
-                        <span>PDF 渲染</span>
-                    </div>
+                <ReadingSettingsSection icon={<Settings size={15} />} title="PDF 渲染">
                     <div className="reading-settings-toggle-row">
                         <span className="reading-settings-toggle-label">预加载后续页</span>
                         <Toggle
@@ -312,7 +294,45 @@ export function ReadingInteractionDialog({ onClose }: Props) {
                     <p className="reading-settings-inline-note">
                         <span>提示：一次渲染页数过少时，滑动到未渲染的页会反复渲染，造成闪烁卡顿；调大并开启预加载可缓解。缩放率调大后一页更接近一屏。</span>
                     </p>
-                </section>
+                </ReadingSettingsSection>
+
+                <ReadingSettingsSection icon={<Settings size={15} />} title="导入段落划分">
+                    <p className="reading-settings-inline-note">
+                        <span>导入 TXT 小说时如何划分段落。选错可在导入后重新导入生效。</span>
+                    </p>
+                    <div className="reading-option-grid">
+                        {PARAGRAPH_MODE_OPTIONS.map((opt) => (
+                            <button
+                                key={opt.value}
+                                type="button"
+                                className={`reading-option-card ${config.paragraphMode === opt.value ? "is-active" : ""}`}
+                                onClick={() => setConfig((prev) => ({ ...prev, paragraphMode: opt.value }))}
+                            >
+                                <span className="reading-option-card-label">{opt.label}</span>
+                                <span className="reading-option-card-desc">{opt.desc}</span>
+                            </button>
+                        ))}
+                    </div>
+                </ReadingSettingsSection>
+
+                <ReadingSettingsSection icon={<Settings size={15} />} title="导入 TXT 编码">
+                    <p className="reading-settings-inline-note">
+                        <span>导入 TXT 小说时按哪种编码解析。自动识别一般够用；个别 TXT 自动识别出错导致乱码时，可手动指定其真实编码后重新导入。</span>
+                    </p>
+                    <div className="reading-option-grid">
+                        {TXT_ENCODING_OPTIONS.map((opt) => (
+                            <button
+                                key={opt.value}
+                                type="button"
+                                className={`reading-option-card ${config.txtEncoding === opt.value ? "is-active" : ""}`}
+                                onClick={() => setConfig((prev) => ({ ...prev, txtEncoding: opt.value }))}
+                            >
+                                <span className="reading-option-card-label">{opt.label}</span>
+                                <span className="reading-option-card-desc">{opt.desc}</span>
+                            </button>
+                        ))}
+                    </div>
+                </ReadingSettingsSection>
             </div>
         </ContentDialog>
     );

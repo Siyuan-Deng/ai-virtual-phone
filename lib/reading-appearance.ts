@@ -66,6 +66,18 @@ export const READING_ANNOTATION_STYLE_DEFAULTS = {
 export const READING_ANNOTATION_FONT_SIZE_MIN = 9;
 export const READING_ANNOTATION_FONT_SIZE_MAX = 22;
 
+/** 把十六进制颜色压暗一档，用来从批注卡片的底色推出划线的颜色。 */
+export function darkenHex(hex: string, amount: number): string {
+    const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+    if (!match) return hex;
+    const value = parseInt(match[1], 16);
+    const mix = (channel: number) => Math.max(0, Math.min(255, Math.round(channel * (1 - amount))));
+    const r = mix((value >> 16) & 255);
+    const g = mix((value >> 8) & 255);
+    const b = mix(value & 255);
+    return `#${[r, g, b].map(c => c.toString(16).padStart(2, "0")).join("")}`;
+}
+
 /** 高亮和划线要留一点透明度，底下的背景图/底色还能透出来。
  *  颜色选择器给的是十六进制，这里补上原来 CSS 里那档透明度。 */
 export function readingMarkColor(hex: string, alpha: number): string {
@@ -174,6 +186,15 @@ function canUseStorage(): boolean {
     return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
+/** 这四个值曾经是写死的默认颜色，没有人「特意选过」它们。
+ *  老配置里存着它们时按「没设过」处理，改成跟着批注卡片的颜色走。 */
+const LEGACY_MARK_DEFAULTS = {
+    highlight: "#ffe278",
+    underline: "#be8c3c",
+    charHighlight: "#bfe3d0",
+    charUnderline: "#5c9b7a",
+} as const;
+
 function normalizeAppearance(raw: Partial<ReadingAppearance> | null | undefined): ReadingAppearance {
     const fontFamily = READING_FONT_OPTIONS.some((option) => option.id === raw?.fontFamily)
         ? raw!.fontFamily!
@@ -220,6 +241,15 @@ function normalizeAppearance(raw: Partial<ReadingAppearance> | null | undefined)
     const color = (value: unknown, fallback: string) => (
         typeof value === "string" && value.trim() ? value.trim() : fallback
     );
+    /** 没设过（或存的还是老的写死默认值）就从卡片颜色推：高亮用卡片色本身，划线压暗一档 */
+    const markColor = (value: unknown, cardColor: string, legacy: string, darken: number) => {
+        const stored = typeof value === "string" ? value.trim() : "";
+        if (stored && stored.toLowerCase() !== legacy) return stored;
+        return darken > 0 ? darkenHex(cardColor, darken) : cardColor;
+    };
+
+    const charCardColor = color(raw?.annotationCardColor, READING_ANNOTATION_STYLE_DEFAULTS.cardColor);
+    const userCardColor = color(raw?.userAnnotationCardColor, READING_ANNOTATION_STYLE_DEFAULTS.userCardColor);
 
     return {
         fontFamily, fontSize, textColor, lineHeight, customFontName,
@@ -227,16 +257,19 @@ function normalizeAppearance(raw: Partial<ReadingAppearance> | null | undefined)
         annotationFontSize: annotationSize(raw?.annotationFontSize),
         annotationLineHeight: annotationLine(raw?.annotationLineHeight),
         annotationTextColor: color(raw?.annotationTextColor, READING_ANNOTATION_STYLE_DEFAULTS.textColor),
-        annotationCardColor: color(raw?.annotationCardColor, READING_ANNOTATION_STYLE_DEFAULTS.cardColor),
+        annotationCardColor: charCardColor,
         userAnnotationFontFamily, userAnnotationCustomFontName,
         userAnnotationFontSize: annotationSize(raw?.userAnnotationFontSize),
         userAnnotationLineHeight: annotationLine(raw?.userAnnotationLineHeight),
         userAnnotationTextColor: color(raw?.userAnnotationTextColor, READING_ANNOTATION_STYLE_DEFAULTS.userTextColor),
-        userAnnotationCardColor: color(raw?.userAnnotationCardColor, READING_ANNOTATION_STYLE_DEFAULTS.userCardColor),
-        highlightColor: color(raw?.highlightColor, READING_ANNOTATION_STYLE_DEFAULTS.highlightColor),
-        underlineColor: color(raw?.underlineColor, READING_ANNOTATION_STYLE_DEFAULTS.underlineColor),
-        charHighlightColor: color(raw?.charHighlightColor, READING_ANNOTATION_STYLE_DEFAULTS.charHighlightColor),
-        charUnderlineColor: color(raw?.charUnderlineColor, READING_ANNOTATION_STYLE_DEFAULTS.charUnderlineColor),
+        userAnnotationCardColor: userCardColor,
+        // 划线/高亮的颜色默认跟着各自那档批注卡片走：我的卡片是什么色，我划的线就是什么色。
+        // 以前是写死的两组颜色，和卡片颜色对不上（TA 的卡片蓝的、线却是青绿的）。
+        // 老配置里存的如果正好是那两组写死的默认值，一并按「没设过」处理，跟着卡片重算。
+        highlightColor: markColor(raw?.highlightColor, userCardColor, LEGACY_MARK_DEFAULTS.highlight, 0),
+        underlineColor: markColor(raw?.underlineColor, userCardColor, LEGACY_MARK_DEFAULTS.underline, 0.45),
+        charHighlightColor: markColor(raw?.charHighlightColor, charCardColor, LEGACY_MARK_DEFAULTS.charHighlight, 0),
+        charUnderlineColor: markColor(raw?.charUnderlineColor, charCardColor, LEGACY_MARK_DEFAULTS.charUnderline, 0.45),
         backgroundBrightness,
     };
 }

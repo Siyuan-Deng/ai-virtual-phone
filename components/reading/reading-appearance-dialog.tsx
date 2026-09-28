@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Code2, Highlighter, ImagePlus, Palette, Trash2 } from "lucide-react";
 import { ContentDialog } from "@/components/ui/modal";
+import { ReadingSettingsSection } from "./reading-settings-section";
 import { ColorInput, Slider } from "@/components/ui/form";
 import type { ReadingAnnotationFontFamilyId, ReadingAppearance } from "@/lib/reading-appearance";
 import {
@@ -307,11 +308,7 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                     </div>
                 </ReadingFontTier>
 
-                <section className="reading-settings-group">
-                    <div className="reading-settings-heading">
-                        <Highlighter size={15} />
-                        <span>高亮与划线</span>
-                    </div>
+                <ReadingSettingsSection icon={<Highlighter size={15} />} title="高亮与划线">
                     <p className="reading-settings-inline-note">
                         <span>自己划的和 TA 划的分开配色，一眼看得出这道线是谁划的。</span>
                     </p>
@@ -355,13 +352,9 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                             </div>
                         </div>
                     ))}
-                </section>
+                </ReadingSettingsSection>
 
-                <section className="reading-settings-group">
-                    <div className="reading-settings-heading">
-                        <Palette size={15} />
-                        <span>全屏背景</span>
-                    </div>
+                <ReadingSettingsSection icon={<Palette size={15} />} title="全屏背景">
                     <div
                         className="reading-bg-preview"
                         style={hasPreview ? { backgroundImage: backgroundPreviewLayers } : undefined}
@@ -416,13 +409,9 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                             setClearBackground(false);
                         }}
                     />
-                </section>
+                </ReadingSettingsSection>
 
-                <section className="reading-settings-group">
-                    <div className="reading-settings-heading">
-                        <Code2 size={15} />
-                        <span>自定义 CSS</span>
-                    </div>
+                <ReadingSettingsSection icon={<Code2 size={15} />} title="自定义 CSS">
                     <p className="reading-settings-inline-note">
                         <span>只作用在阅读 app 内部。常用类名：.reading-line（正文）、.reading-annotation（批注卡片）、.reading-list-item（书架条目）。</span>
                     </p>
@@ -460,7 +449,7 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                             <span>清空</span>
                         </button>
                     </div>
-                </section>
+                </ReadingSettingsSection>
 
                 <ReadingFontDiagnostics appearance={appearance} loadedFonts={loadedFonts} />
             </div>

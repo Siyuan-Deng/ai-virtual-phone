@@ -4,6 +4,7 @@ import Dexie from "dexie";
 import type { Book, BookChapter, ReadingProgress, ReadingAnnotation } from "./reading-types";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { DEFAULT_READING_BILINGUAL_PROMPT } from "./bilingual-prompt-defaults";
+import { DEFAULT_READING_ANNOTATION_GUIDANCE, DEFAULT_READING_SUMMARY_PROMPT } from "./reading-prompt-defaults";
 
 // ── Database ──
 
@@ -70,6 +71,10 @@ export type ReadingInteractionConfig = {
     readingMode: ReadingViewMode;
     /** 翻页模式的翻页动画；关掉就是直接切到下一页 */
     pageFlipAnimation: boolean;
+    /** 批注要求：写什么、怎么写。格式要求不在这里，改坏了也不会把批注格式弄坏。 */
+    annotationGuidancePrompt: string;
+    /** 区间总结的要求 */
+    summaryPrompt: string;
     /** 自动批注失败时的静默重试次数（0=不重试） */
     annotationRetryCount: number;
     /** 批注密度：大约每多少段写 1 条批注。0 = 不限（模型自己决定，等同加此设置之前的行为） */
@@ -98,6 +103,8 @@ export const DEFAULT_READING_INTERACTION_CONFIG: ReadingInteractionConfig = {
     txtEncoding: "auto",
     readingMode: "page",
     pageFlipAnimation: true,
+    annotationGuidancePrompt: DEFAULT_READING_ANNOTATION_GUIDANCE,
+    summaryPrompt: DEFAULT_READING_SUMMARY_PROMPT,
     annotationRetryCount: 3,
     annotationInterval: 0,
     autoAnnotatePrefetch: false,
