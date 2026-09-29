@@ -107,9 +107,11 @@ async function resolveReadingInput(
     const longTermMemories = await retrieveMemoriesForPrompt(characterId, options.bookTitle, memConfig);
 
     // Short-term context
+    // 装配方式沿用 chat（把私聊历史当真正的对话历史），但截断量按「阅读」单独算。
     const { recentBlocks, truncatedHistory, unifiedRecentItems } = prepareShortTermContext(characterId, "chat", {
         history: options.history,
         userName: userIdentity?.name ?? "用户",
+        budgetAppId: "reading",
     });
     const readingConfig = loadReadingInteractionConfig();
 

@@ -2542,6 +2542,73 @@
   font-weight: 400;
 }
 
+/* ── 分应用短期记忆截断量弹层 ── */
+.memory-app-budget-sheet .modal-header {
+  border-bottom: none;
+}
+
+.memory-app-budget-hint {
+  font-size: calc(10.8px*var(--app-text-scale,1));
+  color: var(--c-text);
+  line-height: 1.5;
+  margin: 0 2px 16px;
+}
+
+.memory-app-budget-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.memory-app-budget-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memory-app-budget-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-app-budget-name {
+  flex: 1;
+  min-width: 0;
+  font-size: calc(12.6px*var(--app-text-scale,1));
+  color: var(--c-text-title);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.memory-app-budget-value {
+  flex-shrink: 0;
+  font-size: calc(10.8px*var(--app-text-scale,1));
+  color: var(--c-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.memory-app-budget-row[data-custom] .memory-app-budget-value {
+  color: var(--chip-accent);
+  font-weight: 600;
+}
+
+.memory-app-budget-reset {
+  flex-shrink: 0;
+  border: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--c-page-body-bg);
+  color: var(--c-text);
+  font-size: calc(10.4px*var(--app-text-scale,1));
+  cursor: pointer;
+}
+
+.memory-app-budget-slider {
+  width: 100%;
+}
+
 .data-management-menu .menu-label-group > .menu-label {
   font-weight: 600;
 }

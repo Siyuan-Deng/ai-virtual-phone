@@ -24,6 +24,9 @@ export type MemoryConfig = {
     summarizationEventInterval: number;     // trigger summarization every N events
     coreSummarizationInterval: number;      // trigger core-memory rebuild every N new long-term memories
     shortTermTokenBudget: number;           // token limit for short-term event log
+    /** 分应用覆盖上面那个截断量：键是发起请求的 appId（custom_app:xxx 归并成 custom_app），
+     *  缺键或值 ≤ 0 时跟随 shortTermTokenBudget。 */
+    shortTermTokenBudgetByApp?: Record<string, number>;
     coreMemoryTokenBudget: number;          // token limit for injected core memories
     longTermTokenBudget: number;            // token limit for injected long-term memories
     summarizationPrompt: string;            // user-editable prompt template for memory summarization
@@ -111,6 +114,7 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
     summarizationEventInterval: 80,
     coreSummarizationInterval: 5,
     shortTermTokenBudget: 100000,
+    shortTermTokenBudgetByApp: {},
     coreMemoryTokenBudget: 100000,
     longTermTokenBudget: 100000,
     summarizationPrompt: DEFAULT_SUMMARIZATION_PROMPT,
@@ -132,3 +136,23 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
         custom_app: true,
     },
 };
+
+/** 分应用截断量的键：所有自定义应用共用一个键，其余按 appId 原样。 */
+export function shortTermBudgetKey(appId: string): string {
+    return appId === "custom_app" || appId.startsWith("custom_app:") ? "custom_app" : appId;
+}
+
+/** 某个应用实际生效的短期记忆截断量。没单独配过就用全局值。 */
+export function resolveShortTermTokenBudget(config: MemoryConfig, appId: string): number {
+    const override = config.shortTermTokenBudgetByApp?.[shortTermBudgetKey(appId)];
+    return typeof override === "number" && Number.isFinite(override) && override > 0
+        ? Math.round(override)
+        : config.shortTermTokenBudget;
+}
+
+/** 各自会取一次短期记忆的应用，分应用截断量按这个列表展示。 */
+export const SHORT_TERM_BUDGET_APP_KEYS: string[] = [
+    "chat", "group_chat", "story", "vn", "adventure", "game", "reading",
+    "moments", "diary", "xiaohongshu", "checkphone", "interview_magazine",
+    "cocreate", "calendar", "dwelling", "custom_app",
+];

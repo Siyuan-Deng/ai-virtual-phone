@@ -9,7 +9,7 @@ import { loadMomentPosts, loadMomentComments } from "./moments-storage";
 import { loadCharacters } from "./character-storage";
 import { resolveUserIdentity } from "./settings-storage";
 import { loadMemoryConfig } from "./memory-storage";
-import type { MemoryConfig } from "./memory-types";
+import { resolveShortTermTokenBudget, type MemoryConfig } from "./memory-types";
 import { estimateTokens } from "./token-counter";
 import { loadStoryProjectionEntries } from "./story-storage";
 import { buildTwoLevelMomentThreads } from "./moments-comment-threading";
@@ -942,7 +942,8 @@ export function filterTimelineByAllowedSources(
  *
  * Returns `RecentBlock[]` + `truncatedHistory`.
  * All short-term content (timeline entries + history messages) is merged into one
- * timestamped pool and truncated from the oldest until total tokens ≤ shortTermTokenBudget.
+ * timestamped pool and truncated from the oldest until total tokens ≤ the app's
+ * short-term budget (shortTermTokenBudgetByApp[appId], else shortTermTokenBudget).
  *
  * For history-style appIds, the current feature's block has empty content because
  * the actual content is the history turns (wrapped by the assembler).
@@ -980,6 +981,9 @@ export function prepareShortTermContext(
         chatAsHistory?: boolean;
         timeAware?: boolean;
         promptTimestampOptions?: PromptTimestampOptions;
+        /** 分应用截断量按哪个应用算。默认就是 appId；只有少数功能（比如阅读批注
+         *  借用 chat 的装配方式）需要和装配用的 appId 分开。 */
+        budgetAppId?: string;
     },
 ): {
     recentBlocks: RecentBlock[];
@@ -1001,7 +1005,7 @@ export function prepareShortTermContext(
 
     // Activation context: full timeline for keyword matching (not truncated)
     const wbActivationContext = timeline.slice(-10).map(e => e.content).join("\n");
-    const budget = memConfig.shortTermTokenBudget;
+    const budget = resolveShortTermTokenBudget(memConfig, options?.budgetAppId ?? appId);
     const currentTag = getFeatureTag(appId);
     const history = options?.history?.length
         ? options.history
@@ -1286,7 +1290,7 @@ export function prepareGroupShortTermContext(
     ].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
     const wbActivationContext = activationPool.slice(-10).map(item => item.content).join("\n");
 
-    const budget = memConfig.shortTermTokenBudget;
+    const budget = resolveShortTermTokenBudget(memConfig, "group_chat");
 
     const raw: { tag: string; order: number; entries: NativeTimelineEntry[] }[] = [];
 

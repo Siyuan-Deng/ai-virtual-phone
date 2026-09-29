@@ -1,14 +1,19 @@
 "use client";
 
 import { Component, useState, useEffect, useCallback, type CSSProperties, type ReactNode } from "react";
-import { Trash2, Zap, Clock, Users, Archive, AlertCircle, Search, Brain, FileText, MoreHorizontal, Plus, Edit3, X, Check, ChevronRight, Filter, type LucideIcon } from "lucide-react";
+import { Trash2, Zap, Clock, Users, Archive, AlertCircle, Search, Brain, FileText, MoreHorizontal, Plus, Edit3, X, Check, ChevronRight, Filter, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/modal";
 import { MemoryTimeline } from "./memory-timeline";
 import { Toggle } from "@/components/ui/form";
 import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
 import type { MemoryEntry, MemoryConfig } from "@/lib/memory-types";
-import { DEFAULT_CORE_MEMORY_PROMPT, DEFAULT_SUMMARIZATION_PROMPT } from "@/lib/memory-types";
+import {
+    DEFAULT_CORE_MEMORY_PROMPT,
+    DEFAULT_SUMMARIZATION_PROMPT,
+    SHORT_TERM_BUDGET_APP_KEYS,
+} from "@/lib/memory-types";
+import { CONTENT_APP_LABELS, type ContentAppId } from "@/lib/settings-types";
 import {
     loadMemoryConfig,
     saveMemoryConfig,
@@ -92,6 +97,15 @@ const MEMORY_SOURCE_OPTIONS: Array<{ key: MemorySourceKey; label: string }> = [
     { key: "custom_app", label: "自定义应用" },
 ];
 
+/** 分应用截断量的行标题：能用应用自己的名字就用，装不进 ContentAppId 的另给一个。 */
+const SHORT_TERM_BUDGET_EXTRA_LABELS: Record<string, string> = {
+    custom_app: "自定义应用",
+};
+
+function shortTermBudgetAppLabel(key: string): string {
+    return CONTENT_APP_LABELS[key as ContentAppId] ?? SHORT_TERM_BUDGET_EXTRA_LABELS[key] ?? key;
+}
+
 type MemoryEditorState = {
     type: MemoryEntry["type"];
     entry?: MemoryEntry;
@@ -155,6 +169,50 @@ function MemorySettingsSliderItem({
     );
 }
 
+/** 分应用截断量的一行：没单独配过时显示「默认 N」，拖一下滑块就变成单独配。 */
+function MemoryAppBudgetRow({
+    label,
+    override,
+    fallback,
+    min,
+    max,
+    step,
+    onChange,
+    onReset,
+}: {
+    label: string;
+    override?: number;
+    fallback: number;
+    min: number;
+    max: number;
+    step: number;
+    onChange: (value: number) => void;
+    onReset: () => void;
+}) {
+    const isCustom = typeof override === "number";
+    return (
+        <div className="memory-app-budget-row" data-custom={isCustom ? "" : undefined}>
+            <div className="memory-app-budget-head">
+                <span className="memory-app-budget-name">{label}</span>
+                {isCustom ? (
+                    <button type="button" className="memory-app-budget-reset" onClick={onReset}>跟随默认</button>
+                ) : null}
+                <span className="memory-app-budget-value">{isCustom ? override : `默认 ${fallback}`}</span>
+            </div>
+            <input
+                type="range"
+                min={min}
+                max={max}
+                step={step}
+                value={isCustom ? override : fallback}
+                onChange={e => onChange(Number(e.target.value))}
+                className="ui-slider memory-app-budget-slider"
+                aria-label={`${label}短期记忆截断量`}
+            />
+        </div>
+    );
+}
+
 function relativeTime(isoStr: string): string {
     const diff = Date.now() - new Date(isoStr).getTime();
     const mins = Math.floor(diff / 60000);
@@ -205,9 +263,14 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
     const [savingMemory, setSavingMemory] = useState(false);
     const [summarizeRangeOpen, setSummarizeRangeOpen] = useState(false);
     const [sourcePickerOpen, setSourcePickerOpen] = useState(false);
+    const [appBudgetOpen, setAppBudgetOpen] = useState(false);
 
     const disabledSourceCount = MEMORY_SOURCE_OPTIONS
         .filter(source => (config.shortTermAllowedSources ?? {})[source.key] === false).length;
+
+    const appBudgetOverrides = config.shortTermTokenBudgetByApp ?? {};
+    const customAppBudgetCount = SHORT_TERM_BUDGET_APP_KEYS
+        .filter(key => typeof appBudgetOverrides[key] === "number").length;
 
     // Resolve selected character object from ID
     const selectedChar = selectedCharId
@@ -413,6 +476,21 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
         const min = MEMORY_TOKEN_BUDGET_MIN[key];
         const nextValue = Math.min(MEMORY_TOKEN_BUDGET_MAX, Math.max(min, Math.round(value)));
         const next = { ...config, [key]: nextValue };
+        setConfig(next);
+        saveMemoryConfig(next);
+    };
+
+    /** 传 null = 这个应用回到跟随默认（把键删掉，而不是写一个等于默认值的数）。 */
+    const saveAppBudget = (key: string, value: number | null) => {
+        const nextMap = { ...(config.shortTermTokenBudgetByApp ?? {}) };
+        if (value === null) {
+            delete nextMap[key];
+        } else {
+            if (!Number.isFinite(value)) return;
+            const min = MEMORY_TOKEN_BUDGET_MIN.shortTermTokenBudget;
+            nextMap[key] = Math.min(MEMORY_TOKEN_BUDGET_MAX, Math.max(min, Math.round(value)));
+        }
+        const next = { ...config, shortTermTokenBudgetByApp: nextMap };
         setConfig(next);
         saveMemoryConfig(next);
     };
@@ -1017,6 +1095,17 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                         step={MEMORY_TOKEN_BUDGET_STEP.shortTermTokenBudget}
                         onChange={value => saveBudget("shortTermTokenBudget", value)}
                     />
+                    <button type="button" className="menu-item" onClick={() => setAppBudgetOpen(true)}>
+                        <MemorySettingsIcon icon={SlidersHorizontal} color={BINDING_ACCENTS.voice} />
+                        <div className="menu-label-group">
+                            <span className="menu-label">分应用短期记忆</span>
+                            <span className="menu-desc">给某个应用单独设一个截断量，不影响其它应用</span>
+                        </div>
+                        <div className="menu-right">
+                            <span className="menu-desc mr-1">{customAppBudgetCount === 0 ? "全部跟随默认" : `已单独设 ${customAppBudgetCount} 项`}</span>
+                            <ChevronRight size={16} />
+                        </div>
+                    </button>
                     <MemorySettingsSliderItem
                         icon={Archive}
                         color={BINDING_ACCENTS.memory}
@@ -1040,6 +1129,36 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                         onChange={value => saveBudget("coreMemoryTokenBudget", value)}
                     />
                 </div>
+
+                {appBudgetOpen ? (
+                    <div className="modal-overlay modal-overlay-bottom" data-ui="modal" onClick={() => setAppBudgetOpen(false)}>
+                        <div className="modal-sheet memory-app-budget-sheet" data-ui="modal-sheet" onClick={event => event.stopPropagation()}>
+                            <div className="modal-header" data-ui="modal-header">
+                                <span style={{ width: 28 }} />
+                                <h3 className="modal-title">分应用短期记忆</h3>
+                                <button className="modal-header-btn modal-header-btn-muted" onClick={() => setAppBudgetOpen(false)}><X size={18} /></button>
+                            </div>
+                            <div className="modal-body" data-ui="modal-body">
+                                <p className="memory-app-budget-hint">拖动某一行就变成单独配置，点「跟随默认」再交回上面那个总开关。</p>
+                                <div className="memory-app-budget-list" style={{ "--chip-accent": BINDING_ACCENTS.voice } as CSSProperties}>
+                                    {SHORT_TERM_BUDGET_APP_KEYS.map(key => (
+                                        <MemoryAppBudgetRow
+                                            key={key}
+                                            label={shortTermBudgetAppLabel(key)}
+                                            override={appBudgetOverrides[key]}
+                                            fallback={config.shortTermTokenBudget}
+                                            min={MEMORY_TOKEN_BUDGET_MIN.shortTermTokenBudget}
+                                            max={MEMORY_TOKEN_BUDGET_MAX}
+                                            step={MEMORY_TOKEN_BUDGET_STEP.shortTermTokenBudget}
+                                            onChange={value => saveAppBudget(key, value)}
+                                            onReset={() => saveAppBudget(key, null)}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ) : null}
 
                 {/* Summarization interval */}
                 <p className="menu-group-desc mx-2">自动总结间隔</p>
