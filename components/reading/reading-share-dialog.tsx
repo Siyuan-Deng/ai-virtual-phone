@@ -16,6 +16,8 @@ import {
     type ReadingShareAvatarShape,
     type ReadingShareFonts,
     type ReadingSharePalette,
+    READING_SHARE_RATIOS,
+    type ReadingShareRatio,
     type ReadingShareTemplate,
 } from "@/lib/reading-share-card";
 import { ReadingPresetBar } from "./reading-preset-bar";
@@ -84,6 +86,7 @@ export function ReadingShareDialog({
     const [palette, setPalette] = useState<ReadingSharePalette>(READING_SHARE_TEMPLATE_PRESETS.poster);
     const [align, setAlign] = useState<ReadingShareAlign>(READING_SHARE_TEMPLATE_PRESETS.poster.align);
     const [avatarShape, setAvatarShape] = useState<ReadingShareAvatarShape>("circle");
+    const [ratio, setRatio] = useState<ReadingShareRatio>("auto");
 
     /** 换模板时配色和对齐回到那个模板的出厂值——深色版面套上浅色底会直接糊掉 */
     const pickTemplate = (next: ReadingShareTemplate) => {
@@ -99,6 +102,7 @@ export function ReadingShareDialog({
         palette: ReadingSharePalette;
         align: ReadingShareAlign;
         avatarShape?: ReadingShareAvatarShape;
+        ratio?: ReadingShareRatio;
     };
     const applyStyle = (style: ShareStyle) => {
         if (!style?.template || !READING_SHARE_TEMPLATE_PRESETS[style.template]) return;
@@ -106,6 +110,8 @@ export function ReadingShareDialog({
         if (style.palette) setPalette(style.palette);
         if (style.align) setAlign(style.align);
         setAvatarShape(style.avatarShape === "square" ? "square" : "circle");
+        // 老档里没有比例这项，当成自适应
+        setRatio(READING_SHARE_RATIOS.some(item => item.id === style.ratio) ? style.ratio as ReadingShareRatio : "auto");
     };
     const hasMine = annotations.some((annotation) => annotation.authorType === "user");
     const hasTheirs = annotations.some((annotation) => annotation.authorType === "character");
@@ -158,6 +164,7 @@ export function ReadingShareDialog({
                     palette,
                     align,
                     avatarShape,
+                    ratio,
                 });
                 if (cancelled) return;
                 canvas.className = "reading-share-canvas";
@@ -170,7 +177,7 @@ export function ReadingShareDialog({
         };
         void draw();
         return () => { cancelled = true; };
-    }, [align, avatarShape, palette, template, withMine, withTheirs]);
+    }, [align, avatarShape, palette, ratio, template, withMine, withTheirs]);
 
     const handleDownload = async () => {
         const canvas = canvasRef.current;
@@ -262,6 +269,16 @@ export function ReadingShareDialog({
                         ))}
                     </div>
                     <div className="reading-share-aligns">
+                        {READING_SHARE_RATIOS.map(({ id, label }) => (
+                            <button
+                                key={id}
+                                type="button"
+                                className={`reading-share-template${ratio === id ? " is-active" : ""}`}
+                                onClick={() => setRatio(id)}
+                            >{label}</button>
+                        ))}
+                    </div>
+                    <div className="reading-share-aligns">
                         {([["圆头像", "circle"], ["方头像", "square"]] as Array<[string, ReadingShareAvatarShape]>).map(([label, value]) => (
                             <button
                                 key={value}
@@ -273,7 +290,7 @@ export function ReadingShareDialog({
                     </div>
                     <ReadingPresetBar<ShareStyle>
                         kind="share"
-                        current={() => ({ template, palette, align, avatarShape })}
+                        current={() => ({ template, palette, align, avatarShape, ratio })}
                         onLoad={applyStyle}
                         defaultName={READING_SHARE_TEMPLATES.find(t => t.id === template)?.label || "我的样式"}
                     />

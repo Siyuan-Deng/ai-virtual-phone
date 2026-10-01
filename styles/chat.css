@@ -7471,7 +7471,7 @@
 .reading-list-pin {
   display: inline-block;
   vertical-align: -1px;
-  margin-right: 4px;
+  margin-left: 5px;
   color: var(--reading-warm-accent, #a8704a);
 }
 

@@ -690,10 +690,10 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                                     </div>
                                     <div className="reading-list-info">
                                         <span className="reading-list-title">
+                                            {book.title}
                                             {book.pinnedAt ? (
                                                 <Pin size={12} className="reading-list-pin" aria-label="已置顶" />
                                             ) : null}
-                                            {book.title}
                                         </span>
                                         {book.author && <span className="reading-list-author">{book.author}</span>}
                                         <div className="reading-list-meta">

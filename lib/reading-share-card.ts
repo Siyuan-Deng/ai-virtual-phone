@@ -10,7 +10,11 @@ export type ReadingShareTemplate =
     | "minimal"   // 极简留白：居中，大量留白
     | "collage"   // 色块拼贴：不对称色块压字
     | "letter"    // 横格信笺：正文压在格线上
-    | "sticky";   // 便利贴：白纸 + 两张贴上去的批注
+    | "sticky"    // 便利贴：白纸 + 两张贴上去的批注
+    | "notecard"  // 笔记卡：署名在上，大字正文，出处在下
+    | "quotemark" // 满版引号：巨大的引号水印压底
+    | "coverband" // 封面带：顶上一条色带放书名，下面全给正文
+    | "centered"; // 全居中：上下小记号夹着居中的大字
 
 export const READING_SHARE_TEMPLATES: Array<{ id: ReadingShareTemplate; label: string }> = [
     { id: "poster", label: "大字报" },
@@ -20,6 +24,10 @@ export const READING_SHARE_TEMPLATES: Array<{ id: ReadingShareTemplate; label: s
     { id: "collage", label: "色块" },
     { id: "letter", label: "信笺" },
     { id: "sticky", label: "便利贴" },
+    { id: "notecard", label: "笔记卡" },
+    { id: "quotemark", label: "满版引号" },
+    { id: "coverband", label: "封面带" },
+    { id: "centered", label: "全居中" },
 ];
 
 export type ReadingShareAnnotation = {
@@ -39,6 +47,15 @@ export type ReadingShareFonts = {
 export type ReadingShareAlign = "left" | "center" | "right";
 
 export type ReadingShareAvatarShape = "circle" | "square";
+
+/** 出图比例。auto = 内容多高就多高（原来唯一的那种）。 */
+export type ReadingShareRatio = "auto" | "square" | "story";
+
+export const READING_SHARE_RATIOS: Array<{ id: ReadingShareRatio; label: string }> = [
+    { id: "auto", label: "自适应" },
+    { id: "square", label: "1:1" },
+    { id: "story", label: "9:16" },
+];
 /** 方形头像的圆角。版面按 1080 宽算，落到手机上差不多就是 3px。 */
 const AVATAR_CORNER = 8;
 
@@ -72,6 +89,8 @@ export type ReadingShareCardInput = {
     align?: ReadingShareAlign;
     /** 头像形状：圆形或者圆角方形 */
     avatarShape?: ReadingShareAvatarShape;
+    /** 出图比例；没给就是 auto */
+    ratio?: ReadingShareRatio;
 };
 
 /** 每个模板的出厂配色和默认对齐 */
@@ -86,6 +105,10 @@ export const READING_SHARE_TEMPLATE_PRESETS: Record<
     collage: { background: "#f4f1ec", ink: "#f3efe7", sub: "#4a453c", accent: "#2b4a6f", align: "left" },
     letter: { background: "#fdfcf7", ink: "#2b2720", sub: "#9b8f78", accent: "#e4dcc8", align: "left" },
     sticky: { background: "#efeae1", ink: "#262119", sub: "#8a8071", accent: "#b9a98c", align: "left" },
+    notecard: { background: "#2a3566", ink: "#f2f4fb", sub: "#a9b3d8", accent: "#8c9bd8", align: "left" },
+    quotemark: { background: "#14161b", ink: "#f0eee9", sub: "#8a8f99", accent: "#c9c4ba", align: "left" },
+    coverband: { background: "#ffffff", ink: "#1c1b1a", sub: "#8e8b86", accent: "#3c4a7a", align: "left" },
+    centered: { background: "#3a1f26", ink: "#f6efea", sub: "#c09e95", accent: "#c89a86", align: "center" },
 };
 
 /** 每个模板几套配色。第一套就是模板的出厂配色。
@@ -136,11 +159,47 @@ export const READING_SHARE_PALETTES: Record<
         { name: "薄荷", palette: { background: "#e3efe6", ink: "#1f2a22", sub: "#7b8b7f", accent: "#8fae97" } },
         { name: "深木", palette: { background: "#2b2621", ink: "#f0ebe2", sub: "#9a9187", accent: "#6d6053" } },
     ],
+    notecard: [
+        { name: "藏青", palette: { background: "#2a3566", ink: "#f2f4fb", sub: "#a9b3d8", accent: "#8c9bd8" } },
+        { name: "墨绿", palette: { background: "#1e3028", ink: "#eef4ef", sub: "#9db5a6", accent: "#79b094" } },
+        { name: "奶油", palette: { background: "#f6f1e6", ink: "#231f19", sub: "#8b8070", accent: "#b07b45" } },
+        { name: "炭", palette: { background: "#1c1c1e", ink: "#f0f0f0", sub: "#97979b", accent: "#d0a35e" } },
+    ],
+    quotemark: [
+        { name: "深墨", palette: { background: "#14161b", ink: "#f0eee9", sub: "#8a8f99", accent: "#c9c4ba" } },
+        { name: "赭", palette: { background: "#f3ece2", ink: "#241d16", sub: "#8c8073", accent: "#b5693b" } },
+        { name: "普鲁士蓝", palette: { background: "#121d2b", ink: "#eaf0f6", sub: "#8795a5", accent: "#5f93bf" } },
+        { name: "棠梨", palette: { background: "#f7eceb", ink: "#2d1e1f", sub: "#96807f", accent: "#b2554f" } },
+    ],
+    coverband: [
+        { name: "靛蓝", palette: { background: "#ffffff", ink: "#1c1b1a", sub: "#8e8b86", accent: "#3c4a7a" } },
+        { name: "橄榄", palette: { background: "#fbfaf6", ink: "#1f201b", sub: "#8b8b80", accent: "#4f5c36" } },
+        { name: "砖", palette: { background: "#fdf8f4", ink: "#231c18", sub: "#948278", accent: "#a84d33" } },
+        { name: "夜", palette: { background: "#17181b", ink: "#eeeeea", sub: "#8c8e93", accent: "#2f6f6a" } },
+    ],
+    centered: [
+        { name: "酒红", palette: { background: "#3a1f26", ink: "#f6efea", sub: "#c09e95", accent: "#c89a86" } },
+        { name: "宣纸", palette: { background: "#f7f4ec", ink: "#201d17", sub: "#948b7a", accent: "#b09560" } },
+        { name: "深海", palette: { background: "#111f2a", ink: "#eaf1f5", sub: "#8ea2ad", accent: "#6fa3ae" } },
+        { name: "紫竹", palette: { background: "#2b2436", ink: "#f0ecf5", sub: "#a79ab5", accent: "#a98ac4" } },
+    ],
 };
 
 const WIDTH = 1080;
 /** 输出放大倍数。版面坐标不变，只是画布更密。 */
 const SCALE = 2;
+
+/** 固定比例的目标高度。auto 由内容决定，所以是 null。 */
+const RATIO_HEIGHT: Record<ReadingShareRatio, number | null> = {
+    auto: null,
+    square: WIDTH,
+    story: Math.round((WIDTH * 16) / 9),
+};
+/** 字号倍率的上下限：再小就看不清了，再大一行放不下几个字。 */
+const MIN_TYPE_SCALE = 0.34;
+const MAX_TYPE_SCALE = 2.2;
+/** 行距最多额外加这么多。短摘抄撑 9:16 时全靠它，所以给得宽。 */
+const MAX_EXTRA_LEAD = 260;
 
 /** 不该出现在行首 / 行尾的标点。中文排版的基本禁则。 */
 const NO_LINE_START = "，。、；：？！）】》」』”’…—·,.;:?!)]}>";
@@ -303,7 +362,20 @@ type Ctx = {
     /** 整张图的高度。量版面那一遍还不知道，是 0；真正落笔那一遍才有。
      *  「先铺纸再写字」的模板（书签条、便利贴）靠它先画底。 */
     totalHeight: number;
+    /** 固定比例时正文和批注的字号倍率：内容少就放大撑满，内容多就缩小塞下。
+     *  auto 比例下恒为 1。 */
+    typeScale: number;
+    /** 缩放之后还差的那点高度（凑不满一行）摊进每一行的行距，单位 px。 */
+    extraLead: number;
 };
+
+/** 正文/批注的字号和行距按比例模式缩放。留白余量摊进行距，不是堆在末尾。 */
+function scaleType(ctx: Ctx, size: number, lineHeight: number): { size: number; lineHeight: number } {
+    return {
+        size: Math.max(12, Math.round(size * ctx.typeScale)),
+        lineHeight: Math.max(14, Math.round(lineHeight * ctx.typeScale) + ctx.extraLead),
+    };
+}
 
 function annotationFont(ctx: Ctx, annotation: ReadingShareAnnotation): string {
     return annotation.authorType === "user" ? ctx.fonts.userAnnotation : ctx.fonts.charAnnotation;
@@ -410,12 +482,13 @@ function drawQuote(
     x: number,
     y: number,
     width: number,
-    size: number,
-    lineHeight: number,
+    rawSize: number,
+    rawLineHeight: number,
     color: string,
     align: ReadingShareAlign = ctx.align,
 ): number {
     const { pen, input } = ctx;
+    const { size, lineHeight } = scaleType(ctx, rawSize, rawLineHeight);
     pen.font(size, ctx.fonts.body);
     let cursor = y;
     const paragraphs = input.quoteParagraphs.map(p => p.trim()).filter(Boolean);
@@ -448,8 +521,7 @@ function drawAnnotations(
 ): number {
     const { pen, input, palette } = ctx;
     if (input.annotations.length === 0) return y;
-    const size = 25;
-    const lineHeight = Math.round(size * 1.8);
+    const { size, lineHeight } = scaleType(ctx, 25, 45);
     const inset = style === "plain" ? 0 : 24;
     const followAlign = style === "plain" ? ctx.align : "left";
     let cursor = y;
@@ -530,18 +602,20 @@ function renderPoster(ctx: Ctx): number {
     let y = pad;
 
     pen.font(21, ctx.fonts.body);
-    pen.text(metaLine(input), pad, y + 21, palette.sub);
+    pen.text(truncateToWidth(pen, metaLine(input), inner), pad, y + 21, palette.sub);
     y += 62;
 
+    const leadType = scaleType(ctx, 50, 76);
     if (lead) {
-        pen.font(50, ctx.fonts.body, "600");
-        y = drawLines(ctx, wrapText(pen.ctx, lead, inner), pad, y, inner, 50, 76, palette.ink);
+        pen.font(leadType.size, ctx.fonts.body, "600");
+        y = drawLines(ctx, wrapText(pen.ctx, lead, inner), pad, y, inner, leadType.size, leadType.lineHeight, palette.ink);
     }
     if (rest.length > 0) {
+        const restType = scaleType(ctx, 26, 50);
         y += 20;
-        pen.font(26, ctx.fonts.body);
+        pen.font(restType.size, ctx.fonts.body);
         for (const paragraph of rest) {
-            y = drawLines(ctx, wrapText(pen.ctx, paragraph, inner), pad, y, inner, 26, 50, palette.sub);
+            y = drawLines(ctx, wrapText(pen.ctx, paragraph, inner), pad, y, inner, restType.size, restType.lineHeight, palette.sub);
             y += 16;
         }
     }
@@ -597,7 +671,7 @@ function renderBookmark(ctx: Ctx): number {
     pen.text(displayName(input), cardX + cardWidth / 2, y + 25, palette.ink, "center");
     y += 42;
     pen.font(19, ctx.fonts.body);
-    pen.text(metaLine(input), cardX + cardWidth / 2, y + 19, palette.sub, "center");
+    pen.text(truncateToWidth(pen, metaLine(input), inner), cardX + cardWidth / 2, y + 19, palette.sub, "center");
     y += 30;
     pen.text(`${progressText(input)} · ${stampText(input)}`, cardX + cardWidth / 2, y + 19, palette.sub, "center");
     y += 40;
@@ -671,7 +745,7 @@ function renderMinimal(ctx: Ctx): number {
     pen.text(displayName(input), WIDTH / 2, y + 25, palette.ink, "center");
     y += 42;
     pen.font(19, ctx.fonts.body);
-    pen.text(metaLine(input), WIDTH / 2, y + 19, palette.sub, "center");
+    pen.text(truncateToWidth(pen, metaLine(input), inner), WIDTH / 2, y + 19, palette.sub, "center");
     y += 30;
     pen.text(`${progressText(input)} · ${stampText(input)}`, WIDTH / 2, y + 19, palette.sub, "center");
     return y + 30 + pad;
@@ -685,7 +759,8 @@ function renderCollage(ctx: Ctx): number {
     const quotePad = 54;
     const blockTop = 122;
 
-    pen.font(26, ctx.fonts.body);
+    const collageType = scaleType(ctx, 26, 54);
+    pen.font(collageType.size, ctx.fonts.body);
     const quoteWidth = blockWidth - quotePad * 2;
     const lines: string[] = [];
     const paragraphs = input.quoteParagraphs.map(p => p.trim()).filter(Boolean);
@@ -693,14 +768,14 @@ function renderCollage(ctx: Ctx): number {
         lines.push(...wrapText(pen.ctx, paragraph, quoteWidth));
         if (index < paragraphs.length - 1) lines.push("");
     });
-    const lineHeight = 54;
+    const lineHeight = collageType.lineHeight;
     const blockHeight = quotePad * 2 + lines.length * lineHeight;
 
     pen.rect(blockLeft, blockTop, blockWidth, blockHeight, palette.accent);
     pen.rect(pad, blockTop + 84, 128, 128, readingMarkColor(palette.accent, 0.3));
 
     let y = blockTop + quotePad;
-    drawLines(ctx, lines, blockLeft + quotePad, y, quoteWidth, 26, lineHeight, palette.ink);
+    drawLines(ctx, lines, blockLeft + quotePad, y, quoteWidth, collageType.size, lineHeight, palette.ink);
     y = blockTop + blockHeight + 52;
 
     if (input.annotations.length > 0) {
@@ -711,7 +786,7 @@ function renderCollage(ctx: Ctx): number {
     const centerY = y + 30;
     drawSignature(ctx, pad, centerY, 58, palette.sub, palette.sub, null, palette.accent);
     pen.font(20, ctx.fonts.body);
-    pen.text(metaLine(input), pad, centerY + 62, palette.sub);
+    pen.text(truncateToWidth(pen, metaLine(input), WIDTH - pad * 2), pad, centerY + 62, palette.sub);
     pen.text(`${progressText(input)} · ${stampText(input)}`, pad, centerY + 92, palette.sub);
     pen.font(56, ctx.fonts.body, "300");
     pen.text(`${percentValue(input)}%`, WIDTH - pad, centerY + 92, palette.accent, "right");
@@ -722,14 +797,15 @@ function renderLetter(ctx: Ctx): number {
     const { pen, input, palette } = ctx;
     const pad = 72;
     const inner = WIDTH - pad * 2;
-    const ruleGap = 56;
+    const letterType = scaleType(ctx, 26, 56);
+    const ruleGap = letterType.lineHeight;
     let y = pad;
 
     pen.font(20, ctx.fonts.body);
-    pen.text(metaLine(input), pad, y + 20, palette.sub);
+    pen.text(truncateToWidth(pen, metaLine(input), inner), pad, y + 20, palette.sub);
     y += 54;
 
-    pen.font(26, ctx.fonts.body);
+    pen.font(letterType.size, ctx.fonts.body);
     const lines: string[] = [];
     const paragraphs = input.quoteParagraphs.map(p => p.trim()).filter(Boolean);
     paragraphs.forEach((paragraph, index) => {
@@ -739,7 +815,7 @@ function renderLetter(ctx: Ctx): number {
     const letterSpot = anchor(pad, inner, ctx.align);
     for (const line of lines) {
         pen.rect(pad, y + ruleGap - 10, inner, 1, palette.accent);
-        if (line) pen.text(line, letterSpot.x, y + 34, palette.ink, letterSpot.textAlign);
+        if (line) pen.text(line, letterSpot.x, y + letterType.size + 8, palette.ink, letterSpot.textAlign);
         y += ruleGap;
     }
 
@@ -780,10 +856,11 @@ function renderSticky(ctx: Ctx): number {
         const noteGap = 20;
         const perRow = input.annotations.length > 1 ? 2 : 1;
         const noteWidth = perRow > 1 ? (inner - noteGap) / 2 : inner;
+        const noteType = scaleType(ctx, 24, 40);
         const heights = input.annotations.map((annotation) => {
-            pen.font(24, annotationFont(ctx, annotation));
+            pen.font(noteType.size, annotationFont(ctx, annotation));
             const lines = wrapText(pen.ctx, annotation.content.trim(), noteWidth - 36);
-            return { lines, height: 36 + lines.length * 40 + 26 };
+            return { lines, height: 36 + lines.length * noteType.lineHeight + 26 };
         });
 
         let rowTop = y;
@@ -810,11 +887,11 @@ function renderSticky(ctx: Ctx): number {
                     const noteInk = isDarkColor(tint) ? "#f2efe9" : "#241f18";
                     pen.font(19, font, "600");
                     pen.text(annotation.name, x + 18, rowTop + 34, readingMarkColor(noteInk, 0.72));
-                    pen.font(24, font);
+                    pen.font(noteType.size, font);
                     let cursor = rowTop + 56;
                     for (const line of plan.lines) {
-                        pen.text(line, x + 18, cursor + 24, noteInk);
-                        cursor += 40;
+                        pen.text(line, x + 18, cursor + noteType.size, noteInk);
+                        cursor += noteType.lineHeight;
                     }
                 });
             });
@@ -843,6 +920,160 @@ function renderSticky(ctx: Ctx): number {
     return y + outer;
 }
 
+/** 笔记卡：顶上署名一行，中间大字正文，底下出处。参考小红书那种摘抄卡。 */
+function renderNotecard(ctx: Ctx): number {
+    const { pen, input, palette } = ctx;
+    const pad = 76;
+    const inner = WIDTH - pad * 2;
+    let y = pad;
+
+    drawSignature(
+        ctx, pad, y + 30, 60, palette.ink, palette.sub,
+        `摘录于 ${stampText(input)}`, palette.accent, inner - 80,
+    );
+    y += 96;
+
+    y = drawQuote(ctx, pad, y, inner, 38, 68, palette.ink);
+
+    if (input.annotations.length > 0) {
+        y += 34;
+        y = drawAnnotations(ctx, pad, y, inner, "rule");
+    }
+
+    y += 44;
+    pen.rect(pad, y, 56, 2, palette.accent);
+    y += 26;
+    const foot = anchor(pad, inner, ctx.align);
+    pen.font(23, ctx.fonts.body);
+    pen.text(
+        truncateToWidth(pen, `/ ${[bookTitleText(input), input.chapterTitle].filter(Boolean).join(" · ")}`, inner),
+        foot.x, y + 23, palette.sub, foot.textAlign,
+    );
+    y += 34;
+    if (input.bookAuthor) {
+        pen.font(21, ctx.fonts.body);
+        pen.text(truncateToWidth(pen, input.bookAuthor, inner), foot.x, y + 21, palette.sub, foot.textAlign);
+        y += 32;
+    }
+    pen.font(19, ctx.fonts.body);
+    pen.text(progressText(input), foot.x, y + 19, readingMarkColor(palette.sub, 0.75), foot.textAlign);
+    return y + 19 + pad;
+}
+
+/** 满版引号：一个巨大的引号压在背景上，正文盖在它上面，出处收在右下。 */
+function renderQuotemark(ctx: Ctx): number {
+    const { pen, input, palette } = ctx;
+    const pad = 76;
+    const inner = WIDTH - pad * 2;
+
+    // 水印引号先画，正文才压得上去
+    pen.font(300, ctx.fonts.body, "700");
+    pen.text("\u201C", pad - 10, pad + 210, readingMarkColor(palette.accent, isDarkColor(palette.background) ? 0.28 : 0.2));
+
+    let y = pad + 120;
+    y = drawQuote(ctx, pad, y, inner, 39, 70, palette.ink);
+
+    if (input.annotations.length > 0) {
+        y += 36;
+        y = drawAnnotations(ctx, pad, y, inner, "rule");
+    }
+
+    y += 52;
+    pen.font(25, ctx.fonts.body, "600");
+    pen.text(
+        truncateToWidth(pen, [bookTitleText(input), input.bookAuthor].filter(Boolean).join(" "), inner),
+        WIDTH - pad, y + 25, palette.ink, "right",
+    );
+    y += 38;
+    pen.font(20, ctx.fonts.body);
+    pen.text(
+        truncateToWidth(pen, [input.chapterTitle, progressText(input), stampText(input)].filter(Boolean).join(" · "), inner),
+        WIDTH - pad, y + 20, palette.sub, "right",
+    );
+    y += 34;
+
+    const sigY = y + 34;
+    drawSignature(ctx, pad, sigY, 48, palette.sub, palette.sub, null, palette.accent, inner - 120);
+    return sigY + 24 + pad;
+}
+
+/** 封面带：顶上一条色带放书名作者，下面整块留给大字正文。 */
+function renderCoverband(ctx: Ctx): number {
+    const { pen, input, palette } = ctx;
+    const pad = 76;
+    const inner = WIDTH - pad * 2;
+    const bandHeight = 268;
+    const onBand = isDarkColor(palette.accent) ? "#f6f4ef" : "#1b1a17";
+
+    pen.rect(0, 0, WIDTH, bandHeight, palette.accent);
+    // 书脊：没有封面图也要有个东西占住右上角，不然色带空荡荡的
+    pen.rect(WIDTH - pad - 76, 54, 76, 108, readingMarkColor(onBand, 0.16));
+    pen.rect(WIDTH - pad - 76, 54, 76, 108, readingMarkColor(onBand, 0.0));
+    pen.font(34, ctx.fonts.body, "600");
+    pen.text(truncateToWidth(pen, bookTitleText(input), inner - 120), pad, bandHeight - 104, onBand);
+    pen.font(22, ctx.fonts.body);
+    pen.text(
+        truncateToWidth(pen, [input.bookAuthor, input.chapterTitle].filter(Boolean).join(" · "), inner - 120),
+        pad, bandHeight - 58, readingMarkColor(onBand, 0.78),
+    );
+
+    let y = bandHeight + 62;
+    y = drawQuote(ctx, pad, y, inner, 38, 68, palette.ink);
+
+    if (input.annotations.length > 0) {
+        y += 34;
+        y = drawAnnotations(ctx, pad, y, inner, "strip");
+    }
+
+    y += 48;
+    pen.rect(pad, y, inner, 1, readingMarkColor(palette.sub, 0.4));
+    y += 28;
+    const centerY = y + 24;
+    drawSignature(ctx, pad, centerY, 48, palette.ink, palette.sub, null, palette.accent, inner - 260);
+    pen.font(19, ctx.fonts.body);
+    pen.text(`${progressText(input)} · ${stampText(input)}`, WIDTH - pad, centerY + 7, palette.sub, "right");
+    return centerY + 24 + pad;
+}
+
+/** 全居中：上下各一个小记号，正文居中，出处也居中。 */
+function renderCentered(ctx: Ctx): number {
+    const { pen, input, palette } = ctx;
+    const pad = 84;
+    const inner = WIDTH - pad * 2;
+    let y = pad;
+
+    pen.font(22, ctx.fonts.body);
+    pen.text("\u2726", WIDTH / 2, y + 22, palette.accent, "center");
+    y += 76;
+
+    y = drawQuote(ctx, pad, y, inner, 37, 72, palette.ink);
+
+    if (input.annotations.length > 0) {
+        y += 40;
+        y = drawAnnotations(ctx, pad, y, inner, "plain");
+    }
+
+    y += 46;
+    pen.rect(WIDTH / 2 - 26, y, 52, 1, palette.accent);
+    y += 32;
+
+    pen.font(25, ctx.fonts.body);
+    pen.text(truncateToWidth(pen, bookTitleText(input), inner), WIDTH / 2, y + 25, palette.ink, "center");
+    y += 38;
+    const sub = [input.bookAuthor, input.chapterTitle].filter(Boolean).join(" · ");
+    if (sub) {
+        pen.font(20, ctx.fonts.body);
+        pen.text(truncateToWidth(pen, sub, inner), WIDTH / 2, y + 20, palette.sub, "center");
+        y += 32;
+    }
+    pen.font(18, ctx.fonts.body);
+    pen.text(
+        `${displayName(input)} 摘录于 ${stampText(input)} · ${progressText(input)}`,
+        WIDTH / 2, y + 18, readingMarkColor(palette.sub, 0.8), "center",
+    );
+    return y + 18 + pad;
+}
+
 const RENDERERS: Record<ReadingShareTemplate, (ctx: Ctx) => number> = {
     poster: renderPoster,
     bookmark: renderBookmark,
@@ -851,6 +1082,10 @@ const RENDERERS: Record<ReadingShareTemplate, (ctx: Ctx) => number> = {
     collage: renderCollage,
     letter: renderLetter,
     sticky: renderSticky,
+    notecard: renderNotecard,
+    quotemark: renderQuotemark,
+    coverband: renderCoverband,
+    centered: renderCentered,
 };
 
 /** 画出摘抄图。返回的 canvas 已经是最终像素，直接 toBlob 就能存。 */
@@ -874,7 +1109,34 @@ export function renderReadingShareCard(input: ReadingShareCardInput): HTMLCanvas
 
     const render = RENDERERS[input.template];
     const base = { input, palette, align, avatarShape, fonts: input.fonts };
-    const height = Math.max(420, Math.round(render({ ...base, totalHeight: 0, pen: new Pen(measureCtx, true) })));
+    const measure = (typeScale: number, extraLead: number) =>
+        Math.round(render({ ...base, totalHeight: 0, typeScale, extraLead, pen: new Pen(measureCtx, true) }));
+
+    // 固定比例不是把自适应那张裁一刀，而是重新排：先缩放正文和批注的字号，
+    // 让版面正好落进目标高度；缩放只能按行跳，剩下不足一行的空隙再摊进行距。
+    const target = RATIO_HEIGHT[input.ratio || "auto"];
+    let typeScale = 1;
+    let extraLead = 0;
+    if (target) {
+        let lo = MIN_TYPE_SCALE;
+        let hi = MAX_TYPE_SCALE;
+        for (let i = 0; i < 18; i += 1) {
+            const mid = (lo + hi) / 2;
+            if (measure(mid, 0) <= target) lo = mid;
+            else hi = mid;
+        }
+        typeScale = lo;
+        let leadLo = 0;
+        let leadHi = MAX_EXTRA_LEAD;
+        for (let i = 0; i < 16; i += 1) {
+            const mid = (leadLo + leadHi) / 2;
+            if (measure(typeScale, mid) <= target) leadLo = mid;
+            else leadHi = mid;
+        }
+        extraLead = Math.floor(leadLo);
+    }
+
+    const height = target ?? Math.max(420, measure(typeScale, extraLead));
 
     // 版面按 1080 宽来算，真正的画布放大 SCALE 倍再画：手机屏幕是 3 倍像素密度，
     // 1080 的图铺满屏幕会被拉伸，存下来看就是糊的。
@@ -887,7 +1149,7 @@ export function renderReadingShareCard(input: ReadingShareCardInput): HTMLCanvas
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = palette.background;
     ctx.fillRect(0, 0, WIDTH, height);
-    render({ ...base, totalHeight: height, pen: new Pen(ctx, false) });
+    render({ ...base, totalHeight: height, typeScale, extraLead, pen: new Pen(ctx, false) });
     return canvas;
 }
 
