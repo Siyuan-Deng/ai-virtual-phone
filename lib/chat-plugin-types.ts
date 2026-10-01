@@ -18,11 +18,12 @@
 import type { ChatMessage, ChatSession, ChatContact } from "./chat-storage";
 import type { Character } from "./character-types";
 import type { DiaryEntry, DiaryEntryBlock } from "./diary-entry-types";
+import type { CalendarOwnerType, CalendarWeekPlan } from "./calendar-types";
 
 /** 反注册函数：撤销对应的注册动作 */
 export type Disposable = () => void;
 
-export const CHAT_PLUGIN_API_VERSION = 1;
+export const CHAT_PLUGIN_API_VERSION = 2;
 
 // ── manifest ──────────────────────────────────────────────
 
@@ -275,6 +276,30 @@ export type ChatPluginContext = {
         }): Promise<string>;
     };
     
+    /**
+     * 聊天桥接：请求角色「现在回一条」，走宿主完整的后台回复流程——角色卡 +
+     * 该会话绑定的预设/世界书/正则 + 长短期记忆，和原生的离线/后台回复同一条路。
+     * 不是 ai.chat 那条裸通道（裸通道看不到世界书和记忆）。
+     */
+    chat: {
+        /**
+         * directive：本轮的临时指令（例如「这轮是日程临近提醒，要提醒的是…」）。
+         * 宿主负责它的生命周期：注入 → 生成 → 清除，并顺手取消这轮本来会排的
+         * follow-up。不然 follow-up 会在指令清掉之后才跑，带着空指令再回一条
+         * 和指令完全无关的话。
+         */
+        requestReply(sessionId: string, opts?: { directive?: string }): Promise<{ ok: boolean; skipped?: string }>;
+    };
+
+    /**
+     * 用户日历读写：和日历 App 同一份存储。
+     * replaceOwnerPlans 是整份替换，不会留下改到一半的中间态。
+     */
+    calendar: {
+        list(ownerType: CalendarOwnerType, ownerId: string): CalendarWeekPlan[];
+        replaceOwnerPlans(ownerType: CalendarOwnerType, ownerId: string, plans: CalendarWeekPlan[]): CalendarWeekPlan[];
+    };
+
     /**
      * 手记 App「写日记」桥接：让插件生成日记走宿主自己的完整流程——角色人设 +
      * 该角色在"手记"(diary) 这个 appId 下绑定的预设/世界书/正则/长短期记忆 + 对应

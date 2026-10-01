@@ -13,6 +13,8 @@ import { kvGet, kvSet, kvRemove, hydrateKvDb } from "./kv-db";
 import { hydrateChatStorage, loadChatMessages, loadChatSessions, loadChatContacts, pushChatMessage, updateChatMessage, type ChatMessage } from "./chat-storage";
 import { isMediaStoreRef, loadMediaBlob } from "./media-cache-storage";
 import { loadCharacters } from "./character-storage";
+import { cancelFollowUp, requestBackgroundChatReply } from "./follow-up-service";
+import { loadOwnerCalendarPlans, replaceOwnerCalendarPlans } from "./calendar-storage";
 import { loadApiConfigs, loadBindingConfig } from "./settings-storage";
 import { simpleLLMCall } from "./api-helpers";
 import { generateDiaryEntryForCharacter } from "./diary-entry-engine";
@@ -401,6 +403,29 @@ class ChatPluginRuntime {
             prompts: {
                 set: (text, opts) => setChatPluginPromptFragment(pluginId, text, opts?.sessionId),
                 clear: (opts) => setChatPluginPromptFragment(pluginId, "", opts?.sessionId),
+            },
+
+            chat: {
+                requestReply: async (sessionId, opts) => {
+                    const directive = String(opts?.directive ?? "").trim();
+                    if (directive) setChatPluginPromptFragment(pluginId, directive, sessionId);
+                    try {
+                        return await requestBackgroundChatReply(sessionId);
+                    } finally {
+                        if (directive) {
+                            // 顺序要紧：先取消这轮排下的 follow-up，再清指令。
+                            // 反过来的话 follow-up 会在指令没了之后才跑，角色就会
+                            // 再回一条和这次指令毫无关系的话。
+                            cancelFollowUp(sessionId);
+                            setChatPluginPromptFragment(pluginId, "", sessionId);
+                        }
+                    }
+                },
+            },
+
+            calendar: {
+                list: (ownerType, ownerId) => loadOwnerCalendarPlans(ownerType, ownerId),
+                replaceOwnerPlans: (ownerType, ownerId, plans) => replaceOwnerCalendarPlans(ownerType, ownerId, plans),
             },
 
             ui: {

@@ -154,6 +154,16 @@ opts.timeoutMs 覆盖该 transform 的超时（默认 8000ms）。在 transform 
 - \`ctx.ui.injectCSS(css)\` —— 注入全局样式（禁用自动移除）
 - \`ctx.ui.openModal((el, { close }) => { ... })\` —— 打开一个**插件完全掌控的浮层**：宿主给全屏遮罩 + 一块居中裸容器（默认卡片外观，可覆盖），你在里面自由渲染任意界面（表单、按钮、列表都行）。点遮罩空白处或调 \`close()\` 关闭；插件禁用时自动关。适合做"配置浮层""详情弹窗"等独立界面，摆脱静态设置表单的框框。
 
+## ctx.chat —— 让角色现在回一条
+
+- \`await ctx.chat.requestReply(sessionId, { directive })\` —— 请求该会话的角色**立刻生成一条后台回复**，走宿主完整流程：角色卡 + 该会话绑定的预设/世界书/正则 + 长短期记忆。和 \`ctx.ai.chat\` 的区别是后者是裸通道，看不到世界书和记忆，生成出来的话会没有上下文。
+- \`directive\` 是这一轮的临时指令（例如「本轮是日程临近提醒，要提醒的是……」）。它的生命周期由宿主管：注入 → 生成 → 清除，并且会顺手取消这轮本来会排的 follow-up——否则 follow-up 会在指令清掉之后才跑，角色就会再回一条和指令无关的话。
+
+## ctx.calendar —— 用户日历
+
+- \`ctx.calendar.list(ownerType, ownerId)\` —— 读某个 owner 的全部周计划（\`"user"\` / \`"character"\`）
+- \`ctx.calendar.replaceOwnerPlans(ownerType, ownerId, plans)\` —— **整份替换**该 owner 的周计划，一次落盘。按周逐次写会留下改到一半的中间态，而且每写一周都会触发一次界面重绘。
+
 ## ctx.system —— 系统
 
 - \`ctx.system.storage.get/set/remove/keys\` —— 插件私有 KV（卸载时清除）

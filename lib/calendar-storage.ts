@@ -171,6 +171,35 @@ export function replaceCalendarWeekItems(
   return saveCalendarWeekPlan(plan);
 }
 
+/** 一次性把某个 owner 的全部周计划换掉（其它 owner 原样保留）。
+ *  按周逐次写会产生中间态：中间任何一步失败，日历就停在半改完的样子，
+ *  而且每写一周都会触发一次界面重绘。整份一次落盘就没有这个问题。 */
+export function replaceOwnerCalendarPlans(
+  ownerType: CalendarOwnerType,
+  ownerId: string,
+  plans: CalendarWeekPlan[],
+): CalendarWeekPlan[] {
+  const store = loadStore();
+  const now = new Date().toISOString();
+  const normalized = plans
+    .filter(plan => plan && typeof plan.weekStart === "string")
+    .map(plan => ({
+      ...plan,
+      id: plan.id || `calendar_week_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      ownerType,
+      ownerId,
+      updatedAt: now,
+      items: sortScheduleItems((plan.items || []).map(item => ({
+        ...item,
+        weekday: item.weekday || getWeekdayLabel(item.date),
+        colorKey: item.colorKey || pickScheduleColorKey(item.startTime),
+      }))),
+    }));
+  const others = store.plans.filter(entry => !(entry.ownerType === ownerType && entry.ownerId === ownerId));
+  saveStore({ plans: [...others, ...normalized] });
+  return normalized.sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+}
+
 export function upsertCalendarScheduleItem(
   ownerType: CalendarOwnerType,
   ownerId: string,
