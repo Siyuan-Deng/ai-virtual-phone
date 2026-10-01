@@ -3228,6 +3228,10 @@
   box-shadow: var(--reading-warm-card-shadow, 0 10px 30px rgba(60, 45, 20, 0.075));
   position: relative;
   overflow: visible;
+  /* 长按要弹自己的菜单，不能让 iOS 先弹原生的选中/预览气泡 */
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .reading-list-item:active {
   background: color-mix(in srgb, var(--reading-warm-accent, #fae389) 12%, #fff);
@@ -7460,18 +7464,32 @@
   flex-shrink: 0;
   line-height: 0;
   border-radius: 6px;
-  cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.reading-list-cover-btn:disabled {
-  cursor: default;
-  opacity: 0.6;
+
+/* 书架卡片：置顶小标 + 长按菜单里的编辑表单 */
+.reading-list-pin {
+  display: inline-block;
+  vertical-align: -1px;
+  margin-right: 4px;
+  color: var(--reading-warm-accent, #a8704a);
 }
-.reading-list-cover-btn .reading-list-cover {
-  transition: transform 0.12s;
+
+.reading-book-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
-.reading-list-cover-btn:active .reading-list-cover {
-  transform: scale(0.97);
+
+.reading-book-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.reading-book-edit-field > span {
+  font-size: calc(11.5px*var(--app-text-scale,1));
+  color: var(--c-text);
 }
 
 /* 字体设置里的示例行：字体直接写在 style 上（不吃 --reading-font-family），

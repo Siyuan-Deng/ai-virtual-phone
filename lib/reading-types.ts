@@ -7,6 +7,8 @@ export type Book = {
     format: "txt" | "epub" | "pdf" | "mobi";
     totalChapters: number;
     createdAt: string;
+    /** 置顶时间。有值就排在书架最前面，多本置顶按置顶时间倒序。 */
+    pinnedAt?: string;
 };
 
 export type BookChapter = {

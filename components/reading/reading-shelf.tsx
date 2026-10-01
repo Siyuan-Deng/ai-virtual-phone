@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ChevronLeft, Palette, Settings, UserRound } from "lucide-react";
-import { loadBooks, addBook, deleteBook, saveChapters, loadProgress, saveRawFile, countAnnotationsByBook } from "@/lib/reading-storage";
+import { ChevronLeft, Palette, Pin, Settings, UserRound } from "lucide-react";
+import { loadBooks, addBook, updateBook, deleteBook, saveChapters, loadProgress, saveRawFile, countAnnotationsByBook } from "@/lib/reading-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import { deleteReadingAssetsByPrefix, loadReadingCover, saveReadingAsset, saveReadingCover } from "@/lib/reading-appearance";
 import { readingImageAssetKey, readingImageAssetPrefix } from "@/lib/reading-inline-image";
@@ -114,14 +114,25 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
     const [showAppearanceDialog, setShowAppearanceDialog] = useState(false);
     const [showInteractionDialog, setShowInteractionDialog] = useState(false);
     const [showProfileDialog, setShowProfileDialog] = useState(false);
-    /** 已经有封面的书，点封面先弹这个小菜单（换 / 移除），没封面的直接开相册 */
-    const [coverMenuBook, setCoverMenuBook] = useState<Book | null>(null);
+    /** 长按书卡弹出的操作菜单 */
+    const [actionMenuBook, setActionMenuBook] = useState<Book | null>(null);
+    /** 「编辑」里正在改的那本书；title/author 是草稿，保存时才落库 */
+    const [editingBook, setEditingBook] = useState<Book | null>(null);
+    const [editTitle, setEditTitle] = useState("");
+    const [editAuthor, setEditAuthor] = useState("");
     const [coverBusy, setCoverBusy] = useState(false);
     const fileRef = useRef<HTMLInputElement>(null);
     const coverInputRef = useRef<HTMLInputElement>(null);
     /** 正在设封面的书。存 ref 而不是 state：点完立刻要打开文件选择器，
      *  state 这一拍还没落地，onChange 里就取不到目标书了。 */
     const coverTargetRef = useRef<string | null>(null);
+    /** 长按计时器 + 「这一下已经当成长按了」标记：标记用来吃掉随后那次 click，
+     *  否则松手会在弹出菜单的同时把书也打开。 */
+    const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const longPressFiredRef = useRef(false);
+    /** 按下时的坐标。手指按住不动也会有几 px 抖动，所以要有个阈值，
+     *  不能一有 pointermove 就取消，否则手机上根本按不出菜单。 */
+    const longPressOriginRef = useRef<{ x: number; y: number } | null>(null);
 
     const persistImportDiagnostic = (payload: ImportDiagnostic | null) => {
         if (typeof window === "undefined") return;
@@ -241,10 +252,65 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
         coverInputRef.current?.click();
     };
 
-    const handleCoverClick = (book: Book) => {
-        // 已有封面的书先问一句，否则误触就把 EPUB 自带封面换掉了，还退不回去
-        if (coverUrls[book.id]) setCoverMenuBook(book);
-        else pickCoverFor(book.id);
+    /** 长按：按住 500ms 弹操作菜单。移动或提前松手都取消。 */
+    const cancelLongPress = () => {
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
+        longPressOriginRef.current = null;
+    };
+
+    const startLongPress = (book: Book, e: React.PointerEvent) => {
+        cancelLongPress();
+        longPressFiredRef.current = false;
+        longPressOriginRef.current = { x: e.clientX, y: e.clientY };
+        longPressTimerRef.current = setTimeout(() => {
+            longPressTimerRef.current = null;
+            longPressFiredRef.current = true;
+            longPressOriginRef.current = null;
+            setActionMenuBook(book);
+        }, 500);
+    };
+
+    /** 超过 10px 才算滑动（当成滚动列表），之内的抖动不打断长按 */
+    const trackLongPressMove = (e: React.PointerEvent) => {
+        const origin = longPressOriginRef.current;
+        if (!origin) return;
+        if (Math.abs(e.clientX - origin.x) > 10 || Math.abs(e.clientY - origin.y) > 10) cancelLongPress();
+    };
+
+    /** 长按刚弹过菜单时吞掉紧跟着的那次 click，别顺手把书也打开 */
+    const handleCardClick = (book: Book) => {
+        if (longPressFiredRef.current) {
+            longPressFiredRef.current = false;
+            return;
+        }
+        onOpenBook(book);
+    };
+
+    const togglePin = async (book: Book) => {
+        await updateBook({ ...book, pinnedAt: book.pinnedAt ? undefined : new Date().toISOString() });
+        setBooks(loadBooks());
+    };
+
+    const openEditor = (book: Book) => {
+        setEditingBook(book);
+        setEditTitle(book.title);
+        setEditAuthor(book.author || "");
+    };
+
+    const saveEditor = async () => {
+        if (!editingBook) return;
+        const title = editTitle.trim();
+        // 书名空着就留原来的：书架、分享图、提示词到处都在用它，不能变成空串
+        await updateBook({
+            ...editingBook,
+            title: title || editingBook.title,
+            author: editAuthor.trim() || undefined,
+        });
+        setEditingBook(null);
+        setBooks(loadBooks());
     };
 
     const handleCoverFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -256,9 +322,15 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
         await applyCover(bookId, await compressReadingImage(file, READING_COVER_MAX_SIZE));
     };
 
-    const filteredBooks = search.trim()
+    const matchedBooks = search.trim()
         ? books.filter(b => b.title.toLowerCase().includes(search.toLowerCase()) || b.author?.toLowerCase().includes(search.toLowerCase()))
         : books;
+    // 置顶的排最前（多本按置顶时间倒序），其余保持 loadBooks 的导入时间倒序
+    const filteredBooks = [...matchedBooks].sort((a, b) => {
+        if (Boolean(a.pinnedAt) !== Boolean(b.pinnedAt)) return a.pinnedAt ? -1 : 1;
+        if (a.pinnedAt && b.pinnedAt) return b.pinnedAt.localeCompare(a.pinnedAt);
+        return 0;
+    });
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -591,15 +663,19 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                             const gradient = coverGradients[book.title.length % coverGradients.length];
                             const layout = coverLayouts[(book.title.length + (book.author?.length || 0)) % coverLayouts.length];
                             return (
-                                <div key={book.id} className="reading-list-item" onClick={() => onOpenBook(book)}>
-                                    {/* 点封面是换封面，不是打开书 */}
-                                    <button
-                                        type="button"
-                                        className="reading-list-cover-btn"
-                                        onClick={(e) => { e.stopPropagation(); handleCoverClick(book); }}
-                                        disabled={coverBusy}
-                                        aria-label={`设置《${book.title}》的封面`}
-                                    >
+                                <div
+                                    key={book.id}
+                                    className="reading-list-item"
+                                    onClick={() => handleCardClick(book)}
+                                    onPointerDown={(e) => startLongPress(book, e)}
+                                    onPointerUp={cancelLongPress}
+                                    onPointerLeave={cancelLongPress}
+                                    onPointerCancel={cancelLongPress}
+                                    onPointerMove={trackLongPressMove}
+                                    onContextMenu={(e) => { e.preventDefault(); setActionMenuBook(book); }}
+                                >
+                                    {/* 封面只是封面：换封面挪进长按菜单的「编辑」里了 */}
+                                    <div className="reading-list-cover-btn">
                                         {coverUrls[book.id] ? (
                                             <div className="reading-list-cover reading-list-cover--image">
                                                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -611,9 +687,14 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                                                 <span className="reading-list-cover-title">{book.title}</span>
                                             </div>
                                         )}
-                                    </button>
+                                    </div>
                                     <div className="reading-list-info">
-                                        <span className="reading-list-title">{book.title}</span>
+                                        <span className="reading-list-title">
+                                            {book.pinnedAt ? (
+                                                <Pin size={12} className="reading-list-pin" aria-label="已置顶" />
+                                            ) : null}
+                                            {book.title}
+                                        </span>
                                         {book.author && <span className="reading-list-author">{book.author}</span>}
                                         <div className="reading-list-meta">
                                             <span className="reading-list-badge">{formatBadge(book.format)}</span>
@@ -672,39 +753,93 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                 onChange={(e) => { void handleCoverFileChange(e); }}
             />
 
-            {coverMenuBook && (
+            {actionMenuBook && (
                 <ContentDialog
-                    title="封面"
+                    title={actionMenuBook.title}
                     confirmLabel=""
                     cancelLabel="取消"
-                    onConfirm={() => setCoverMenuBook(null)}
-                    onCancel={() => setCoverMenuBook(null)}
+                    onConfirm={() => setActionMenuBook(null)}
+                    onCancel={() => setActionMenuBook(null)}
                 >
                     <div className="reading-settings-grid">
                         <button
                             type="button"
                             className="ui-btn ui-btn-outline"
-                            disabled={coverBusy}
                             onClick={() => {
-                                const target = coverMenuBook.id;
-                                setCoverMenuBook(null);
-                                pickCoverFor(target);
+                                const target = actionMenuBook;
+                                setActionMenuBook(null);
+                                void togglePin(target);
                             }}
                         >
-                            从相册选择图片
+                            {actionMenuBook.pinnedAt ? "取消置顶" : "置顶"}
                         </button>
                         <button
                             type="button"
                             className="ui-btn ui-btn-outline"
-                            disabled={coverBusy}
                             onClick={() => {
-                                const target = coverMenuBook.id;
-                                setCoverMenuBook(null);
-                                void applyCover(target, null);
+                                const target = actionMenuBook;
+                                setActionMenuBook(null);
+                                openEditor(target);
                             }}
                         >
-                            移除封面，恢复默认样式
+                            编辑
                         </button>
+                    </div>
+                </ContentDialog>
+            )}
+
+            {editingBook && (
+                <ContentDialog
+                    title="编辑书籍"
+                    confirmLabel="保存"
+                    cancelLabel="取消"
+                    onConfirm={() => { void saveEditor(); }}
+                    onCancel={() => setEditingBook(null)}
+                >
+                    <div className="reading-book-edit">
+                        <label className="reading-book-edit-field">
+                            <span>书名</span>
+                            <input
+                                type="text"
+                                className="ui-input"
+                                value={editTitle}
+                                onChange={(e) => setEditTitle(e.target.value)}
+                                placeholder={editingBook.title}
+                            />
+                        </label>
+                        <label className="reading-book-edit-field">
+                            <span>作者</span>
+                            <input
+                                type="text"
+                                className="ui-input"
+                                value={editAuthor}
+                                onChange={(e) => setEditAuthor(e.target.value)}
+                                placeholder="留空就不显示"
+                            />
+                        </label>
+                        <div className="reading-book-edit-field">
+                            <span>封面</span>
+                            <div className="reading-settings-grid">
+                                <button
+                                    type="button"
+                                    className="ui-btn ui-btn-outline"
+                                    disabled={coverBusy}
+                                    onClick={() => pickCoverFor(editingBook.id)}
+                                >
+                                    从相册选择图片
+                                </button>
+                                {coverUrls[editingBook.id] ? (
+                                    <button
+                                        type="button"
+                                        className="ui-btn ui-btn-outline"
+                                        disabled={coverBusy}
+                                        onClick={() => { void applyCover(editingBook.id, null); }}
+                                    >
+                                        移除封面，恢复默认样式
+                                    </button>
+                                ) : null}
+                            </div>
+                        </div>
                     </div>
                 </ContentDialog>
             )}
