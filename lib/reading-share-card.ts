@@ -195,11 +195,18 @@ const RATIO_HEIGHT: Record<ReadingShareRatio, number | null> = {
     square: WIDTH,
     story: Math.round((WIDTH * 16) / 9),
 };
-/** 字号倍率的上下限：再小就看不清了，再大一行放不下几个字。 */
-const MIN_TYPE_SCALE = 0.34;
-const MAX_TYPE_SCALE = 2.2;
-/** 行距最多额外加这么多。短摘抄撑 9:16 时全靠它，所以给得宽。 */
-const MAX_EXTRA_LEAD = 260;
+/** 每种比例自己的正文字号倍率。1:1 用设计值；9:16 是满屏竖图，
+ *  看的距离远一点，字略放大。这是「设计值」，不是撑满用的橡皮筋。 */
+const RATIO_TYPE_SCALE: Record<ReadingShareRatio, number> = {
+    auto: 1,
+    square: 1,
+    story: 1.1,
+};
+/** 内容塞不下时最多缩到设计值的几成。再小就不像给人看的了。 */
+const MIN_FIT_RATIO = 0.62;
+/** 内容少时最多放大到设计值的几倍。封顶是关键：不封顶短摘抄会被
+ *  撑成一张大字报，正文顶到页脚上。 */
+const MAX_GROW_RATIO = 1.35;
 
 /** 不该出现在行首 / 行尾的标点。中文排版的基本禁则。 */
 const NO_LINE_START = "，。、；：？！）】》」』”’…—·,.;:?!)]}>";
@@ -362,18 +369,21 @@ type Ctx = {
     /** 整张图的高度。量版面那一遍还不知道，是 0；真正落笔那一遍才有。
      *  「先铺纸再写字」的模板（书签条、便利贴）靠它先画底。 */
     totalHeight: number;
-    /** 固定比例时正文和批注的字号倍率：内容少就放大撑满，内容多就缩小塞下。
-     *  auto 比例下恒为 1。 */
+    /** 固定比例下正文和批注的字号倍率。只会 ≤ 该比例的设计值：
+     *  内容多就缩小塞下，内容少绝不放大——放大会把正文顶成大字报。 */
     typeScale: number;
-    /** 缩放之后还差的那点高度（凑不满一行）摊进每一行的行距，单位 px。 */
-    extraLead: number;
+    /** 版面没排满时多出来的高度，分成正文之前和之后两段留白，
+     *  让正文块视觉居中，页脚照旧压在底边。
+     *  绝对不能摊进行距：行距一松排版就散了。 */
+    padTop: number;
+    fillGap: number;
 };
 
-/** 正文/批注的字号和行距按比例模式缩放。留白余量摊进行距，不是堆在末尾。 */
+/** 正文/批注的字号和行距按比例缩放。行距跟着字号等比走，不额外加。 */
 function scaleType(ctx: Ctx, size: number, lineHeight: number): { size: number; lineHeight: number } {
     return {
-        size: Math.max(12, Math.round(size * ctx.typeScale)),
-        lineHeight: Math.max(14, Math.round(lineHeight * ctx.typeScale) + ctx.extraLead),
+        size: Math.max(13, Math.round(size * ctx.typeScale)),
+        lineHeight: Math.max(16, Math.round(lineHeight * ctx.typeScale)),
     };
 }
 
@@ -605,6 +615,7 @@ function renderPoster(ctx: Ctx): number {
     pen.text(truncateToWidth(pen, metaLine(input), inner), pad, y + 21, palette.sub);
     y += 62;
 
+    y += ctx.padTop;
     const leadType = scaleType(ctx, 50, 76);
     if (lead) {
         pen.font(leadType.size, ctx.fonts.body, "600");
@@ -619,6 +630,8 @@ function renderPoster(ctx: Ctx): number {
             y += 16;
         }
     }
+
+    y += ctx.fillGap;
 
     if (input.annotations.length > 0) {
         y += 26;
@@ -651,7 +664,9 @@ function renderBookmark(ctx: Ctx): number {
 
     pen.rect(cardX + cardWidth / 2 - 22, y + 6, 44, 3, palette.accent);
     y += 42;
+    y += ctx.padTop;
     y = drawQuote(ctx, cardX + padX, y, inner, 26, 56, palette.ink);
+    y += ctx.fillGap;
 
     if (input.annotations.length > 0) {
         y += 24;
@@ -693,8 +708,10 @@ function renderMagazine(ctx: Ctx): number {
     pen.rect(pad, y, inner, 3, palette.ink);
     y += 44;
 
+    y += ctx.padTop;
     y = drawQuote(ctx, pad, y, inner, 27, 56, palette.ink);
     y += 24;
+    y += ctx.fillGap;
 
     if (input.annotations.length > 0) {
         pen.rect(pad, y, inner, 1, readingMarkColor(palette.sub, 0.45));
@@ -726,7 +743,9 @@ function renderMinimal(ctx: Ctx): number {
     const inner = WIDTH - pad * 2;
     let y = pad + 24;
 
+    y += ctx.padTop;
     y = drawQuote(ctx, pad, y, inner, 28, 66, palette.ink);
+    y += ctx.fillGap;
     if (input.annotations.length > 0) {
         y += 36;
         y = drawAnnotations(ctx, pad, y, inner, "plain");
@@ -757,7 +776,7 @@ function renderCollage(ctx: Ctx): number {
     const blockLeft = 156;
     const blockWidth = WIDTH - blockLeft;
     const quotePad = 54;
-    const blockTop = 122;
+    const blockTop = 122 + ctx.padTop;
 
     const collageType = scaleType(ctx, 26, 54);
     pen.font(collageType.size, ctx.fonts.body);
@@ -776,7 +795,7 @@ function renderCollage(ctx: Ctx): number {
 
     let y = blockTop + quotePad;
     drawLines(ctx, lines, blockLeft + quotePad, y, quoteWidth, collageType.size, lineHeight, palette.ink);
-    y = blockTop + blockHeight + 52;
+    y = blockTop + blockHeight + 52 + ctx.fillGap;
 
     if (input.annotations.length > 0) {
         y = drawAnnotations({ ...ctx, align: "left" }, pad, y, WIDTH - pad * 2, "rule");
@@ -805,6 +824,7 @@ function renderLetter(ctx: Ctx): number {
     pen.text(truncateToWidth(pen, metaLine(input), inner), pad, y + 20, palette.sub);
     y += 54;
 
+    y += ctx.padTop;
     pen.font(letterType.size, ctx.fonts.body);
     const lines: string[] = [];
     const paragraphs = input.quoteParagraphs.map(p => p.trim()).filter(Boolean);
@@ -818,6 +838,8 @@ function renderLetter(ctx: Ctx): number {
         if (line) pen.text(line, letterSpot.x, y + letterType.size + 8, palette.ink, letterSpot.textAlign);
         y += ruleGap;
     }
+
+    y += ctx.fillGap;
 
     if (input.annotations.length > 0) {
         y += 38;
@@ -848,7 +870,9 @@ function renderSticky(ctx: Ctx): number {
     }
 
     let y = paperTop + pad;
+    y += ctx.padTop;
     y = drawQuote(ctx, paperX + pad, y, inner, 26, 54, palette.ink);
+    y += ctx.fillGap;
 
     // 批注做成贴上去的便签，用的就是阅读界面里那两张卡片的颜色
     if (input.annotations.length > 0) {
@@ -933,7 +957,9 @@ function renderNotecard(ctx: Ctx): number {
     );
     y += 96;
 
-    y = drawQuote(ctx, pad, y, inner, 38, 68, palette.ink);
+    y += ctx.padTop;
+    y = drawQuote(ctx, pad, y, inner, 44, 78, palette.ink);
+    y += ctx.fillGap;
 
     if (input.annotations.length > 0) {
         y += 34;
@@ -971,7 +997,9 @@ function renderQuotemark(ctx: Ctx): number {
     pen.text("\u201C", pad - 10, pad + 210, readingMarkColor(palette.accent, isDarkColor(palette.background) ? 0.28 : 0.2));
 
     let y = pad + 120;
-    y = drawQuote(ctx, pad, y, inner, 39, 70, palette.ink);
+    y += ctx.padTop;
+    y = drawQuote(ctx, pad, y, inner, 45, 80, palette.ink);
+    y += ctx.fillGap;
 
     if (input.annotations.length > 0) {
         y += 36;
@@ -1018,7 +1046,9 @@ function renderCoverband(ctx: Ctx): number {
     );
 
     let y = bandHeight + 62;
-    y = drawQuote(ctx, pad, y, inner, 38, 68, palette.ink);
+    y += ctx.padTop;
+    y = drawQuote(ctx, pad, y, inner, 44, 78, palette.ink);
+    y += ctx.fillGap;
 
     if (input.annotations.length > 0) {
         y += 34;
@@ -1046,7 +1076,9 @@ function renderCentered(ctx: Ctx): number {
     pen.text("\u2726", WIDTH / 2, y + 22, palette.accent, "center");
     y += 76;
 
-    y = drawQuote(ctx, pad, y, inner, 37, 72, palette.ink);
+    y += ctx.padTop;
+    y = drawQuote(ctx, pad, y, inner, 43, 82, palette.ink);
+    y += ctx.fillGap;
 
     if (input.annotations.length > 0) {
         y += 40;
@@ -1109,34 +1141,41 @@ export function renderReadingShareCard(input: ReadingShareCardInput): HTMLCanvas
 
     const render = RENDERERS[input.template];
     const base = { input, palette, align, avatarShape, fonts: input.fonts };
-    const measure = (typeScale: number, extraLead: number) =>
-        Math.round(render({ ...base, totalHeight: 0, typeScale, extraLead, pen: new Pen(measureCtx, true) }));
+    const measure = (typeScale: number, padTop: number, fillGap: number) =>
+        Math.round(render({ ...base, totalHeight: 0, typeScale, padTop, fillGap, pen: new Pen(measureCtx, true) }));
 
-    // 固定比例不是把自适应那张裁一刀，而是重新排：先缩放正文和批注的字号，
-    // 让版面正好落进目标高度；缩放只能按行跳，剩下不足一行的空隙再摊进行距。
+    // 固定比例不是把自适应那张拉长或裁一刀，而是各自有一套版面：
+    //   1) 这个比例的设计字号先定下来（9:16 满屏看，字略大）
+    //   2) 排不下才按比例缩小字号，最多缩到设计值的 MIN_FIT_RATIO
+    //   3) 排不满剩下的高度，整块变成正文和页脚之间的一段留白
+    // 余量绝不进行距——行距一松，整张图就散了。
     const target = RATIO_HEIGHT[input.ratio || "auto"];
-    let typeScale = 1;
-    let extraLead = 0;
+    const designScale = RATIO_TYPE_SCALE[input.ratio || "auto"];
+    let typeScale = designScale;
+    let padTop = 0;
+    let fillGap = 0;
     if (target) {
-        let lo = MIN_TYPE_SCALE;
-        let hi = MAX_TYPE_SCALE;
-        for (let i = 0; i < 18; i += 1) {
+        // 在[缩到最小, 放大封顶]之间二分，取放得下的最大字号
+        let lo = designScale * MIN_FIT_RATIO;
+        let hi = designScale * MAX_GROW_RATIO;
+        for (let i = 0; i < 20; i += 1) {
             const mid = (lo + hi) / 2;
-            if (measure(mid, 0) <= target) lo = mid;
+            if (measure(mid, 0, 0) <= target) lo = mid;
             else hi = mid;
         }
         typeScale = lo;
-        let leadLo = 0;
-        let leadHi = MAX_EXTRA_LEAD;
-        for (let i = 0; i < 16; i += 1) {
-            const mid = (leadLo + leadHi) / 2;
-            if (measure(typeScale, mid) <= target) leadLo = mid;
-            else leadHi = mid;
+        // 视觉重心略高于正中，所以上面给得比下面少一点
+        const slack = target - measure(typeScale, 0, 0);
+        if (slack > 0) {
+            padTop = Math.round(slack * 0.42);
+            fillGap = slack - padTop;
         }
-        extraLead = Math.floor(leadLo);
     }
 
-    const height = target ?? Math.max(420, measure(typeScale, extraLead));
+    // 摘抄太长、缩到最小也塞不进目标比例时，宁可让图变高也不裁掉正文——
+    // 裁掉是看不见的损失，变高用户一眼就能发现。
+    const natural = Math.max(420, measure(typeScale, padTop, fillGap));
+    const height = target && natural <= target ? target : natural;
 
     // 版面按 1080 宽来算，真正的画布放大 SCALE 倍再画：手机屏幕是 3 倍像素密度，
     // 1080 的图铺满屏幕会被拉伸，存下来看就是糊的。
@@ -1149,7 +1188,7 @@ export function renderReadingShareCard(input: ReadingShareCardInput): HTMLCanvas
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = palette.background;
     ctx.fillRect(0, 0, WIDTH, height);
-    render({ ...base, totalHeight: height, typeScale, extraLead, pen: new Pen(ctx, false) });
+    render({ ...base, totalHeight: height, typeScale, padTop, fillGap, pen: new Pen(ctx, false) });
     return canvas;
 }
 
