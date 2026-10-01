@@ -1,7 +1,7 @@
 // lib/reading-storage.ts — Dexie IndexedDB persistence for Reading feature.
 
 import Dexie from "dexie";
-import type { Book, BookChapter, ReadingProgress, ReadingAnnotation } from "./reading-types";
+import type { Book, BookChapter, ReadingAnnotation, ReadingBookmark, ReadingProgress } from "./reading-types";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { DEFAULT_READING_BILINGUAL_PROMPT } from "./bilingual-prompt-defaults";
 import { DEFAULT_READING_ANNOTATION_GUIDANCE, DEFAULT_READING_SUMMARY_PROMPT } from "./reading-prompt-defaults";
@@ -14,6 +14,7 @@ class ReadingDB extends Dexie {
     progress!: Dexie.Table<ReadingProgress, string>;
     annotations!: Dexie.Table<ReadingAnnotation, string>;
     rawFiles!: Dexie.Table<{ bookId: string; data: Blob }, string>;
+    bookmarks!: Dexie.Table<ReadingBookmark, string>;
 
     constructor() {
         super("reading-db");
@@ -35,6 +36,14 @@ class ReadingDB extends Dexie {
             progress: "bookId",
             annotations: "id, [bookId+chapterIndex]",
             rawFiles: "bookId",
+        });
+        this.version(4).stores({
+            books: "id, createdAt",
+            chapters: "id, bookId, [bookId+index]",
+            progress: "bookId",
+            annotations: "id, [bookId+chapterIndex]",
+            rawFiles: "bookId",
+            bookmarks: "id, bookId",
         });
     }
 }
@@ -377,4 +386,24 @@ export async function loadRawFileBlob(bookId: string): Promise<Blob | null> {
     } catch {
         return null;
     }
+}
+
+// ── 书签 ──────────────────────────────────────────────
+
+export async function loadBookmarks(bookId: string): Promise<ReadingBookmark[]> {
+    const list = await db.bookmarks.where("bookId").equals(bookId).toArray();
+    // 按书里的先后排，不是按加的时间：列表要跟着书走才找得到
+    return list.sort((a, b) => a.chapterIndex - b.chapterIndex || a.fraction - b.fraction);
+}
+
+export async function saveBookmark(bookmark: ReadingBookmark): Promise<void> {
+    await db.bookmarks.put(bookmark);
+}
+
+export async function deleteBookmark(bookmarkId: string): Promise<void> {
+    await db.bookmarks.delete(bookmarkId);
+}
+
+export async function deleteBookmarksByBook(bookId: string): Promise<void> {
+    await db.bookmarks.where("bookId").equals(bookId).delete();
 }

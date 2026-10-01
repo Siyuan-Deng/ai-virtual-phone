@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { ChevronLeft, Palette, Pin, Settings, UserRound } from "lucide-react";
-import { loadBooks, addBook, updateBook, deleteBook, saveChapters, loadProgress, saveRawFile, countAnnotationsByBook } from "@/lib/reading-storage";
+import { loadBooks, addBook, updateBook, deleteBook, deleteBookmarksByBook, saveChapters, loadProgress, saveRawFile, countAnnotationsByBook } from "@/lib/reading-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import { deleteReadingAssetsByPrefix, loadReadingCover, saveReadingAsset, saveReadingCover } from "@/lib/reading-appearance";
 import { readingImageAssetKey, readingImageAssetPrefix } from "@/lib/reading-inline-image";
@@ -564,6 +564,7 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
     const handleDelete = async (bookId: string) => {
         if (!confirm("确定删除这本书吗？")) return;
         await deleteBook(bookId);
+        await deleteBookmarksByBook(bookId).catch(() => {});
         await saveReadingCover(bookId, null).catch(() => {});
         await deleteReadingAssetsByPrefix(readingImageAssetPrefix(bookId)).catch(() => {});
         setBooks(loadBooks());

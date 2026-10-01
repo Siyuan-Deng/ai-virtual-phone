@@ -4062,6 +4062,107 @@
   position: relative;
   z-index: 1;
 }
+
+/* ── 书签图标：一条缎带，纯 CSS 画 ──
+   描边版用一个「环形」polygon：先顺着外轮廓走一圈，再反向走一圈内轮廓，
+   中间就被挖空了。好处是不用拿背景色去填挖空处——阅读界面背后可能是
+   用户自己的背景图，任何写死的填充色都会露馅。 */
+.reading-bookmark-icon {
+  display: block;
+  width: 13px;
+  height: 17px;
+  background: currentColor;
+  clip-path: polygon(
+    0 0, 13px 0, 13px 17px, 6.5px 11.9px, 0 17px, 0 0,
+    1.7px 1.7px,
+    1.7px 13.6px, 6.5px 9.8px, 11.3px 13.6px, 11.3px 1.7px, 1.7px 1.7px,
+    0 0
+  );
+}
+
+/* 已加书签：同一条缎带，填实 */
+.reading-bookmark-icon[data-on] {
+  clip-path: polygon(0 0, 13px 0, 13px 17px, 6.5px 11.9px, 0 17px);
+}
+
+/* ── 书签列表 ── */
+.reading-bookmark-empty {
+  margin: 0;
+  font-size: calc(11.5px*var(--app-text-scale,1));
+  color: var(--c-text);
+  line-height: 1.6;
+}
+
+.reading-bookmark-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.reading-bookmark-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.reading-bookmark-jump {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 8px;
+  border: 0;
+  background: none;
+  border-radius: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reading-bookmark-jump:active {
+  background: var(--c-page-body-bg);
+}
+
+.reading-bookmark-where {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: calc(12.6px*var(--app-text-scale,1));
+  color: var(--c-text-title);
+}
+
+.reading-bookmark-at {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: calc(10.4px*var(--app-text-scale,1));
+  color: var(--c-icon);
+  font-variant-numeric: tabular-nums;
+}
+
+.reading-bookmark-excerpt {
+  font-size: calc(11px*var(--app-text-scale,1));
+  color: var(--c-text);
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reading-bookmark-remove {
+  flex-shrink: 0;
+  width: 34px;
+  border: 0;
+  background: none;
+  color: var(--c-icon);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.reading-bookmark-remove:active {
+  background: var(--c-page-body-bg);
+}
 /* ── Immersive mode ── */
 .reading-header--immersive {
   border-bottom-color: transparent;

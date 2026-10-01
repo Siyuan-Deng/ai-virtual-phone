@@ -43,6 +43,21 @@ export type ReadingProgress = {
     lastReadAt: string;
 };
 
+/** 一个书签 = 书 + 章 + 章节内位置。位置统一用 0-1 的比例存，
+ *  翻页模式和滚动模式都能还原；PDF 另外记页码。 */
+export type ReadingBookmark = {
+    id: string;
+    bookId: string;
+    chapterIndex: number;
+    /** 存一份加书签时的章节名，章节重建后列表也还认得出 */
+    chapterTitle: string;
+    fraction: number;
+    pdfPage?: number;
+    /** 当前位置开头的一小段正文，列表里靠它认出是哪儿 */
+    excerpt: string;
+    createdAt: string;
+};
+
 export type ReadingAnnotation = {
     id: string;
     bookId: string;

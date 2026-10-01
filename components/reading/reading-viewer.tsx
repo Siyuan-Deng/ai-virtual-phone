@@ -15,6 +15,9 @@ import {
     updateBook,
     loadReadingInteractionConfig,
     saveReadingInteractionConfig,
+    loadBookmarks,
+    saveBookmark,
+    deleteBookmark,
     DEFAULT_READING_INTERACTION_CONFIG,
 } from "@/lib/reading-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
@@ -29,7 +32,7 @@ import {
 import { annotationExportFileName, buildAnnotationMarkdown } from "@/lib/reading-export";
 import { downloadFile } from "@/lib/download-utils";
 import { collectSelectionSegments, type ReadingSelectionSegment } from "./reading-selection";
-import { isUserAnnotation, type ReadingMark, type ReadingMarkStyle } from "@/lib/reading-types";
+import { isUserAnnotation, type ReadingBookmark, type ReadingMark, type ReadingMarkStyle } from "@/lib/reading-types";
 import { generateAnnotationBatch, generateReadingChat, parseReadingDiscussResponse, summarizeReadingRange, type ReadingDiscussAction, type ReadingDiscussContext } from "@/lib/reading-engine";
 import { loadChatMessages, pushChatMessage, deleteChatMessage, editChatMessage, loadChatContacts, createOrGetSession, isReadingDiscussMessage } from "@/lib/chat-storage";
 import type { ChatMessage, ChatSession } from "@/lib/chat-storage";
@@ -367,6 +370,8 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         pdfPreloadEnabled: readingConfig.pdfPreloadEnabled !== false,
     }));
     const [showNavigationDialog, setShowNavigationDialog] = useState(false);
+    const [bookmarks, setBookmarks] = useState<ReadingBookmark[]>([]);
+    const [showBookmarks, setShowBookmarks] = useState(false);
     const [pdfJumpPage, setPdfJumpPage] = useState<number | undefined>(undefined);
     /** PDF 手动预批注对话框：自定义起始页/结束页，确认后立即预解析并预生成该范围批注 */
     const [pdfPrefetchDialogOpen, setPdfPrefetchDialogOpen] = useState(false);
@@ -1057,6 +1062,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                 setCompanionId(enrichedContacts[0].characterId);
             }
             if (!progress && !isPdf) setTxtPage(0);
+            setBookmarks(await loadBookmarks(book.id).catch(() => []));
             setChaptersLoaded(true);
         })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1780,6 +1786,86 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         pendingScrollFractionRef.current = startFromEnd ? 1 : 0;
         setChapterIndex(idx);
         setTxtPage(0);
+    };
+
+    // ── 书签 ──
+    // 位置统一折成章节内 0-1 的比例：翻页/滚动/PDF 三种模式都能用同一个数还原。
+    const currentFraction = (): number => {
+        if (isPdf) return pdfTotalPages > 0 ? Math.min(1, Math.max(0, pdfCurrentPage / pdfTotalPages)) : 0;
+        if (isScrollMode) return Math.max(0, Math.min(1, scrollFraction));
+        return txtTotalPages > 1 ? txtPage / (txtTotalPages - 1) : 0;
+    };
+
+    /** 当前位置附近的一句正文，列表里靠它认出是哪儿 */
+    const bookmarkExcerpt = (chapterIdx: number, fraction: number): string => {
+        const paragraphs = (chapters[chapterIdx]?.paragraphs || []).filter((text) => text.trim());
+        if (paragraphs.length === 0) return "";
+        const index = Math.min(paragraphs.length - 1, Math.floor(fraction * paragraphs.length));
+        return paragraphs[index].trim().replace(/\s+/g, " ").slice(0, 40);
+    };
+
+    /** 同一页上已经有书签就算「这里有」，再点一下是取消 */
+    const bookmarkHere = (): ReadingBookmark | undefined => {
+        const fraction = currentFraction();
+        return bookmarks.find((item) => {
+            if (item.chapterIndex !== chapterIndex) return false;
+            if (isPdf) return item.pdfPage === pdfCurrentPage;
+            // 一页的宽度就是容差：翻页模式按页算，滚动模式给 2%
+            const tolerance = isScrollMode ? 0.02 : 1 / Math.max(1, txtTotalPages) / 2;
+            return Math.abs(item.fraction - fraction) <= tolerance;
+        });
+    };
+
+    const toggleBookmark = async () => {
+        const existing = bookmarkHere();
+        if (existing) {
+            await deleteBookmark(existing.id);
+            setBookmarks(await loadBookmarks(book.id));
+            return;
+        }
+        const fraction = currentFraction();
+        const bookmark: ReadingBookmark = {
+            id: `bm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+            bookId: book.id,
+            chapterIndex,
+            chapterTitle: chapters[chapterIndex]?.title || `第${chapterIndex + 1}章`,
+            fraction,
+            pdfPage: isPdf ? pdfCurrentPage : undefined,
+            excerpt: bookmarkExcerpt(chapterIndex, fraction),
+            createdAt: new Date().toISOString(),
+        };
+        await saveBookmark(bookmark);
+        setBookmarks(await loadBookmarks(book.id));
+    };
+
+    const jumpToBookmark = (bookmark: ReadingBookmark) => {
+        setShowBookmarks(false);
+        setShowReadingSettings(false);
+        if (isPdf) {
+            setChapterIndex(Math.min(Math.max(0, bookmark.chapterIndex), Math.max(0, chapters.length - 1)));
+            setPdfJumpPage(Math.max(1, bookmark.pdfPage || 1));
+            return;
+        }
+        const target = Math.min(Math.max(0, bookmark.chapterIndex), Math.max(0, chapters.length - 1));
+        const fraction = Math.max(0, Math.min(1, bookmark.fraction));
+        if (target === chapterIndex) {
+            // 同章内：直接定位，不走换章那条路（换章会重置到章首）
+            if (isScrollMode) scrollToChapterFraction(fraction, chapterIndex);
+            else {
+                pendingTxtPageFractionRef.current = null;
+                setTxtPage(Math.round(fraction * Math.max(0, txtTotalPages - 1)));
+            }
+            return;
+        }
+        pendingTxtPageFractionRef.current = fraction;
+        pendingScrollFractionRef.current = fraction;
+        setChapterIndex(target);
+        setTxtPage(0);
+    };
+
+    const removeBookmark = async (bookmarkId: string) => {
+        await deleteBookmark(bookmarkId);
+        setBookmarks(await loadBookmarks(book.id));
     };
 
     const buildDiscussContext = useCallback((sourceChapters: BookChapter[] = chapters): ReadingDiscussContext | null => {
@@ -2738,6 +2824,15 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                         <button
                             type="button"
                             className="page-back-btn"
+                            onClick={() => { void toggleBookmark(); }}
+                            aria-label={bookmarkHere() ? "取消书签" : "加书签"}
+                            aria-pressed={Boolean(bookmarkHere())}
+                        >
+                            <span className="reading-bookmark-icon" data-on={bookmarkHere() ? "" : undefined} aria-hidden="true" />
+                        </button>
+                        <button
+                            type="button"
+                            className="page-back-btn"
                             onClick={openNavigationDialog}
                             aria-label="目录"
                         >
@@ -3674,6 +3769,13 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                         <button
                             type="button"
                             className="ui-btn ui-btn-outline"
+                            onClick={() => setShowBookmarks(true)}
+                        >
+                            书签{bookmarks.length > 0 ? `（${bookmarks.length}）` : ""}
+                        </button>
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
                             onClick={() => { void exportAnnotations(); }}
                         >
                             导出全书批注（Markdown）
@@ -3767,6 +3869,50 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                     </div>
                 </ContentDialog>
             )}
+            {showBookmarks && (
+                <ContentDialog
+                    title="书签"
+                    confirmLabel=""
+                    cancelLabel="关闭"
+                    onConfirm={() => setShowBookmarks(false)}
+                    onCancel={() => setShowBookmarks(false)}
+                >
+                    {bookmarks.length === 0 ? (
+                        <p className="reading-bookmark-empty">还没有书签。读到想记住的地方，点右上角的书签图标。</p>
+                    ) : (
+                        <div className="reading-bookmark-list">
+                            {bookmarks.map((bookmark) => (
+                                <div key={bookmark.id} className="reading-bookmark-row">
+                                    <button
+                                        type="button"
+                                        className="reading-bookmark-jump"
+                                        onClick={() => jumpToBookmark(bookmark)}
+                                    >
+                                        <span className="reading-bookmark-where">
+                                            {bookmark.chapterTitle}
+                                            <span className="reading-bookmark-at">
+                                                {bookmark.pdfPage ? `第${bookmark.pdfPage}页` : `${Math.round(bookmark.fraction * 100)}%`}
+                                            </span>
+                                        </span>
+                                        {bookmark.excerpt && (
+                                            <span className="reading-bookmark-excerpt">{bookmark.excerpt}</span>
+                                        )}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="reading-bookmark-remove"
+                                        onClick={() => { void removeBookmark(bookmark.id); }}
+                                        aria-label={`删除书签 ${bookmark.chapterTitle}`}
+                                    >
+                                        <X size={15} strokeWidth={2} />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </ContentDialog>
+            )}
+
             {showNavigationDialog && (
                 <>
                     <div className="reading-nav-backdrop" onClick={() => setShowNavigationDialog(false)} />
