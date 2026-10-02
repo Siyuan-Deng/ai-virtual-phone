@@ -47,6 +47,12 @@ import {
 import { CalendarMonthPage } from "./calendar/month-page";
 import { CalendarDetailPage } from "./calendar/detail-page";
 import { CalendarEventEditModal, type CalendarEventDraft } from "./calendar/event-edit-modal";
+import {
+  loadCalendarExtras,
+  normalizeCalendarTodos,
+  updateCalendarExtras,
+  type CalendarEventDetails,
+} from "@/lib/calendar-extras";
 
 type OwnerOption = {
   key: string;
@@ -293,6 +299,7 @@ export function PhoneCalendarApp({
   };
 
   const openEditItem = (item: CalendarScheduleItem) => {
+    const details = loadCalendarExtras().eventDetails[item.id];
     setEditingItem({
       id: item.id,
       date: item.date,
@@ -304,7 +311,37 @@ export function PhoneCalendarApp({
       title: item.title,
       emoji: item.emoji || "",
       colorKey: item.colorKey,
+      allDay: details?.allDay === true,
+      note: details?.note || "",
+      todos: details?.todos ? details.todos.map((todo) => ({ ...todo })) : [],
     });
+  };
+
+  /** 日程的附加信息跟着条目 id 走。多天日程每天一条，各存一份拷贝。 */
+  const writeEventDetails = (itemIds: string[], draft: CalendarEventDraft) => {
+    const todos = normalizeCalendarTodos(draft.todos);
+    const note = (draft.note || "").trim();
+    const allDay = draft.allDay === true;
+    const extras = loadCalendarExtras();
+    const eventDetails = { ...extras.eventDetails };
+    const now = new Date().toISOString();
+    for (const id of itemIds) {
+      if (!note && !allDay && todos.length === 0) {
+        // 三样都空就不留记录，免得附加信息表里堆满空壳
+        delete eventDetails[id];
+        continue;
+      }
+      const details: CalendarEventDetails = {
+        note,
+        allDay,
+        // 每天各自一份：勾完第一天的待办不该把第二天的也勾上
+        todos: todos.map((todo) => ({ ...todo, id: `${id}_${todo.id}` })),
+        seriesId: eventDetails[id]?.seriesId ?? null,
+        updatedAt: now,
+      };
+      eventDetails[id] = details;
+    }
+    updateCalendarExtras({ eventDetails });
   };
 
   const handleSaveDraft = () => {
@@ -334,12 +371,18 @@ export function PhoneCalendarApp({
       }
     }
     // 多天：第一天沿用原 id（编辑场景），其余每天各生成一条独立日程
+    const savedIds: string[] = [];
     for (let offset = 0; offset < dayCount; offset++) {
       const day = parseIsoDate(startDate);
       day.setDate(day.getDate() + offset);
       const dayIso = formatIsoDate(day);
+      // id 在这里就定下来，附加信息才知道挂到哪条上
+      const itemId = (offset === 0 && editingItem.id)
+        ? editingItem.id
+        : `calendar_item_${Date.now()}_${offset}_${Math.random().toString(36).slice(2, 8)}`;
+      savedIds.push(itemId);
       upsertCalendarScheduleItem(selectedOwner.ownerType, selectedOwner.ownerId, getWeekStartIso(parseIsoDate(dayIso)), {
-        id: offset === 0 ? editingItem.id : undefined,
+        id: itemId,
         date: dayIso,
         startTime: editingItem.startTime,
         endTime: editingItem.endTime,
@@ -350,6 +393,7 @@ export function PhoneCalendarApp({
         colorKey: editingItem.colorKey ?? pickScheduleColorKey(editingItem.startTime),
       });
     }
+    writeEventDetails(savedIds, editingItem);
     setEditingItem(null);
     refreshPlans();
     onNotice?.(dayCount > 1 ? `已创建 ${dayCount} 天的日程` : "日程已保存");
@@ -359,6 +403,13 @@ export function PhoneCalendarApp({
     if (!selectedOwner || !editingItem?.id) return;
     const targetWeekStart = getWeekStartIso(parseIsoDate(editingItem.originalDate || editingItem.date));
     deleteCalendarScheduleItem(selectedOwner.ownerType, selectedOwner.ownerId, targetWeekStart, editingItem.id);
+    // 附加信息跟着条目走，条目没了它也得走，否则表里会攒一堆孤儿
+    const extras = loadCalendarExtras();
+    if (extras.eventDetails[editingItem.id]) {
+      const eventDetails = { ...extras.eventDetails };
+      delete eventDetails[editingItem.id];
+      updateCalendarExtras({ eventDetails });
+    }
     setEditingItem(null);
     refreshPlans();
     onNotice?.("日程已删除");

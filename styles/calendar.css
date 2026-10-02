@@ -1533,3 +1533,89 @@
     animation: none !important;
   }
 }
+
+/* ── 日程附加信息：全天 / 备注 / 待办 ── */
+.calendar-all-day-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px;
+}
+
+.calendar-edit-modal [data-disabled] {
+  opacity: 0.45;
+}
+
+.calendar-note-input {
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.55;
+  padding: 10px 12px;
+}
+
+.calendar-todo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.calendar-todo-add,
+.calendar-todo-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--c-icon);
+  cursor: pointer;
+}
+
+.calendar-todo-add:active,
+.calendar-todo-remove:active {
+  background: var(--c-page-body-bg);
+}
+
+.calendar-todo-empty {
+  padding: 4px 0 2px;
+}
+
+.calendar-todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.calendar-todo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.calendar-todo-row .ui-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.calendar-todo-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1.5px solid var(--c-icon);
+  border-radius: 6px;
+  background: none;
+  color: #fff;
+  cursor: pointer;
+}
+
+.calendar-todo-check[data-done] {
+  background: var(--c-icon-active, #4a7cf0);
+  border-color: var(--c-icon-active, #4a7cf0);
+}
