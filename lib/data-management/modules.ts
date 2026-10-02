@@ -246,6 +246,7 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
         keys: [
           "ai_phone_calendar_plans_v1",
           "ai_phone_calendar_config_v1",
+          "ai_phone_calendar_extras_v1",
           "ai_phone_diary_entries_v1",
           "ai_phone_diary_entry_timer_settings_v1",
           "ai_phone_diary_entry_font_asset_v1",

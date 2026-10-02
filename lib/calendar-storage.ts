@@ -171,6 +171,21 @@ export function replaceCalendarWeekItems(
   return saveCalendarWeekPlan(plan);
 }
 
+/** 原样读某个 owner 的周计划：不按时间合法性过滤条目，也不重排。
+ *  给「读出来 → 改一改 → 整份写回去」这种流程用：loadOwnerCalendarPlans 会
+ *  滤掉 start >= end 的条目（那是界面不渲染它们的原因），整份回写时这些条目
+ *  就被顺手删了。读写要对称，才不会悄悄吃掉数据。 */
+export function loadOwnerCalendarPlansRaw(
+  ownerType: CalendarOwnerType,
+  ownerId: string,
+): CalendarWeekPlan[] {
+  const store = loadStore();
+  return store.plans
+    .filter(entry => entry.ownerType === ownerType && entry.ownerId === ownerId)
+    .map(entry => ({ ...entry, items: [...(entry.items || [])] }))
+    .sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+}
+
 /** 一次性把某个 owner 的全部周计划换掉（其它 owner 原样保留）。
  *  按周逐次写会产生中间态：中间任何一步失败，日历就停在半改完的样子，
  *  而且每写一周都会触发一次界面重绘。整份一次落盘就没有这个问题。 */
@@ -189,6 +204,7 @@ export function replaceOwnerCalendarPlans(
       ownerType,
       ownerId,
       updatedAt: now,
+      // 只补缺省字段，不丢条目：调用方传什么就落什么
       items: sortScheduleItems((plan.items || []).map(item => ({
         ...item,
         weekday: item.weekday || getWeekdayLabel(item.date),

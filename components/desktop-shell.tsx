@@ -45,6 +45,7 @@ import { AppMarketApp } from "@/components/app-market/app-market-app";
 import { CustomAppRunner } from "@/components/app-market/custom-app-runner";
 import { CustomAppForegroundBoundary } from "@/components/app-market/custom-app-failure";
 import { hydrateKvDb, kvGet, kvSet, kvRemove, kvKeysWithPrefix } from "@/lib/kv-db";
+import { migrateCalendarExtrasFromPlugin } from "@/lib/calendar-extras";
 import { deleteDatabase } from "@/lib/data-management/idb";
 import { hydrateStoryStorage } from "@/lib/story-storage";
 import { hydrateMomentsStorage } from "@/lib/moments-storage";
@@ -1793,6 +1794,21 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       // 全局绑定「所见即所得」归一化：API/预设/身份未设置或悬空时落位为实际兜底值，
       // 绑定界面显示的即实际生效的，消灭静默兜底
       ensureGlobalBindingDefaults();
+
+      // 日历增强数据从插件搬进原生存储。只读不删——插件那份原样留着，
+      // 用户确认原生这边都在之后再自己卸载插件（卸载会清掉插件私有数据）。
+      // 搬过一次就不再搬，所以每次启动都调用是安全的。
+      try {
+        const migration = migrateCalendarExtrasFromPlugin();
+        if (migration.status === "migrated") {
+          console.info(
+            `[Calendar] 已从 ${migration.from} 搬入日历增强数据：`
+            + `${migration.events} 条日程附加信息、${migration.series} 个重复系列、${migration.memos} 页备忘录`,
+          );
+        }
+      } catch (err) {
+        console.warn("[Calendar] 日历增强数据迁移失败:", err);
+      }
 
       // One-time cleanup of the orphaned folder-backup handle DB. The removed
       // auto-backup feature opened (and thus created) AiPhoneBackupHandleDB on
