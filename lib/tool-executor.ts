@@ -1994,7 +1994,17 @@ function executeCalendarUpdateTool(args: Record<string, unknown>, characterId: s
     const found = findCalendarItemByArgs(args, "character", characterId);
     if (!found) return calendarToolFailure("修改日程", "未找到匹配的日程", "未找到要修改的日程");
 
-    const parsed = parseCalendarDraft(args);
+    // 只改模型给出的字段，其余沿用原日程——模型常常只传要改的那一两项（比如只改时间），
+    // 以前四项全必填，少一项就整条失败
+    const parsed = parseCalendarDraft({
+        date: found.item.date,
+        startTime: found.item.startTime,
+        endTime: found.item.endTime,
+        title: found.item.title,
+        location: found.item.location,
+        emoji: found.item.emoji,
+        ...pickProvidedCalendarArgs(args),
+    });
     if (!parsed.ok) return calendarToolFailure("修改日程", parsed.error, parsed.notice);
 
     const nextWeekStart = getWeekStartIso(parseIsoDate(parsed.item.date));
@@ -2033,6 +2043,24 @@ function executeCalendarDeleteTool(args: Record<string, unknown>, characterId: s
     };
 }
 
+/** 模型这次真的给了值的字段（空字符串、null 不算），别名统一成标准字段名 */
+function pickProvidedCalendarArgs(args: Record<string, unknown>): Record<string, unknown> {
+    const aliases: Record<string, unknown[]> = {
+        date: [args.date],
+        startTime: [args.startTime, args.start_time, args.start],
+        endTime: [args.endTime, args.end_time, args.end],
+        title: [args.title, args.task, args.content],
+        location: [args.location, args.place],
+        emoji: [args.emoji, args.icon],
+    };
+    const picked: Record<string, unknown> = {};
+    for (const [key, values] of Object.entries(aliases)) {
+        const value = values.find(item => typeof item === "string" ? item.trim() !== "" : item !== undefined && item !== null);
+        if (value !== undefined) picked[key] = value;
+    }
+    return picked;
+}
+
 type CalendarDraftParseResult =
     | { ok: true; item: Omit<CalendarScheduleItem, "id" | "weekday" | "colorKey" | "createdAt" | "updatedAt"> }
     | { ok: false; error: string; notice: string };
@@ -2042,7 +2070,9 @@ function parseCalendarDraft(args: Record<string, unknown>): CalendarDraftParseRe
     if (!date) return { ok: false, error: "缺少有效日期，请使用 YYYY-MM-DD", notice: "日期格式无效" };
 
     const startTime = normalizeTime(cleanToolString(args.startTime ?? args.start_time ?? args.start, 16));
-    const endTime = normalizeTime(cleanToolString(args.endTime ?? args.end_time ?? args.end, 16));
+    let endTime = normalizeTime(cleanToolString(args.endTime ?? args.end_time ?? args.end, 16));
+    // 跨过零点的安排（23:00-01:00 这种）：日程不能跨天，停在当天 23:59，而不是整条报错
+    if (startTime && endTime && endTime < startTime && endTime <= "06:00" && startTime < "23:59") endTime = "23:59";
     if (!startTime || !endTime || !isCalendarTimeRangeAllowed(startTime, endTime)) {
         return { ok: false, error: "时间无效，需使用 HH:MM 且开始时间早于结束时间", notice: "日程时间无效" };
     }
@@ -2092,14 +2122,57 @@ function findCalendarItemByArgs(
         }
     }
 
-    if (!keyword) return null;
-    for (const weekStart of getCalendarSearchWeekStarts(date)) {
-        const plan = loadCalendarWeekPlan(ownerType, ownerId, weekStart);
-        if (!plan) continue;
-        const found = plan.items.find(item => calendarKeywordMatch(keyword, item.title, item.location));
-        if (found) return { weekStart, item: found };
+    const weeks = getCalendarSearchWeekStarts(date)
+        .map(weekStart => ({ weekStart, plan: loadCalendarWeekPlan(ownerType, ownerId, weekStart) }))
+        .filter((entry): entry is { weekStart: string; plan: NonNullable<ReturnType<typeof loadCalendarWeekPlan>> } => Boolean(entry.plan));
+
+    if (keyword) {
+        for (const { weekStart, plan } of weeks) {
+            const found = plan.items.find(item => calendarKeywordMatch(keyword, item.title, item.location));
+            if (found) return { weekStart, item: found };
+        }
+        // 关键词换了说法（「去图书馆学习」对「图书馆自习」）：挑字面最接近的一条，够像才算
+        let best: { weekStart: string; item: CalendarScheduleItem; score: number } | null = null;
+        for (const { weekStart, plan } of weeks) {
+            for (const item of plan.items) {
+                const score = calendarTextSimilarity(keyword, item.title);
+                if (score >= 0.5 && (!best || score > best.score)) best = { weekStart, item, score };
+            }
+        }
+        if (best) return { weekStart: best.weekStart, item: best.item };
+    }
+
+    // 没给 itemId、关键词也对不上，但说了日期而那天只有一条日程：就是它
+    if (date) {
+        const weekStart = getWeekStartIso(parseIsoDate(date));
+        const sameDay = weeks.find(entry => entry.weekStart === weekStart)?.plan.items.filter(item => item.date === date) ?? [];
+        if (sameDay.length === 1) return { weekStart, item: sameDay[0] };
     }
     return null;
+}
+
+/** 两段文字有多像（0-1）：取「用到的字」重合度和「相邻两字」重合度里高的那个。
+ *  中文换个说法常常字还是那几个字（「去图书馆学习」/「图书馆自习」），只看相邻两字会漏掉 */
+function calendarTextSimilarity(a: string, b: string): number {
+    const left = a.replace(/\s+/g, "");
+    const right = b.replace(/\s+/g, "");
+    if (!left || !right) return 0;
+    const dice = (x: string[], y: string[]) => {
+        if (x.length === 0 || y.length === 0) return 0;
+        const pool = [...y];
+        let shared = 0;
+        for (const item of x) {
+            const index = pool.indexOf(item);
+            if (index >= 0) {
+                shared += 1;
+                pool.splice(index, 1);
+            }
+        }
+        return (2 * shared) / (x.length + y.length);
+    };
+    const pairs = (text: string) => Array.from({ length: Math.max(0, text.length - 1) }, (_, index) => text.slice(index, index + 2));
+    const chars = (text: string) => Array.from(new Set(Array.from(text)));
+    return Math.max(dice(pairs(left), pairs(right)), dice(chars(left), chars(right)));
 }
 
 function getCalendarSearchWeekStarts(dateHint: string | null): string[] {
