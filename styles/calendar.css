@@ -2451,3 +2451,114 @@
   z-index: 100;
   background: var(--c-page-body-bg);
 }
+
+/* ── 编辑弹窗里插件加的那几栏（重复日程 / 备注 / 待办清单），尺寸照插件 .ucal-field ── */
+.calendar-plugin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.calendar-edit-modal .calendar-plugin-field .ui-input,
+.calendar-edit-modal .calendar-plugin-field .ui-textarea,
+.calendar-edit-modal .calendar-plugin-field .ui-select {
+  box-sizing: border-box;
+  border: 0;
+  background: var(--c-calendar-surface);
+  color: var(--c-calendar-ink);
+  border-radius: 10px;
+  font-family: inherit;
+}
+
+.calendar-weekday-picker {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.calendar-weekday-chip {
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 50%;
+  background: var(--c-calendar-surface);
+  color: var(--c-calendar-sub);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  padding: 0;
+  cursor: pointer;
+}
+
+.calendar-weekday-chip[data-active="true"] {
+  background: var(--c-calendar-sel-bg);
+  color: var(--c-calendar-sel-fg);
+}
+
+.calendar-weekday-chip:disabled,
+.calendar-month-last-button:disabled,
+.calendar-dt-toggle:disabled {
+  opacity: 0.68;
+  cursor: default;
+}
+
+.calendar-month-rule-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  gap: 8px;
+  align-items: center;
+}
+
+.calendar-month-rule-row .ui-input {
+  min-width: 0;
+}
+
+.calendar-month-rule-row .ui-input:disabled {
+  opacity: 1;
+  background: color-mix(in srgb, var(--c-calendar-faint) 12%, var(--c-calendar-surface));
+  color: var(--c-calendar-faint);
+  -webkit-text-fill-color: var(--c-calendar-faint);
+  cursor: not-allowed;
+}
+
+.calendar-month-rule-row .ui-input:disabled::placeholder {
+  color: var(--c-calendar-faint);
+  opacity: 1;
+}
+
+.calendar-month-last-button {
+  height: 100%;
+  min-height: 38px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--c-calendar-surface);
+  color: var(--c-calendar-sub);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.calendar-month-last-button[data-active="true"] {
+  background: var(--c-calendar-sel-bg);
+  color: var(--c-calendar-sel-fg);
+}
+
+/* 保存重复日程：仅修改这一次 / 修改整个重复日程 */
+.calendar-app-shell .caltool-series-save-intro {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--c-calendar-sub);
+}
+
+.calendar-app-shell .caltool-series-save-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.calendar-app-shell .caltool-series-save-option .caltool-clear-symbol {
+  background: var(--c-calendar-sheet);
+  color: var(--c-calendar-ink);
+}

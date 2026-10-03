@@ -58,7 +58,15 @@ import {
 } from "@/lib/calendar-extras";
 import { CalendarScheduleBanners, buildBannerGroups, memoColor } from "./calendar/schedule-banners";
 import {
+  clampInt,
+  createRecurringSeries,
+  ensureForeverSeries,
+  pruneEmptySeries,
+  updateEntireSeries,
+} from "@/lib/calendar-recurrence";
+import {
   CalendarConfirmSheet,
+  CalendarSeriesSaveChoice,
   CalendarToolModal,
   type CalendarConfirmRequest,
   type CalendarToolNav,
@@ -311,6 +319,12 @@ export function PhoneCalendarApp({
 
   useEffect(() => {
     setOwners(buildOwnerOptions());
+    // 「永远」的重复日程往后补（平时是空操作）
+    try {
+      ensureForeverSeries();
+    } catch (error) {
+      console.warn("[calendar] 补永久重复日程失败", error);
+    }
   }, []);
 
   const refreshPlans = () => {
@@ -370,7 +384,11 @@ export function PhoneCalendarApp({
   };
 
   const openEditItem = (item: CalendarScheduleItem) => {
-    const details = loadCalendarExtras().eventDetails[item.id];
+    const extras = loadCalendarExtras();
+    const details = extras.eventDetails[item.id];
+    // 重复系列里的一次：带上系列的规则，编辑框里锁住不让改（和插件一样）
+    const series = details?.seriesId ? extras.series[details.seriesId] : undefined;
+    const itemDate = parseIsoDate(item.date);
     setEditingItem({
       id: item.id,
       date: item.date,
@@ -385,6 +403,16 @@ export function PhoneCalendarApp({
       allDay: details?.allDay === true,
       note: details?.note || "",
       todos: details?.todos ? details.todos.map((todo) => ({ ...todo })) : [],
+      ...(series ? {
+        seriesId: series.id,
+        frequency: series.frequency,
+        forever: series.forever,
+        weekdays: series.weekdays?.length ? series.weekdays : [itemDate.getDay()],
+        monthDay: String(clampInt(series.monthDay, itemDate.getDate(), 1, 31)),
+        monthLastDay: series.monthLastDay === true,
+        // 结束日期那格这时是「重复结束日期」
+        endDate: series.untilDate || item.date,
+      } : {}),
     });
   };
 
@@ -397,16 +425,18 @@ export function PhoneCalendarApp({
     const eventDetails = { ...extras.eventDetails };
     const now = new Date().toISOString();
     for (const id of itemIds) {
-      if (!note && !allDay && todos.length === 0) {
-        // 三样都空就不留记录，免得附加信息表里堆满空壳
+      if (!note && !allDay && todos.length === 0 && !eventDetails[id]?.seriesId) {
+        // 三样都空就不留记录，免得附加信息表里堆满空壳；
+        // 重复系列里的条目例外，记录里的 seriesId 是它和系列的唯一联系
         delete eventDetails[id];
         continue;
       }
       const details: CalendarEventDetails = {
         note,
         allDay,
-        // 每天各自一份：勾完第一天的待办不该把第二天的也勾上
-        todos: todos.map((todo) => ({ ...todo, id: `${id}_${todo.id}` })),
+        // 每天各自一份：勾完第一天的待办不该把第二天的也勾上。
+        // 已经带着本条前缀的不再加，不然每编辑一次 id 就变一次，提醒去重全乱
+        todos: todos.map((todo) => ({ ...todo, id: todo.id.startsWith(`${id}_`) ? todo.id : `${id}_${todo.id}` })),
         seriesId: eventDetails[id]?.seriesId ?? null,
         updatedAt: now,
       };
@@ -415,6 +445,8 @@ export function PhoneCalendarApp({
     updateCalendarExtras({ eventDetails });
   };
 
+  const [askSeriesScope, setAskSeriesScope] = useState(false);
+
   const handleSaveDraft = () => {
     if (!selectedOwner || !editingItem) return;
     const error = validateScheduleDraft(editingItem);
@@ -422,8 +454,86 @@ export function PhoneCalendarApp({
       onNotice?.(error);
       return;
     }
+    if (selectedOwner.ownerType === "user") {
+      // 重复系列里的一次：先问改这一次还是整个系列
+      if (editingItem.seriesId && loadCalendarExtras().series[editingItem.seriesId]) {
+        setAskSeriesScope(true);
+        return;
+      }
+      if ((editingItem.frequency ?? "none") !== "none") {
+        saveAsSeries(editingItem);
+        return;
+      }
+    }
+    saveSingle(editingItem, false);
+  };
+
+  const seriesFields = (draft: CalendarEventDraft) => ({
+    startTime: draft.startTime,
+    endTime: draft.endTime,
+    location: draft.location,
+    title: draft.title,
+    emoji: sanitizeScheduleEmoji(draft.emoji),
+    colorKey: draft.colorKey,
+  });
+
+  const seriesDetails = (draft: CalendarEventDraft) => ({
+    note: draft.note || "",
+    allDay: draft.allDay === true,
+    todos: normalizeCalendarTodos(draft.todos),
+  });
+
+  const saveAsSeries = (draft: CalendarEventDraft) => {
+    const frequency = draft.frequency ?? "none";
+    if (frequency === "none") return;
+    const result = createRecurringSeries({
+      fields: seriesFields(draft),
+      details: seriesDetails(draft),
+      frequency,
+      rule: {
+        weekdays: [...(draft.weekdays ?? [parseIsoDate(draft.date).getDay()])].sort((a, b) => a - b),
+        monthDay: clampInt(draft.monthDay, parseIsoDate(draft.date).getDate(), 1, 31),
+        monthLastDay: draft.monthLastDay === true,
+      },
+      startDate: draft.date,
+      untilDate: draft.endDate || "",
+      forever: draft.forever === true,
+      // 已有的单次日程改成重复：它自己就是第一次
+      existingItemId: draft.id,
+    });
+    if (!result.ok) {
+      onNotice?.(result.error);
+      return;
+    }
+    setEditingItem(null);
+    refreshPlans();
+    onNotice?.(result.message);
+  };
+
+  const saveWholeSeries = (draft: CalendarEventDraft) => {
+    if (!draft.id || !draft.seriesId) return;
+    const result = updateEntireSeries({
+      seriesId: draft.seriesId,
+      currentItemId: draft.id,
+      fields: seriesFields(draft),
+      details: seriesDetails(draft),
+      untilDate: draft.endDate || "",
+    });
+    if (!result.ok) {
+      onNotice?.(result.error);
+      return;
+    }
+    setEditingItem(null);
+    refreshPlans();
+    onNotice?.(result.message);
+  };
+
+  /** 普通保存。singleDay：重复系列里「仅修改这一次」——结束日期那格是重复结束日期，不能当成多天 */
+  const saveSingle = (draft: CalendarEventDraft & { originalDate?: string }, singleDay: boolean) => {
+    if (!selectedOwner) return;
+    const editingItem = draft;
     const startDate = editingItem.date;
-    const endDate = editingItem.endDate || editingItem.date;
+    const endDate = singleDay ? startDate : (editingItem.endDate || editingItem.date);
     if (endDate < startDate) {
       onNotice?.("结束日期不能早于开始日期");
       return;
@@ -480,6 +590,8 @@ export function PhoneCalendarApp({
       const eventDetails = { ...extras.eventDetails };
       delete eventDetails[editingItem.id];
       updateCalendarExtras({ eventDetails });
+      // 重复系列删到一次不剩，规则也一起删
+      pruneEmptySeries();
     }
     setEditingItem(null);
     refreshPlans();
@@ -907,12 +1019,21 @@ export function PhoneCalendarApp({
       {editingItem && (
         <CalendarEventEditModal
           draft={editingItem}
+          withUserExtras={selectedOwner?.ownerType === "user"}
           onChange={next => setEditingItem(prev => (prev ? { ...prev, ...next } : next))}
           onSave={handleSaveDraft}
           onDelete={handleDeleteItem}
           onClose={() => setEditingItem(null)}
         />
       )}
+
+      {askSeriesScope && editingItem ? (
+        <CalendarSeriesSaveChoice
+          onCurrent={() => saveSingle(editingItem, true)}
+          onAll={() => saveWholeSeries(editingItem)}
+          close={() => setAskSeriesScope(false)}
+        />
+      ) : null}
 
       {showMenstrualSettings && (
         <div className="modal-overlay calendar-edit-modal-overlay" onClick={() => setShowMenstrualSettings(false)}>

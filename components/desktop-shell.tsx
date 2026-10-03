@@ -46,6 +46,7 @@ import { CustomAppRunner } from "@/components/app-market/custom-app-runner";
 import { CustomAppForegroundBoundary } from "@/components/app-market/custom-app-failure";
 import { hydrateKvDb, kvGet, kvSet, kvRemove, kvKeysWithPrefix } from "@/lib/kv-db";
 import { migrateCalendarExtrasFromPlugin, migrateCalendarSettingsFromPlugin } from "@/lib/calendar-extras";
+import { ensureForeverSeries } from "@/lib/calendar-recurrence";
 import { deleteDatabase } from "@/lib/data-management/idb";
 import { hydrateStoryStorage } from "@/lib/story-storage";
 import { hydrateMomentsStorage } from "@/lib/moments-storage";
@@ -1817,6 +1818,12 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
         }
       } catch (err) {
         console.warn("[Calendar] 日历设置迁移失败:", err);
+      }
+      // 「永远」的重复日程往后补到两年后：角色读日历、临近提醒不用等打开日历才看得到
+      try {
+        ensureForeverSeries();
+      } catch (err) {
+        console.warn("[Calendar] 补永久重复日程失败:", err);
       }
 
       // One-time cleanup of the orphaned folder-backup handle DB. The removed

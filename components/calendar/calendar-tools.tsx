@@ -411,11 +411,15 @@ function MemoEditor({ memoId, nav, close }: { memoId: string | null; nav: Calend
 
 // ── 一键清除 ──
 
-function ClearOption({ title, description, icon, danger, onClick }: {
-    title: string; description: string; icon: string; danger?: boolean; onClick: () => void;
+function ClearOption({ title, description, icon, danger, className, onClick }: {
+    title: string; description: string; icon: string; danger?: boolean; className?: string; onClick: () => void;
 }) {
     return (
-        <button type="button" className={`caltool-clear-option${danger ? " is-danger" : ""}`} onClick={onClick}>
+        <button
+            type="button"
+            className={`caltool-clear-option${danger ? " is-danger" : ""}${className ? ` ${className}` : ""}`}
+            onClick={onClick}
+        >
             <span className="caltool-clear-symbol">{icon}</span>
             <span className="caltool-clear-copy">
                 <b>{title}</b>
@@ -539,6 +543,35 @@ export function CalendarConfirmSheet({ request, close }: { request: CalendarConf
                 >
                     {request.confirmText}
                 </button>
+            </div>
+        </ToolSheet>
+    );
+}
+
+/** 编辑重复系列里的一次、点保存时问范围（插件 openSeriesSaveChoice），叠在编辑框上面 */
+export function CalendarSeriesSaveChoice({ onCurrent, onAll, close }: {
+    onCurrent: () => void;
+    onAll: () => void;
+    close: () => void;
+}) {
+    return (
+        <ToolSheet title="保存重复日程" hideAction onBack={close} onDismiss={close}>
+            <p className="caltool-series-save-intro">这条日程属于一个重复系列。请选择本次修改的范围。</p>
+            <div className="caltool-series-save-list">
+                <ClearOption
+                    className="caltool-series-save-option"
+                    title="仅修改这一次"
+                    description="只保存当前这一天，其他日期保持原样"
+                    icon="1"
+                    onClick={() => { close(); onCurrent(); }}
+                />
+                <ClearOption
+                    className="caltool-series-save-option"
+                    title="修改整个重复日程"
+                    description="同步修改这个系列已有及之后生成的日程"
+                    icon="全"
+                    onClick={() => { close(); onAll(); }}
+                />
             </div>
         </ToolSheet>
     );
