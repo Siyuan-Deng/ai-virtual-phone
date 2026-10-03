@@ -2333,3 +2333,121 @@
     font-size: 9px!important;
   }
 }
+
+/* ── 日历设置页（照搬插件对设置表的改动：数字框满宽、节假日颜色色板） ── */
+.caltool-settings-full-input {
+  display: block !important;
+  width: 100% !important;
+  max-width: none !important;
+  box-sizing: border-box !important;
+}
+
+.caltool-settings-color-picker {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 2px 0;
+}
+
+.caltool-settings-color-picker .calendar-color-swatch {
+  position: relative;
+  display: block;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ev-bg, #e5e5e5);
+  box-shadow: none;
+}
+
+.caltool-settings-color-picker .calendar-color-swatch-auto {
+  flex-basis: 94px;
+  width: 94px;
+  border-radius: 24px;
+  background: #efeeeb;
+  color: #77746f;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.caltool-settings-color-picker .calendar-color-swatch-auto[data-active=true] {
+  background: #1f1e1c;
+  color: #fff;
+}
+
+.caltool-settings-color-picker .calendar-color-swatch-auto[data-active=true]:after {
+  display: none;
+}
+
+.caltool-settings-color-picker .calendar-color-swatch[data-color=blue] { --ev-bg: #c7e1fb; --ev-fg: #3b82c4; }
+.caltool-settings-color-picker .calendar-color-swatch[data-color=green] { --ev-bg: #d2efc8; --ev-fg: #4f9b48; }
+.caltool-settings-color-picker .calendar-color-swatch[data-color=amber] { --ev-bg: #ffe3bd; --ev-fg: #c98227; }
+.caltool-settings-color-picker .calendar-color-swatch[data-color=rose] { --ev-bg: #ffd0df; --ev-fg: #c65478; }
+.caltool-settings-color-picker .calendar-color-swatch[data-color=violet] { --ev-bg: #dfd2ff; --ev-fg: #765ac5; }
+.caltool-settings-color-picker .calendar-color-swatch[data-color=teal] { --ev-bg: #c8eeea; --ev-fg: #16796f; }
+.caltool-settings-color-picker .calendar-color-swatch[data-color=slate] { --ev-bg: #e6e5e2; --ev-fg: #72716d; }
+.caltool-settings-color-picker .calendar-color-swatch[data-color=lilac] { --ev-bg: #efd7f4; --ev-fg: #9560a1; }
+
+.caltool-settings-color-picker .calendar-color-swatch:not(.calendar-color-swatch-auto)[data-active=true]:after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--ev-fg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ev-fg) 14%, transparent);
+}
+
+/* 主题弹窗底部进日历设置的那一行 */
+.calendar-settings-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 14px;
+  padding: 12px 12px 12px 14px;
+  border: none;
+  border-radius: 12px;
+  background: var(--c-calendar-surface);
+  color: var(--c-calendar-ink);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.calendar-settings-entry-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.calendar-settings-entry-copy b {
+  font-size: calc(13px * var(--app-text-scale, 1));
+  font-weight: 700;
+}
+
+.calendar-settings-entry-copy small {
+  font-size: calc(11px * var(--app-text-scale, 1));
+  color: var(--c-calendar-sub);
+}
+
+.calendar-settings-entry svg {
+  color: var(--c-calendar-faint);
+  flex: none;
+}
+
+.calendar-settings-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  background: var(--c-page-body-bg);
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Check, ChevronLeft, HeartPulse, Plus, Trash2, Wand2, X } from "lucide-react";
+import { Bot, Check, ChevronLeft, ChevronRight, HeartPulse, Plus, Trash2, Wand2, X } from "lucide-react";
 import { Avatar } from "./ui/primitives";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
@@ -64,6 +64,7 @@ import {
   type CalendarToolNav,
   type CalendarToolView,
 } from "./calendar/calendar-tools";
+import { CalendarSettingsPage } from "./calendar/calendar-settings-page";
 
 type OwnerOption = {
   key: string;
@@ -159,6 +160,7 @@ export function PhoneCalendarApp({
   const [menstrualConfig, setMenstrualConfig] = useState(() => loadMenstrualConfig());
   const [menstrualRecords, setMenstrualRecords] = useState<MenstrualRecord[]>(() => loadMenstrualRecords());
   const [showThemePanel, setShowThemePanel] = useState(false);
+  const [showSettingsPage, setShowSettingsPage] = useState(false);
   const [showDaysPanel, setShowDaysPanel] = useState(false);
   const [showMenstrualSettings, setShowMenstrualSettings] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -840,8 +842,34 @@ export function PhoneCalendarApp({
               <button type="button" className="calendar-block-btn" data-variant="ghost" onClick={() => setCalendarCustomCss("")}>清空</button>
               <button type="button" className="calendar-block-btn" data-variant="primary" onClick={handleApplyCalendarCss}>应用</button>
             </div>
+
+            <button
+              type="button"
+              className="calendar-settings-entry"
+              onClick={() => {
+                setShowThemePanel(false);
+                setShowSettingsPage(true);
+              }}
+            >
+              <span className="calendar-settings-entry-copy">
+                <b>日历设置</b>
+                <small>提醒、角色读取范围、每周起始日、节假日</small>
+              </span>
+              <ChevronRight size={16} />
+            </button>
           </div>
         </div>
+      )}
+
+      {showSettingsPage && (
+        <CalendarSettingsPage
+          config={config}
+          onChange={(next) => {
+            setConfig(next);
+            saveCalendarConfig(next);
+          }}
+          onBack={() => setShowSettingsPage(false)}
+        />
       )}
 
       {showDaysPanel && (
