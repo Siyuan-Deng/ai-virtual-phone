@@ -95,6 +95,8 @@ export type CalendarExtras = {
     /** 从哪个插件桶迁移来的；有值就不再迁移第二次 */
     migratedFrom?: string;
     migratedAt?: string;
+    /** 迁移之后插件那边又写过的东西补搬过了（插件现在不再运行，补一次就够） */
+    pluginResyncedAt?: string;
 };
 
 export const EMPTY_CALENDAR_EXTRAS: CalendarExtras = {
@@ -257,6 +259,7 @@ export function normalizeCalendarExtras(value: unknown): CalendarExtras {
         reminderSent,
         clearBarrier: clearedAt ? { clearedAt } : null,
         migratedFrom: typeof raw.migratedFrom === "string" ? raw.migratedFrom : undefined,
+        pluginResyncedAt: typeof raw.pluginResyncedAt === "string" ? raw.pluginResyncedAt : undefined,
         migratedAt: typeof raw.migratedAt === "string" ? raw.migratedAt : undefined,
     };
 }
@@ -515,6 +518,54 @@ export function migrateCalendarExtrasFromPlugin(): CalendarMigrationResult {
         };
     }
     return { status: "nothing" };
+}
+
+/** 迁移之后插件如果又被打开用过，那段时间在插件里新建 / 改过的备忘录、日程附加信息、重复系列
+ *  只在插件的数据桶里。补搬一次：只拿比迁移时间新的条目，原生这边更新过的不覆盖，
+ *  原生这边删掉的也不会被翻出来（删掉的那些在插件里不会比迁移时间新）。 */
+export function resyncCalendarExtrasFromPlugin(): { status: "done" | "skipped"; memos?: number; events?: number; series?: number } {
+    if (typeof window === "undefined") return { status: "skipped" };
+    const current = loadCalendarExtras();
+    if (!current.migratedFrom || !current.migratedAt || current.pluginResyncedAt) return { status: "skipped" };
+    let bucket: CalendarExtras;
+    try {
+        const raw = kvGet(current.migratedFrom);
+        if (!raw) {
+            saveCalendarExtras({ ...current, pluginResyncedAt: new Date().toISOString() });
+            return { status: "done", memos: 0, events: 0, series: 0 };
+        }
+        bucket = normalizeCalendarExtras(JSON.parse(raw));
+    } catch {
+        return { status: "skipped" };
+    }
+    const since = current.migratedAt;
+    const newer = (value: string | undefined, than: string | undefined) => Boolean(value && value > since && (!than || value > than));
+
+    const memos = [...current.memos];
+    let memoCount = 0;
+    for (const memo of bucket.memos) {
+        const index = memos.findIndex((item) => item.id === memo.id);
+        if (!newer(memo.updatedAt, index >= 0 ? memos[index].updatedAt : undefined)) continue;
+        if (index >= 0) memos[index] = memo;
+        else memos.push(memo);
+        memoCount += 1;
+    }
+    const eventDetails = { ...current.eventDetails };
+    let eventCount = 0;
+    for (const [id, details] of Object.entries(bucket.eventDetails)) {
+        if (!newer(details.updatedAt, eventDetails[id]?.updatedAt)) continue;
+        eventDetails[id] = details;
+        eventCount += 1;
+    }
+    const series = { ...current.series };
+    let seriesCount = 0;
+    for (const [id, entry] of Object.entries(bucket.series)) {
+        if (series[id] || !newer(entry.updatedAt || entry.createdAt, undefined)) continue;
+        series[id] = entry;
+        seriesCount += 1;
+    }
+    saveCalendarExtras({ ...current, memos, eventDetails, series, pluginResyncedAt: new Date().toISOString() });
+    return { status: "done", memos: memoCount, events: eventCount, series: seriesCount };
 }
 
 // ── 设置也搬 ──
