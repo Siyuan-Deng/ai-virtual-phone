@@ -5,6 +5,7 @@ import { Component, memo, useCallback, useEffect, useInsertionEffect, useLayoutE
 import { updateStatusBarTone } from "@/lib/bg-tone";
 import { startDiaryEntryTimerService, stopDiaryEntryTimerService } from "@/lib/diary-entry-timer-service";
 import { startDiaryReplyService, stopDiaryReplyService } from "@/lib/diary-reply-service";
+import { startCalendarChatService, stopCalendarChatService } from "@/lib/calendar-chat-service";
 import { startFollowUpService, stopFollowUpService } from "@/lib/follow-up-service";
 import { startMomentsService, stopMomentsService } from "@/lib/moments-engine";
 import { bgTimerCleanup } from "@/lib/bg-timer";
@@ -1839,6 +1840,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       startMomentsService();
       startDiaryEntryTimerService();
       startDiaryReplyService();
+      startCalendarChatService();
       const stopWeixinCloudRealtimeSync = startWeixinCloudRealtimeSync();
       servicesStarted = true;
       cleanupWeixinCloudRealtimeSync = stopWeixinCloudRealtimeSync;
@@ -1858,6 +1860,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
         stopMomentsService();
         stopDiaryEntryTimerService();
         stopDiaryReplyService();
+        stopCalendarChatService();
       }
       bgTimerCleanup();
     };

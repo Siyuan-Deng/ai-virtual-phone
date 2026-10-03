@@ -74,7 +74,8 @@ export type CalendarMemoPage = {
     updatedAt: string;
 };
 
-export type CalendarReminderSentRecord = { at: number; status: "sending" | "sent" };
+/** sending：正在发；sent：发出去了；failed：生成报错了（隔一会儿再试，最多试 3 次） */
+export type CalendarReminderSentRecord = { at: number; status: "sending" | "sent" | "failed"; attempts?: number };
 
 export type CalendarExtras = {
     /** 条目 id → 附加信息 */
@@ -236,9 +237,10 @@ export function normalizeCalendarExtras(value: unknown): CalendarExtras {
                 ? Number((record as Record<string, unknown>).at)
                 : Number(record);
             if (!Number.isFinite(at)) continue;
-            const status = typeof record === "object" && record
-                && (record as Record<string, unknown>).status === "sending" ? "sending" : "sent";
-            reminderSent[key] = { at, status };
+            const rawStatus = typeof record === "object" && record ? (record as Record<string, unknown>).status : undefined;
+            const status = rawStatus === "sending" || rawStatus === "failed" ? rawStatus : "sent";
+            const attempts = typeof record === "object" && record ? Number((record as Record<string, unknown>).attempts) : NaN;
+            reminderSent[key] = Number.isFinite(attempts) && attempts > 0 ? { at, status, attempts } : { at, status };
         }
     }
 
@@ -393,35 +395,64 @@ export function clearCalendarMemos(startDate = "", endDate = ""): number {
 }
 
 // ── 勾待办 ──
-// 横幅、备忘录查看页都从这里勾，角色的「完成待办后回应」也只需要接在这一处。
+// 横幅、备忘录查看页都从这里勾。勾选状态一变就报给角色的「完成待办后回应」
+// （calendar-chat-service 启动时挂上来；这里不直接 import 它，免得循环依赖）。
+
+type TodoTransitionListener = {
+    event?: (eventId: string, before: CalendarTodo[] | undefined, after: CalendarTodo[] | undefined) => void;
+    memo?: (memo: CalendarMemoPage, before: CalendarTodo[] | undefined) => void;
+};
+
+let todoListener: TodoTransitionListener = {};
+
+export function setCalendarTodoListener(listener: TodoTransitionListener): void {
+    todoListener = listener;
+}
+
+/** 日程的待办勾选状态可能变了（编辑框保存后也调用） */
+export function reportEventTodosChanged(eventId: string, before: CalendarTodo[] | undefined, after: CalendarTodo[] | undefined): void {
+    try {
+        todoListener.event?.(eventId, before, after);
+    } catch (error) {
+        console.warn("[Calendar] 待办回应处理失败", error);
+    }
+}
+
+/** 备忘录的待办勾选状态可能变了（编辑后保存也调用） */
+export function reportMemoTodosChanged(memo: CalendarMemoPage, before: CalendarTodo[] | undefined): void {
+    try {
+        todoListener.memo?.(memo, before);
+    } catch (error) {
+        console.warn("[Calendar] 待办回应处理失败", error);
+    }
+}
 
 export function setEventTodoDone(itemId: string, todoId: string, done: boolean): void {
     const extras = loadCalendarExtras();
     const details = extras.eventDetails[itemId];
     if (!details) return;
+    const todos = details.todos.map((todo) => todo.id === todoId ? { ...todo, done } : todo);
     saveCalendarExtras({
         ...extras,
         eventDetails: {
             ...extras.eventDetails,
-            [itemId]: {
-                ...details,
-                todos: details.todos.map((todo) => todo.id === todoId ? { ...todo, done } : todo),
-                updatedAt: new Date().toISOString(),
-            },
+            [itemId]: { ...details, todos, updatedAt: new Date().toISOString() },
         },
     });
+    reportEventTodosChanged(itemId, details.todos, todos);
 }
 
 export function setMemoTodoDone(memoId: string, todoId: string, done: boolean): void {
     const extras = loadCalendarExtras();
-    saveCalendarExtras({
-        ...extras,
-        memos: extras.memos.map((memo) => memo.id !== memoId ? memo : {
-            ...memo,
-            checklist: memo.checklist.map((todo) => todo.id === todoId ? { ...todo, done } : todo),
-            updatedAt: new Date().toISOString(),
-        }),
-    });
+    const memo = extras.memos.find((item) => item.id === memoId);
+    if (!memo) return;
+    const next: CalendarMemoPage = {
+        ...memo,
+        checklist: memo.checklist.map((todo) => todo.id === todoId ? { ...todo, done } : todo),
+        updatedAt: new Date().toISOString(),
+    };
+    saveCalendarExtras({ ...extras, memos: extras.memos.map((item) => (item.id === memoId ? next : item)) });
+    reportMemoTodosChanged(next, memo.checklist);
 }
 
 /** 删一页备忘录，连同它的提醒记录 */
@@ -498,16 +529,19 @@ const PLUGIN_SETTING_KEYS = [
 
 type InstalledPluginLike = { manifest?: { id?: string; settings?: Array<{ key?: string }> }; settings?: Record<string, unknown> };
 
+/** 是不是那个已经并进源码的日历增强插件：按设置项的形状认，不认插件 id */
+export function isAbsorbedCalendarPlugin(manifest: { settings?: Array<{ key?: string }> } | undefined): boolean {
+    const keys = (manifest?.settings || []).map((field) => field?.key);
+    return keys.includes("weekStartDay") && keys.includes("chinaHolidays") && keys.includes("nearMinutes");
+}
+
 /** 找日历插件那一项：优先按数据桶记下的 id，找不到再按设置项的形状认 */
 function findCalendarPluginEntry(list: InstalledPluginLike[], preferredId: string | null): InstalledPluginLike | null {
     if (preferredId) {
         const byId = list.find((entry) => entry?.manifest?.id === preferredId);
         if (byId) return byId;
     }
-    return list.find((entry) => {
-        const keys = (entry?.manifest?.settings || []).map((field) => field?.key);
-        return keys.includes("weekStartDay") && keys.includes("chinaHolidays") && keys.includes("nearMinutes");
-    }) || null;
+    return list.find((entry) => isAbsorbedCalendarPlugin(entry?.manifest)) || null;
 }
 
 export function migrateCalendarSettingsFromPlugin(): { status: "already" | "nothing" } | { status: "migrated"; from: string } {

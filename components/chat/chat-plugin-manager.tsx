@@ -23,6 +23,7 @@ import { installChatPluginFromCode } from "@/lib/chat-plugin-loader";
 import { getChatPluginRuntime, isChatPluginSafeMode, setChatPluginSafeMode } from "@/lib/chat-plugin-runtime";
 import { ChatPluginSlot } from "@/components/chat/chat-plugin-slot";
 import { CHAT_PLUGIN_FULL_DOC } from "@/lib/chat-plugin-docs";
+import { isAbsorbedCalendarPlugin } from "@/lib/calendar-extras";
 
 const INSTALL_WARNING = "插件将与应用本身拥有相同的能力（包括访问你的 API 配置与全部聊天数据）。只安装你信任来源的插件。确认安装吗？";
 
@@ -204,7 +205,9 @@ export function ChatPluginManager({ onBack }: { onBack: () => void }) {
                                 const hasSettings = (p.manifest.settings?.length ?? 0) > 0;
                                 const settingsOpen = settingsOpenId === p.manifest.id;
                                 const running = p.enabled && !safeMode && runtimeState.activeIds.includes(p.manifest.id);
-                                const notRunning = p.enabled && !safeMode && !running;
+                                // 日历增强插件已并进源码，运行时故意不启动它：标「已内置」，不当成故障
+                                const absorbed = isAbsorbedCalendarPlugin(p.manifest);
+                                const notRunning = p.enabled && !safeMode && !running && !absorbed;
                                 return (
                                     <div className="menu-group" key={p.manifest.id}>
                                         {/* 头部 */}
@@ -218,6 +221,7 @@ export function ChatPluginManager({ onBack }: { onBack: () => void }) {
                                                     {p.manifest.version && <span style={{ opacity: 0.5, fontWeight: 400, marginLeft: 6 }}>v{p.manifest.version}</span>}
                                                     {p.manifest.author && <span style={{ opacity: 0.5, fontWeight: 400, marginLeft: 6 }}>{p.manifest.author}</span>}
                                                     {notRunning && <span style={{ color: "var(--c-danger)", fontWeight: 400, marginLeft: 6 }}>未运行</span>}
+                                                    {absorbed && <span style={{ opacity: 0.5, fontWeight: 400, marginLeft: 6 }}>已内置</span>}
                                                 </span>
                                                 {p.manifest.description && <span className="menu-desc">{p.manifest.description}</span>}
                                                 {!!p.manifest.permissions?.length && <span className="menu-desc" style={{ opacity: 0.6 }}>声明用途：{p.manifest.permissions.join("、")}</span>}

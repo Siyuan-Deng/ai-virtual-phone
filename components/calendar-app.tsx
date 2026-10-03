@@ -51,6 +51,7 @@ import {
   CALENDAR_EXTRAS_UPDATED_EVENT,
   loadCalendarExtras,
   normalizeCalendarTodos,
+  reportEventTodosChanged,
   setEventTodoDone,
   setMemoTodoDone,
   updateCalendarExtras,
@@ -424,6 +425,8 @@ export function PhoneCalendarApp({
     const extras = loadCalendarExtras();
     const eventDetails = { ...extras.eventDetails };
     const now = new Date().toISOString();
+    // 编辑已有日程时在编辑框里勾掉的待办，也要报给角色的「完成待办后回应」
+    const todosBefore = draft.id ? extras.eventDetails[draft.id]?.todos : undefined;
     for (const id of itemIds) {
       if (!note && !allDay && todos.length === 0 && !eventDetails[id]?.seriesId) {
         // 三样都空就不留记录，免得附加信息表里堆满空壳；
@@ -443,6 +446,7 @@ export function PhoneCalendarApp({
       eventDetails[id] = details;
     }
     updateCalendarExtras({ eventDetails });
+    if (draft.id) reportEventTodosChanged(draft.id, todosBefore, eventDetails[draft.id]?.todos);
   };
 
   const [askSeriesScope, setAskSeriesScope] = useState(false);

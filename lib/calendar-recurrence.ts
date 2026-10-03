@@ -20,6 +20,7 @@ import {
 import {
     loadCalendarExtras,
     normalizeCalendarTodos,
+    reportEventTodosChanged,
     saveCalendarExtras,
     type CalendarEventDetails,
     type CalendarExtras,
@@ -379,6 +380,8 @@ export function updateEntireSeries(input: {
 
     const nextSeries: CalendarRecurrenceSeries = { ...series, untilDate, materializedUntil: materializedThrough, title, updatedAt: now };
     commit(plans, { ...extras, eventDetails, series: { ...extras.series, [input.seriesId]: nextSeries } });
+    // 只有正在编辑的这一次用编辑框里的勾选状态，所以也只有它可能「刚完成」
+    reportEventTodosChanged(input.currentItemId, extras.eventDetails[input.currentItemId]?.todos, eventDetails[input.currentItemId]?.todos);
     const count = keptIds.size + extensionDates.length;
     return { ok: true, count, message: `已修改整个重复日程，共 ${count} 次` };
 }

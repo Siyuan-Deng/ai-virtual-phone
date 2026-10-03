@@ -14,6 +14,7 @@ import { hydrateChatStorage, loadChatMessages, loadChatSessions, loadChatContact
 import { isMediaStoreRef, loadMediaBlob } from "./media-cache-storage";
 import { loadCharacters } from "./character-storage";
 import { cancelFollowUp, requestBackgroundChatReply } from "./follow-up-service";
+import { isAbsorbedCalendarPlugin } from "./calendar-extras";
 import { loadOwnerCalendarPlans, replaceOwnerCalendarPlans } from "./calendar-storage";
 import { loadApiConfigs, loadBindingConfig } from "./settings-storage";
 import { simpleLLMCall } from "./api-helpers";
@@ -192,6 +193,12 @@ class ChatPluginRuntime {
     private async startPlugin(installed: InstalledChatPlugin): Promise<void> {
         const pluginId = installed.manifest.id;
         if (this.active.has(pluginId)) return;
+        // 日历增强插件的功能已经全部并进源码：它再跑起来会和源码版各提醒一遍、
+        // 把已经按周一排好的月历再挪一格，所以不启动它（数据早已搬进日历）
+        if (isAbsorbedCalendarPlugin(installed.manifest)) {
+            recordChatPluginLog({ pluginId, where: "setup", message: "日历增强功能已内置到日历 App，这个插件不再运行，可以卸载", level: "info" });
+            return;
+        }
         const { module, error } = await loadChatPluginModule(installed.code);
         if (!module) {
             recordChatPluginLog({ pluginId, where: "setup", message: error ?? "加载失败", level: "error" });

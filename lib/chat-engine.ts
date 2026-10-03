@@ -362,6 +362,9 @@ type ChatPromptBuildOptions = {
     activateAllWorldBooks?: boolean;
     toolsAllowed?: boolean;
     forceEnableTools?: boolean;
+    /** 带着明确任务的后台生成（如日历提醒）：不追加「空生成续写」提示——
+     *  那句提示要求「只续写一句、不要开启新事件」，会把这次的任务指令压掉 */
+    skipEmptyGenerateGuard?: boolean;
 };
 
 function matchesPromptProfileRef(prompt: { identifier: string; name?: string }, refs: Set<string>): boolean {
@@ -1948,7 +1951,7 @@ export async function buildChatPromptMessages(
             content: "本次自定义 APP AI 任务只输出严格 JSON。不要输出 Markdown 代码块、解释文字或聊天富媒体指令。",
         });
     }
-    appendEmptyGenerateGuardMessage(llmMessages, config, historyForPrompt);
+    if (!options?.skipEmptyGenerateGuard) appendEmptyGenerateGuardMessage(llmMessages, config, historyForPrompt);
 
     return { llmMessages, character, config, preset, regexes, userIdentity, toolsEnabled };
 }

@@ -11,6 +11,7 @@ import {
     deleteCalendarMemo,
     loadCalendarExtras,
     normalizeCalendarTodos,
+    reportMemoTodosChanged,
     setMemoTodoDone,
     updateCalendarExtras,
     type CalendarMemoPage,
@@ -366,6 +367,8 @@ function MemoEditor({ memoId, nav, close }: { memoId: string | null; nav: Calend
         const memos = loadCalendarExtras().memos.filter((item) => item.id !== memo.id);
         memos.push(memo);
         updateCalendarExtras({ memos });
+        // 编辑时顺手勾掉的待办，也算完成（和插件一样，只看原来就有的那几条）
+        if (source) reportMemoTodosChanged(memo, source.checklist);
         nav.notify("备忘录已保存");
         back();
     };
