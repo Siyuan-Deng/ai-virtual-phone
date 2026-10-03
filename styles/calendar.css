@@ -1741,3 +1741,595 @@
   width: 20px;
   height: 20px;
 }
+
+/* ── 备忘录 / 一键清除 / 日历知情角色（照搬用户日历增强插件，ucal- → caltool-） ── */
+.calendar-app-shell .caltool-overlay {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background: var(--c-calendar-scrim);
+  z-index: 90;
+}
+
+.calendar-app-shell .caltool-modal {
+  background: var(--c-calendar-sheet);
+  color: var(--c-calendar-ink);
+  width: min(92%,390px);
+  max-height: 84%;
+  border-radius: 20px;
+}
+
+.calendar-app-shell .caltool-modal .modal-header {
+  background: transparent;
+  border: 0;
+}
+
+.calendar-app-shell .caltool-modal .modal-header-btn {
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--c-calendar-sub);
+}
+
+.calendar-app-shell .caltool-modal .modal-header-btn-action {
+  font-size: 20px;
+  color: var(--c-calendar-ink);
+}
+
+.calendar-app-shell .caltool-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 16px 28px;
+  background: transparent;
+}
+
+.calendar-app-shell .caltool-field,
+.calendar-app-shell .caltool-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.calendar-app-shell .caltool-modal .ui-input,
+.calendar-app-shell .caltool-modal .ui-textarea,
+.calendar-app-shell .caltool-modal .ui-select {
+  box-sizing: border-box;
+  border: 0;
+  background: var(--c-calendar-surface);
+  color: var(--c-calendar-ink);
+  border-radius: 10px;
+  font-family: inherit;
+}
+
+.calendar-app-shell .caltool-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.calendar-app-shell .caltool-check-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0,1fr) 30px;
+  gap: 7px;
+  align-items: center;
+}
+
+.calendar-app-shell .caltool-check-row input[type=checkbox] {
+  width: 19px;
+  height: 19px;
+  accent-color: var(--c-calendar-sel-bg);
+}
+
+.calendar-app-shell .caltool-check-row .ui-input {
+  padding: 9px 11px;
+}
+
+.calendar-app-shell .caltool-deadline-editor {
+  grid-column: 2/4;
+  display: grid;
+  grid-template-columns: auto minmax(0,1.25fr) minmax(0,.85fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.calendar-app-shell .caltool-deadline-editor .ui-input {
+  min-width: 0;
+  padding: 7px 8px;
+  font-size: 11px;
+}
+
+.calendar-app-shell .caltool-deadline-label {
+  font-size: 11px;
+  color: var(--c-calendar-sub);
+}
+
+.calendar-app-shell .caltool-icon-button {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--c-calendar-surface);
+  color: var(--c-calendar-sub);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.calendar-app-shell .caltool-add-row {
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  color: var(--c-calendar-ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 8px 2px;
+}
+
+.calendar-app-shell .caltool-memo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.calendar-app-shell .caltool-memo-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+  border: 0;
+  border-radius: 14px;
+  padding: 14px;
+  background: var(--c-calendar-surface);
+  color: var(--c-calendar-ink);
+}
+
+.calendar-app-shell .caltool-memo-card b {
+  font-size: 14px;
+}
+
+.calendar-app-shell .caltool-memo-card span {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--c-calendar-sub);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-app-shell .caltool-memo-card small {
+  font-size: 10px;
+  color: var(--c-calendar-faint);
+}
+
+.calendar-app-shell .caltool-memo-view-title {
+  font-size: 22px;
+  line-height: 1.3;
+  margin: 2px 0 0;
+  color: var(--c-calendar-ink);
+}
+
+.calendar-app-shell .caltool-memo-view-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--c-calendar-ink);
+}
+
+.calendar-app-shell .caltool-memo-view-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.calendar-app-shell .caltool-view-todo {
+  display: grid;
+  grid-template-columns: 22px minmax(0,1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 9px 10px;
+  border-radius: 11px;
+  background: var(--c-calendar-surface);
+}
+
+.calendar-app-shell .caltool-view-todo input {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  accent-color: var(--c-calendar-sel-bg);
+}
+
+.calendar-app-shell .caltool-view-todo-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.calendar-app-shell .caltool-view-todo-content b {
+  font-size: 13px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+
+.calendar-app-shell .caltool-view-todo-content small {
+  font-size: 10px;
+  color: var(--c-calendar-sub);
+}
+
+.calendar-app-shell .caltool-view-todo.is-done b {
+  text-decoration: line-through;
+  color: var(--c-calendar-faint);
+}
+
+.calendar-app-shell .caltool-empty {
+  display: flex;
+  min-height: 220px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 7px;
+  text-align: center;
+  color: var(--c-calendar-sub);
+}
+
+.calendar-app-shell .caltool-empty b {
+  color: var(--c-calendar-ink);
+}
+
+.calendar-app-shell .caltool-empty span {
+  font-size: 12px;
+}
+
+.calendar-app-shell .caltool-edit-action {
+  display: flex!important;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0!important;
+  border-radius: 50%;
+}
+
+.calendar-app-shell .caltool-pencil-icon {
+  position: relative;
+  display: block;
+  width: 8px;
+  height: 20px;
+  transform: rotate(42deg);
+  transform-origin: center;
+}
+
+.calendar-app-shell .caltool-pencil-icon:before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 0;
+  width: 6px;
+  height: 15px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px 2px 0 0;
+  box-sizing: border-box;
+  background: linear-gradient(to bottom,currentColor 0 2px,transparent 2px 100%);
+}
+
+.calendar-app-shell .caltool-pencil-icon:after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 14px;
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+  clip-path: polygon(0 0,100% 0,50% 100%);
+}
+
+.calendar-app-shell .caltool-danger-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 12px;
+  color: #d7443e;
+  background: color-mix(in srgb,#d7443e 7%,var(--c-calendar-surface));
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.calendar-app-shell .caltool-trash-icon {
+  position: relative;
+  display: block;
+  width: 13px;
+  height: 14px;
+  border: 1.6px solid currentColor;
+  border-top: 0;
+  border-radius: 0 0 3px 3px;
+  box-sizing: border-box;
+}
+
+.calendar-app-shell .caltool-trash-icon:before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: -4px;
+  width: 17px;
+  border-top: 1.6px solid currentColor;
+}
+
+.calendar-app-shell .caltool-trash-icon:after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: -7px;
+  width: 5px;
+  height: 3px;
+  border: 1.6px solid currentColor;
+  border-bottom: 0;
+  border-radius: 2px 2px 0 0;
+  box-sizing: border-box;
+}
+
+.calendar-app-shell .caltool-confirm-text {
+  margin: 8px 0 16px;
+  line-height: 1.6;
+  font-size: 13px;
+  color: var(--c-calendar-sub);
+}
+
+.calendar-app-shell .caltool-confirm-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.calendar-app-shell .caltool-confirm-danger[data-variant=primary] {
+  background: #d7443e;
+  color: white;
+}
+
+.calendar-app-shell .caltool-menu-icon {
+  width: 18px;
+  text-align: center;
+  color: var(--c-calendar-sub);
+  font-size: 16px;
+}
+
+.calendar-app-shell .caltool-menu-danger {
+  color: #d7443e;
+  border-top: 1px solid var(--c-calendar-hair);
+  margin-top: 3px;
+  padding-top: 12px;
+}
+
+.calendar-app-shell .caltool-fab-menu {
+  min-width: 224px;
+}
+
+.calendar-app-shell .caltool-clear-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.calendar-app-shell .caltool-clear-option {
+  display: grid;
+  grid-template-columns: 34px minmax(0,1fr) 14px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  border-radius: 13px;
+  background: var(--c-calendar-surface);
+  color: var(--c-calendar-ink);
+  text-align: left;
+  font: inherit;
+}
+
+.calendar-app-shell .caltool-clear-symbol {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--c-calendar-sheet);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.calendar-app-shell .caltool-clear-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.calendar-app-shell .caltool-clear-copy b {
+  font-size: 13px;
+}
+
+.calendar-app-shell .caltool-clear-copy small {
+  font-size: 10px;
+  color: var(--c-calendar-sub);
+}
+
+.calendar-app-shell .caltool-clear-arrow {
+  color: var(--c-calendar-faint);
+  font-size: 21px;
+  line-height: 1;
+}
+
+.calendar-app-shell .caltool-clear-option.is-danger .caltool-clear-symbol {
+  color: #d7443e;
+  background: color-mix(in srgb,#d7443e 8%,var(--c-calendar-sheet));
+}
+
+.calendar-app-shell .caltool-clear-option.is-danger b {
+  color: #d7443e;
+}
+
+.calendar-app-shell .caltool-clear-date-grid {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(0,1fr);
+  gap: 10px;
+}
+
+.calendar-app-shell .caltool-clear-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--c-calendar-sub);
+}
+
+.calendar-app-shell .caltool-contact-icon {
+  position: relative;
+  display: block;
+  width: 19px;
+  height: 18px;
+}
+
+.calendar-app-shell .caltool-contact-icon i {
+  position: absolute;
+  left: 6px;
+  top: 0;
+  width: 7px;
+  height: 7px;
+  border: 1.7px solid currentColor;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.calendar-app-shell .caltool-contact-icon b {
+  position: absolute;
+  left: 1px;
+  bottom: 0;
+  width: 17px;
+  height: 8px;
+  border: 1.7px solid currentColor;
+  border-bottom: 0;
+  border-radius: 10px 10px 2px 2px;
+  box-sizing: border-box;
+}
+
+.calendar-app-shell .caltool-access-intro {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--c-calendar-sub);
+}
+
+.calendar-app-shell .caltool-access-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.calendar-app-shell .caltool-text-button {
+  border: 0;
+  background: none;
+  color: var(--c-calendar-ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 2px;
+}
+
+.calendar-app-shell .caltool-access-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.calendar-app-shell .caltool-access-row {
+  display: grid;
+  grid-template-columns: 38px minmax(72px,.8fr) minmax(138px,1.35fr) 28px;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 8px;
+  border-radius: 12px;
+  background: var(--c-calendar-surface);
+}
+
+.calendar-app-shell .caltool-access-avatar {
+  display: flex;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--c-calendar-sheet);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.calendar-app-shell .caltool-access-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.calendar-app-shell .caltool-access-copy {
+  display: contents;
+}
+
+.calendar-app-shell .caltool-access-name {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-app-shell .caltool-reaction-select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 6px 28px 6px 10px!important;
+  border-radius: 9px!important;
+  font-size: 10px!important;
+  color: var(--c-calendar-sub)!important;
+  background-color: var(--c-calendar-sheet)!important;
+}
+
+.calendar-app-shell .caltool-reaction-select:disabled {
+  opacity: .48;
+}
+
+.calendar-app-shell .caltool-access-row>input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  justify-self: center;
+  accent-color: var(--c-calendar-sel-bg);
+}
+
+.calendar-app-shell .caltool-memo-dot {
+  background: var(--ev-fg,var(--c-calendar-sub))!important;
+  opacity: .9;
+}
+
+@media (max-width: 360px) {
+  .calendar-app-shell .caltool-access-row {
+    grid-template-columns: 34px minmax(62px,.7fr) minmax(122px,1.3fr) 24px;
+    gap: 6px;
+  }
+
+  .calendar-app-shell .caltool-access-avatar {
+    width: 32px;
+    height: 32px;
+  }
+
+  .calendar-app-shell .caltool-reaction-select {
+    padding-left: 7px!important;
+    padding-right: 22px!important;
+    font-size: 9px!important;
+  }
+}

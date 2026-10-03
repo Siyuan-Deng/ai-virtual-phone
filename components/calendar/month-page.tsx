@@ -69,9 +69,11 @@ export function CalendarMonthPage({
   itemsByDate,
   cycleMap,
   ownerStrip,
+  memoDotsByDate,
   onPickDay,
   onClose,
   onOpenTheme,
+  onOpenAccess,
   weekStartDay,
 }: {
   weekStartDay: "monday" | "sunday";
@@ -79,9 +81,12 @@ export function CalendarMonthPage({
   itemsByDate: Map<string, CalendarScheduleItem[]>;
   cycleMap: Map<string, MenstrualDayState> | null;
   ownerStrip: ReactNode;
+  /** 备忘录待办截止日 → 每个待办一个颜色，画在日程小圆点后面 */
+  memoDotsByDate: Map<string, string[]>;
   onPickDay: (iso: string) => void;
   onClose: () => void;
   onOpenTheme: () => void;
+  onOpenAccess: () => void;
 }) {
   const mondayFirst = weekStartDay === "monday";
   const months = useMemo(() => buildMonths(todayIso, mondayFirst), [todayIso, mondayFirst]);
@@ -179,6 +184,9 @@ export function CalendarMonthPage({
                       <span className="calendar-month-dots" aria-hidden="true">
                         {cycle ? <i className="calendar-cycle-dot" data-type={cycle.type} /> : null}
                         {items && items.length > 0 ? <i className="calendar-event-dot" data-color={items[0].colorKey} /> : null}
+                        {memoDotsByDate.get(cell.iso)?.map((color, index) => (
+                          <i key={index} className="calendar-event-dot caltool-memo-dot" data-color={color} />
+                        ))}
                       </span>
                     </button>
                   );
@@ -197,6 +205,9 @@ export function CalendarMonthPage({
             {titleYear}年
           </button>
           <span className="calendar-topbar-space" />
+          <button type="button" className="calendar-icon-btn caltool-access-button" onClick={onOpenAccess} aria-label="选择日历知情角色">
+            <span className="caltool-contact-icon" aria-hidden="true"><i /><b /></span>
+          </button>
           <button type="button" className="calendar-icon-btn" onClick={onOpenTheme} aria-label="主题与自定义">
             <Palette size={17} />
           </button>

@@ -59,7 +59,8 @@ function holidayColor(value: string, fallback: string): string {
     return fallback;
 }
 
-function memoColor(bannerColor: string, todo: CalendarTodo): string {
+/** 备忘录待办的颜色：选了具体颜色就用它，「自动」按截止时间挑（没填时间按中午） */
+export function memoColor(bannerColor: string, todo: CalendarTodo): string {
     if (bannerColor && bannerColor !== "auto" && (BANNER_COLOR_ORDER as string[]).includes(bannerColor)) return bannerColor;
     return pickScheduleColorKey(todo.dueTime || "12:00");
 }

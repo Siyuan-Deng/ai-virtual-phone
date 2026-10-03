@@ -6,7 +6,13 @@
 // 数据要原样搬进来，形状对不上就得写转换，转换就有丢字段的风险。
 
 import { kvGet, kvKeysWithPrefix, kvSet, registerKvMigration } from "./kv-db";
-import { loadCalendarConfig, normalizeCalendarConfig, saveCalendarConfig } from "./calendar-storage";
+import {
+    loadCalendarConfig,
+    loadOwnerCalendarPlansRaw,
+    normalizeCalendarConfig,
+    replaceOwnerCalendarPlans,
+    saveCalendarConfig,
+} from "./calendar-storage";
 
 const EXTRAS_KEY = "ai_phone_calendar_extras_v1";
 registerKvMigration(EXTRAS_KEY);
@@ -279,6 +285,153 @@ export function updateCalendarExtras(patch: Partial<CalendarExtras>): CalendarEx
     const next = { ...loadCalendarExtras(), ...patch };
     saveCalendarExtras(next);
     return next;
+}
+
+// ── 一键清除 ──
+
+function queueTaskKey(record: unknown): string {
+    const key = (record as { taskKey?: unknown } | null)?.taskKey;
+    return typeof key === "string" ? key : "";
+}
+
+/** 删掉和这些日程 / 备忘录有关的提醒记录和待回应队列（插件 cleanupReminderKeys） */
+function withoutReminderTraces(
+    extras: CalendarExtras,
+    eventIds: Set<string>,
+    memoIds: Set<string>,
+): Pick<CalendarExtras, "reminderSent" | "todoCompletionQueue"> {
+    const events = Array.from(eventIds);
+    const memos = Array.from(memoIds);
+    const reminderSent: CalendarExtras["reminderSent"] = {};
+    for (const [key, record] of Object.entries(extras.reminderSent)) {
+        const removed = events.some((id) => key.includes(`:event:${id}:`))
+            || memos.some((id) => key.includes(`:memo:${id}:`));
+        if (!removed) reminderSent[key] = record;
+    }
+    const todoCompletionQueue = extras.todoCompletionQueue.filter((record) => {
+        const taskKey = queueTaskKey(record);
+        return !events.some((id) => taskKey.startsWith(`event:${id}:`))
+            && !memos.some((id) => taskKey.startsWith(`memo:${id}:`));
+    });
+    return { reminderSent, todoCompletionQueue };
+}
+
+/** 清除自己日历上的日程。不给日期就是全部；给了按条目日期筛，首尾两天都算。
+ *  日程本身一次性整份落盘，成功之后再清附加信息，不会停在删了一半的状态。
+ *  返回删掉了几条。 */
+export function clearUserCalendarEvents(startDate = "", endDate = ""): number {
+    const clearAll = !startDate && !endDate;
+    const plans = loadOwnerCalendarPlansRaw("user", "self");
+    const removedIds = new Set<string>();
+    for (const plan of plans) {
+        for (const item of plan.items) {
+            if (clearAll || (item.date >= startDate && item.date <= endDate)) removedIds.add(item.id);
+        }
+    }
+    const remaining = clearAll ? [] : plans
+        .map((plan) => ({ ...plan, items: plan.items.filter((item) => item.date < startDate || item.date > endDate) }))
+        .filter((plan) => plan.items.length > 0);
+    replaceOwnerCalendarPlans("user", "self", remaining);
+
+    const extras = loadCalendarExtras();
+    if (clearAll) {
+        // 全部清空时连孤立的旧详情和系列一起删，不只看当前还在的条目
+        const reminderSent: CalendarExtras["reminderSent"] = {};
+        for (const [key, record] of Object.entries(extras.reminderSent)) {
+            if (!key.includes(":event:")) reminderSent[key] = record;
+        }
+        saveCalendarExtras({
+            ...extras,
+            eventDetails: {},
+            series: {},
+            reminderSent,
+            todoCompletionQueue: extras.todoCompletionQueue.filter((record) => !queueTaskKey(record).startsWith("event:")),
+            clearBarrier: { clearedAt: new Date().toISOString() },
+        });
+    } else {
+        const eventDetails = { ...extras.eventDetails };
+        for (const id of removedIds) delete eventDetails[id];
+        // 没有任何日程再引用的重复系列也一起删
+        const usedSeries = new Set(Object.values(eventDetails).map((entry) => entry.seriesId).filter(Boolean));
+        const series = Object.fromEntries(Object.entries(extras.series).filter(([id]) => usedSeries.has(id)));
+        saveCalendarExtras({
+            ...extras,
+            eventDetails,
+            series,
+            ...withoutReminderTraces(extras, removedIds, new Set()),
+        });
+    }
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("calendar-updated"));
+    return removedIds.size;
+}
+
+/** 备忘录的创建日期（本地日期）。createdAt 是 UTC 时间串，直接截前十位
+ *  会把晚上建的备忘录算到第二天，所以先转回本地。 */
+function memoCreatedDate(memo: CalendarMemoPage): string {
+    const value = memo.createdAt || memo.updatedAt || "";
+    const parsed = new Date(value);
+    if (value && !Number.isNaN(parsed.getTime())) {
+        const pad = (n: number) => String(n).padStart(2, "0");
+        return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
+    }
+    return /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : "";
+}
+
+/** 清除备忘录。不给日期就是全部；给了按创建日期筛，首尾两天都算。返回删掉了几页。 */
+export function clearCalendarMemos(startDate = "", endDate = ""): number {
+    const extras = loadCalendarExtras();
+    const clearAll = !startDate && !endDate;
+    const removedIds = new Set<string>();
+    const memos = extras.memos.filter((memo) => {
+        const date = memoCreatedDate(memo);
+        const remove = clearAll || (!!date && date >= startDate && date <= endDate);
+        if (remove) removedIds.add(memo.id);
+        return !remove;
+    });
+    saveCalendarExtras({ ...extras, memos, ...withoutReminderTraces(extras, new Set(), removedIds) });
+    return removedIds.size;
+}
+
+// ── 勾待办 ──
+// 横幅、备忘录查看页都从这里勾，角色的「完成待办后回应」也只需要接在这一处。
+
+export function setEventTodoDone(itemId: string, todoId: string, done: boolean): void {
+    const extras = loadCalendarExtras();
+    const details = extras.eventDetails[itemId];
+    if (!details) return;
+    saveCalendarExtras({
+        ...extras,
+        eventDetails: {
+            ...extras.eventDetails,
+            [itemId]: {
+                ...details,
+                todos: details.todos.map((todo) => todo.id === todoId ? { ...todo, done } : todo),
+                updatedAt: new Date().toISOString(),
+            },
+        },
+    });
+}
+
+export function setMemoTodoDone(memoId: string, todoId: string, done: boolean): void {
+    const extras = loadCalendarExtras();
+    saveCalendarExtras({
+        ...extras,
+        memos: extras.memos.map((memo) => memo.id !== memoId ? memo : {
+            ...memo,
+            checklist: memo.checklist.map((todo) => todo.id === todoId ? { ...todo, done } : todo),
+            updatedAt: new Date().toISOString(),
+        }),
+    });
+}
+
+/** 删一页备忘录，连同它的提醒记录 */
+export function deleteCalendarMemo(memoId: string): void {
+    const extras = loadCalendarExtras();
+    saveCalendarExtras({
+        ...extras,
+        memos: extras.memos.filter((memo) => memo.id !== memoId),
+        ...withoutReminderTraces(extras, new Set(), new Set([memoId])),
+    });
 }
 
 // ── 从插件搬家 ──

@@ -51,10 +51,19 @@ import {
   CALENDAR_EXTRAS_UPDATED_EVENT,
   loadCalendarExtras,
   normalizeCalendarTodos,
+  setEventTodoDone,
+  setMemoTodoDone,
   updateCalendarExtras,
   type CalendarEventDetails,
 } from "@/lib/calendar-extras";
-import { CalendarScheduleBanners, buildBannerGroups } from "./calendar/schedule-banners";
+import { CalendarScheduleBanners, buildBannerGroups, memoColor } from "./calendar/schedule-banners";
+import {
+  CalendarConfirmSheet,
+  CalendarToolModal,
+  type CalendarConfirmRequest,
+  type CalendarToolNav,
+  type CalendarToolView,
+} from "./calendar/calendar-tools";
 
 type OwnerOption = {
   key: string;
@@ -250,32 +259,35 @@ export function PhoneCalendarApp({
     [config, extras, itemsByDate, selectedDate, selectedOwner],
   );
 
-  const toggleEventTodo = (itemId: string, todoId: string, done: boolean) => {
-    const current = loadCalendarExtras();
-    const details = current.eventDetails[itemId];
-    if (!details) return;
-    updateCalendarExtras({
-      eventDetails: {
-        ...current.eventDetails,
-        [itemId]: {
-          ...details,
-          todos: details.todos.map(todo => todo.id === todoId ? { ...todo, done } : todo),
-          updatedAt: new Date().toISOString(),
-        },
-      },
-    });
-  };
+  /** 月历格子底下的备忘录截止小圆点：日期 → 每个待办一个颜色 */
+  const memoDotsByDate = useMemo(() => {
+    const map = new Map<string, string[]>();
+    if (selectedOwner?.ownerType !== "user") return map;
+    for (const memo of extras.memos) {
+      for (const todo of normalizeCalendarTodos(memo.checklist)) {
+        if (!todo.dueDate) continue;
+        const colors = map.get(todo.dueDate) || [];
+        colors.push(memoColor(memo.bannerColor, todo));
+        map.set(todo.dueDate, colors);
+      }
+    }
+    return map;
+  }, [extras, selectedOwner]);
 
-  const toggleMemoTodo = (memoId: string, todoId: string, done: boolean) => {
-    const current = loadCalendarExtras();
-    updateCalendarExtras({
-      memos: current.memos.map(memo => memo.id !== memoId ? memo : {
-        ...memo,
-        checklist: memo.checklist.map(todo => todo.id === todoId ? { ...todo, done } : todo),
-        updatedAt: new Date().toISOString(),
-      }),
-    });
-  };
+  // ── 备忘录 / 一键清除 / 知情角色 ──
+  const [toolView, setToolView] = useState<CalendarToolView | null>(null);
+  const [confirmRequest, setConfirmRequest] = useState<CalendarConfirmRequest | null>(null);
+  const toolNav = useMemo<CalendarToolNav>(() => ({
+    go: setToolView,
+    confirm: setConfirmRequest,
+    notify: (message) => onNotice?.(message),
+  }), [onNotice]);
+  const accessCharacters = useMemo(
+    () => (toolView?.kind === "access"
+      ? loadCharacters().map(char => ({ id: char.id, name: char.name, avatar: char.avatar || undefined }))
+      : []),
+    [toolView],
+  );
 
   // 经期标注：覆盖月历页 ±1 年范围
   const cycleMap = useMemo(() => {
@@ -640,9 +652,11 @@ export function PhoneCalendarApp({
             itemsByDate={itemsByDate}
             cycleMap={cycleMap}
             ownerStrip={ownerStrip}
+            memoDotsByDate={memoDotsByDate}
             onPickDay={openDetail}
             onClose={onClose}
             onOpenTheme={() => setShowThemePanel(true)}
+            onOpenAccess={() => setToolView({ kind: "access" })}
           />
         ) : (
           <CalendarDetailPage
@@ -656,8 +670,8 @@ export function PhoneCalendarApp({
               <CalendarScheduleBanners
                 groups={bannerGroups}
                 onOpenItem={openEditItem}
-                onToggleEventTodo={toggleEventTodo}
-                onToggleMemoTodo={toggleMemoTodo}
+                onToggleEventTodo={setEventTodoDone}
+                onToggleMemoTodo={setMemoTodoDone}
               />
             )}
             weekStartDay={config.weekStartDay}
@@ -672,6 +686,43 @@ export function PhoneCalendarApp({
 
         {fabMenuOpen ? <div className="calendar-fab-backdrop" onClick={() => setFabMenuOpen(false)} /> : null}
         <div className="calendar-fab-stack">
+          {fabMenuOpen && selectedOwner?.ownerType === "user" ? (
+            <div className="calendar-fab-menu caltool-fab-menu" role="menu">
+              <button
+                type="button"
+                className="calendar-fab-menu-item"
+                onClick={() => {
+                  setFabMenuOpen(false);
+                  openNewDraft(view === "detail" ? selectedDate : todayIso);
+                }}
+              >
+                <span className="caltool-menu-icon" aria-hidden="true">＋</span>
+                <span>添加日程</span>
+              </button>
+              <button
+                type="button"
+                className="calendar-fab-menu-item"
+                onClick={() => {
+                  setFabMenuOpen(false);
+                  setToolView({ kind: "memoList" });
+                }}
+              >
+                <span className="caltool-menu-icon" aria-hidden="true">☷</span>
+                <span>备忘录</span>
+              </button>
+              <button
+                type="button"
+                className="calendar-fab-menu-item caltool-menu-danger"
+                onClick={() => {
+                  setFabMenuOpen(false);
+                  setToolView({ kind: "clearMenu" });
+                }}
+              >
+                <span className="caltool-menu-icon" aria-hidden="true">⌫</span>
+                <span>一键清除</span>
+              </button>
+            </div>
+          ) : null}
           {fabMenuOpen && selectedOwner?.ownerType === "character" ? (
             <div className="calendar-fab-menu" role="menu">
               <button
@@ -716,15 +767,9 @@ export function PhoneCalendarApp({
             type="button"
             className="calendar-fab calendar-fab-primary"
             data-loading={isGenerating ? "true" : undefined}
-            onClick={() => {
-              if (selectedOwner?.ownerType === "character") {
-                setFabMenuOpen(prev => !prev);
-              } else {
-                openNewDraft(view === "detail" ? selectedDate : todayIso);
-              }
-            }}
-            aria-label={selectedOwner?.ownerType === "character" ? "日程操作菜单" : "新增事项"}
-            aria-expanded={selectedOwner?.ownerType === "character" ? fabMenuOpen : undefined}
+            onClick={() => setFabMenuOpen(prev => !prev)}
+            aria-label="日程操作菜单"
+            aria-expanded={fabMenuOpen}
           >
             <Plus size={20} style={{ transform: fabMenuOpen ? "rotate(45deg)" : undefined, transition: "transform 0.2s" }} />
           </button>
@@ -1037,6 +1082,9 @@ export function PhoneCalendarApp({
           </div>
         </div>
       )}
+
+      {toolView ? <CalendarToolModal view={toolView} nav={toolNav} characters={accessCharacters} /> : null}
+      {confirmRequest ? <CalendarConfirmSheet request={confirmRequest} close={() => setConfirmRequest(null)} /> : null}
     </div>
   );
 }
