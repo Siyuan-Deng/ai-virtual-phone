@@ -1534,16 +1534,77 @@
   }
 }
 
-/* ── 日程附加信息：全天 / 备注 / 待办 ── */
-.calendar-all-day-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 2px 4px;
+/* ── 日程附加信息：全天 / 备注 / 待办 ──
+   尺寸、圆角、字重都照搬「用户日历增强版」插件原本的样子，只换了类名。 */
+.calendar-dt-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 66px;
+  gap: 8px;
+  align-items: end;
 }
 
-.calendar-edit-modal [data-disabled] {
-  opacity: 0.45;
+.calendar-dt-row > * {
+  min-width: 0;
+}
+
+.calendar-dt-row .ui-input {
+  min-width: 0;
+  padding-left: 10px;
+  padding-right: 8px;
+}
+
+.calendar-dt-row .ui-input:disabled {
+  opacity: 1;
+  background: color-mix(in srgb, var(--c-calendar-faint) 12%, var(--c-calendar-surface));
+  color: var(--c-calendar-faint);
+  -webkit-text-fill-color: var(--c-calendar-faint);
+  cursor: not-allowed;
+}
+
+.calendar-dt-toggle {
+  height: 38px;
+  min-height: 38px;
+  align-self: end;
+  border: 0;
+  border-radius: 10px;
+  background: var(--c-calendar-surface);
+  color: var(--c-calendar-sub);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.calendar-dt-toggle[data-active="true"] {
+  background: var(--c-calendar-sel-bg);
+  color: var(--c-calendar-sel-fg);
+}
+
+/* 第二行右侧占位，保证两行的三栏对齐 */
+.calendar-dt-toggle-slot {
+  display: block;
+  height: 38px;
+}
+
+/* 全天时时间框显示「无需填写」，真实值藏起来但仍然保留着 */
+.calendar-field-unavailable {
+  position: relative;
+}
+
+.calendar-field-unavailable::after {
+  content: "无需填写";
+  position: absolute;
+  left: 11px;
+  bottom: 11px;
+  color: var(--c-calendar-faint);
+  font-size: 11px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.calendar-field-unavailable > .ui-input:disabled {
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
 }
 
 .calendar-note-input {
@@ -1553,69 +1614,130 @@
   padding: 10px 12px;
 }
 
-.calendar-todo-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.calendar-todo-add,
-.calendar-todo-remove {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--c-icon);
-  cursor: pointer;
-}
-
-.calendar-todo-add:active,
-.calendar-todo-remove:active {
-  background: var(--c-page-body-bg);
-}
-
-.calendar-todo-empty {
-  padding: 4px 0 2px;
-}
-
-.calendar-todo-list {
+.calendar-checklist {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
 }
 
-.calendar-todo-row {
-  display: flex;
+.calendar-check-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 30px;
+  gap: 7px;
   align-items: center;
-  gap: 8px;
 }
 
-.calendar-todo-row .ui-input {
-  flex: 1;
-  min-width: 0;
+.calendar-check-row input[type="checkbox"] {
+  width: 19px;
+  height: 19px;
+  accent-color: var(--c-calendar-sel-bg);
 }
 
-.calendar-todo-check {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  padding: 0;
-  border: 1.5px solid var(--c-icon);
-  border-radius: 6px;
-  background: none;
-  color: #fff;
+.calendar-check-row .ui-input {
+  padding: 9px 11px;
+}
+
+.calendar-icon-button {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--c-calendar-surface);
+  color: var(--c-calendar-sub);
+  font-size: 20px;
+  line-height: 1;
   cursor: pointer;
 }
 
-.calendar-todo-check[data-done] {
-  background: var(--c-icon-active, #4a7cf0);
-  border-color: var(--c-icon-active, #4a7cf0);
+.calendar-add-row {
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  color: var(--c-calendar-ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 8px 2px;
+  cursor: pointer;
+}
+
+/* ── 日详情顶部横幅：全天 / 节假日 / 待办 ──
+   照搬插件 ucal-schedule-banner-line 那一套，挂在原生经期行的版式上。 */
+.calendar-banner-line {
+  align-items: center;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.calendar-banner-line--all-day {
+  background: var(--ev-bg, var(--c-calendar-surface));
+}
+
+.calendar-banner-line--todo {
+  background: var(--c-calendar-sheet);
+}
+
+.calendar-banner-items {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.calendar-banner-item {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 3px 0;
+  color: var(--c-calendar-ink);
+}
+
+.calendar-banner-item.is-event-link {
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.calendar-banner-item.is-event-link:focus-visible {
+  outline: 2px solid var(--ev-fg, var(--c-calendar-sel-bg));
+  outline-offset: 1px;
+}
+
+.calendar-banner-item > .calendar-banner-dot {
+  width: 6px;
+  height: 6px;
+  margin: 0;
+  align-self: center;
+  flex: none;
+  background: var(--ev-fg, var(--c-calendar-sub)) !important;
+}
+
+.calendar-banner-copy {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.calendar-banner-item.is-done .calendar-banner-copy {
+  text-decoration: line-through;
+  color: var(--c-calendar-faint);
+}
+
+.calendar-banner-item input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  justify-self: end;
+  accent-color: var(--ev-fg, var(--c-calendar-sel-bg));
+}
+
+.calendar-banner-spacer {
+  width: 20px;
+  height: 20px;
 }

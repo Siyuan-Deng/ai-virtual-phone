@@ -24,18 +24,77 @@ type PersistedCalendarStore = {
   plans: CalendarWeekPlan[];
 };
 
+export type CalendarReadScope = "chat_and_story" | "chat_only" | "story_only";
+export type CalendarWeekStartDay = "monday" | "sunday";
+
 export type CalendarConfig = {
   autoGenerateEnabled: boolean;
   theme: string;
   /** 详情页时间轴一页显示的天数（1/2/3/5/7），默认 2 */
   daysPerPage: number;
+
+  // ↓ 以下从「用户日历与备忘录增强」插件搬来，含义、范围和默认值都和插件一致
+  /** 角色在哪些场景里读得到用户日历 */
+  scope: CalendarReadScope;
+  /** 日程开始 / 待办截止前多少分钟主动提醒一次；0 关闭，0–1440 */
+  nearMinutes: number;
+  /** 提示词里读今天起未来几天，1–31 */
+  futureDays: number;
+  /** 每轮提示词最多带几条日程，1–150 */
+  maxEvents: number;
+  /** 只改显示顺序，不改日程日期 */
+  weekStartDay: CalendarWeekStartDay;
+  /** 提示词是否带上今天已经结束的日程 */
+  includePastToday: boolean;
+  chinaHolidays: boolean;
+  ontarioHolidays: boolean;
+  /** "auto" / 色键 / #hex */
+  chinaHolidayColor: string;
+  ontarioHolidayColor: string;
+  /** 设置从哪个插件搬来的；有值就不再搬第二次 */
+  pluginSettingsMigratedFrom?: string;
 };
 
-const DEFAULT_CALENDAR_CONFIG: CalendarConfig = {
+export const DEFAULT_CALENDAR_CONFIG: CalendarConfig = {
   autoGenerateEnabled: false,
   theme: "light",
   daysPerPage: 2,
+  scope: "chat_and_story",
+  nearMinutes: 180,
+  futureDays: 7,
+  maxEvents: 40,
+  weekStartDay: "monday",
+  includePastToday: true,
+  chinaHolidays: true,
+  ontarioHolidays: false,
+  chinaHolidayColor: "auto",
+  ontarioHolidayColor: "auto",
 };
+
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.round(number))) : fallback;
+}
+
+/** 把任意来源的设置值收成合法的 CalendarConfig 字段（插件设置也走这里） */
+export function normalizeCalendarConfig(raw: Partial<CalendarConfig> & Record<string, unknown>): CalendarConfig {
+  const merged = { ...DEFAULT_CALENDAR_CONFIG, ...raw } as CalendarConfig;
+  return {
+    ...merged,
+    theme: normalizeCalendarTheme(merged.theme),
+    daysPerPage: normalizeCalendarDaysPerPage(merged.daysPerPage),
+    scope: merged.scope === "chat_only" || merged.scope === "story_only" ? merged.scope : "chat_and_story",
+    nearMinutes: clampInt(merged.nearMinutes, 180, 0, 1440),
+    futureDays: clampInt(merged.futureDays, 7, 1, 31),
+    maxEvents: clampInt(merged.maxEvents, 40, 1, 150),
+    weekStartDay: merged.weekStartDay === "sunday" ? "sunday" : "monday",
+    includePastToday: merged.includePastToday !== false,
+    chinaHolidays: merged.chinaHolidays !== false,
+    ontarioHolidays: merged.ontarioHolidays === true,
+    chinaHolidayColor: typeof merged.chinaHolidayColor === "string" && merged.chinaHolidayColor ? merged.chinaHolidayColor : "auto",
+    ontarioHolidayColor: typeof merged.ontarioHolidayColor === "string" && merged.ontarioHolidayColor ? merged.ontarioHolidayColor : "auto",
+  };
+}
 
 export const CALENDAR_DAYS_PER_PAGE_OPTIONS = [1, 2, 3, 5, 7] as const;
 
@@ -84,10 +143,7 @@ export function loadCalendarConfig(): CalendarConfig {
   try {
     const raw = kvGet(CALENDAR_CONFIG_KEY);
     if (!raw) return { ...DEFAULT_CALENDAR_CONFIG };
-    const parsed = { ...DEFAULT_CALENDAR_CONFIG, ...JSON.parse(raw) } as CalendarConfig;
-    parsed.theme = normalizeCalendarTheme(parsed.theme);
-    parsed.daysPerPage = normalizeCalendarDaysPerPage(parsed.daysPerPage);
-    return parsed;
+    return normalizeCalendarConfig(JSON.parse(raw));
   } catch {
     return { ...DEFAULT_CALENDAR_CONFIG };
   }

@@ -48,11 +48,13 @@ import { CalendarMonthPage } from "./calendar/month-page";
 import { CalendarDetailPage } from "./calendar/detail-page";
 import { CalendarEventEditModal, type CalendarEventDraft } from "./calendar/event-edit-modal";
 import {
+  CALENDAR_EXTRAS_UPDATED_EVENT,
   loadCalendarExtras,
   normalizeCalendarTodos,
   updateCalendarExtras,
   type CalendarEventDetails,
 } from "@/lib/calendar-extras";
+import { CalendarScheduleBanners, buildBannerGroups } from "./calendar/schedule-banners";
 
 type OwnerOption = {
   key: string;
@@ -205,6 +207,13 @@ export function PhoneCalendarApp({
   );
   const weekStart = useMemo(() => getWeekStartIso(parseIsoDate(selectedDate)), [selectedDate]);
 
+  const [extras, setExtras] = useState(() => loadCalendarExtras());
+  useEffect(() => {
+    const reload = () => setExtras(loadCalendarExtras());
+    window.addEventListener(CALENDAR_EXTRAS_UPDATED_EVENT, reload);
+    return () => window.removeEventListener(CALENDAR_EXTRAS_UPDATED_EVENT, reload);
+  }, []);
+
   const itemsByDate = useMemo(() => {
     const map = new Map<string, CalendarScheduleItem[]>();
     for (const plan of ownerPlans) {
@@ -219,6 +228,54 @@ export function PhoneCalendarApp({
     }
     return map;
   }, [ownerPlans]);
+
+  /** 时间轴用的那份：全天日程挪去顶部横幅，不在时间轴上占格子 */
+  const timelineItemsByDate = useMemo(() => {
+    if (selectedOwner?.ownerType !== "user") return itemsByDate;
+    const map = new Map<string, CalendarScheduleItem[]>();
+    for (const [date, list] of itemsByDate) {
+      map.set(date, list.filter(item => extras.eventDetails[item.id]?.allDay !== true));
+    }
+    return map;
+  }, [extras, itemsByDate, selectedOwner]);
+
+  const bannerGroups = useMemo(
+    () => buildBannerGroups(
+      selectedDate,
+      // 日程和备忘录横幅只在自己的日历上出；看角色日历时只剩节假日
+      selectedOwner?.ownerType === "user" ? (itemsByDate.get(selectedDate) ?? []) : [],
+      selectedOwner?.ownerType === "user" ? extras : { ...extras, memos: [], eventDetails: {} },
+      config,
+    ),
+    [config, extras, itemsByDate, selectedDate, selectedOwner],
+  );
+
+  const toggleEventTodo = (itemId: string, todoId: string, done: boolean) => {
+    const current = loadCalendarExtras();
+    const details = current.eventDetails[itemId];
+    if (!details) return;
+    updateCalendarExtras({
+      eventDetails: {
+        ...current.eventDetails,
+        [itemId]: {
+          ...details,
+          todos: details.todos.map(todo => todo.id === todoId ? { ...todo, done } : todo),
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    });
+  };
+
+  const toggleMemoTodo = (memoId: string, todoId: string, done: boolean) => {
+    const current = loadCalendarExtras();
+    updateCalendarExtras({
+      memos: current.memos.map(memo => memo.id !== memoId ? memo : {
+        ...memo,
+        checklist: memo.checklist.map(todo => todo.id === todoId ? { ...todo, done } : todo),
+        updatedAt: new Date().toISOString(),
+      }),
+    });
+  };
 
   // 经期标注：覆盖月历页 ±1 年范围
   const cycleMap = useMemo(() => {
@@ -578,6 +635,7 @@ export function PhoneCalendarApp({
       <div className="calendar-app">
         {view === "month" ? (
           <CalendarMonthPage
+            weekStartDay={config.weekStartDay}
             todayIso={todayIso}
             itemsByDate={itemsByDate}
             cycleMap={cycleMap}
@@ -591,9 +649,18 @@ export function PhoneCalendarApp({
             key={detailKey}
             initialDate={selectedDate}
             todayIso={todayIso}
-            itemsByDate={itemsByDate}
+            itemsByDate={timelineItemsByDate}
             cycleMap={cycleMap}
             cyclePanel={cyclePanel}
+            bannerPanel={(
+              <CalendarScheduleBanners
+                groups={bannerGroups}
+                onOpenItem={openEditItem}
+                onToggleEventTodo={toggleEventTodo}
+                onToggleMemoTodo={toggleMemoTodo}
+              />
+            )}
+            weekStartDay={config.weekStartDay}
             daysPerPage={config.daysPerPage}
             onOpenDaysPicker={() => setShowDaysPanel(true)}
             onOpenCycleSettings={selectedOwner?.ownerType === "user" ? openMenstrualSettings : null}

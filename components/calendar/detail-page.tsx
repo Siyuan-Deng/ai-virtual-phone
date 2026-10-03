@@ -10,14 +10,20 @@ import { getLunarInfoByIso } from "@/lib/lunar";
 const WEEKDAY_CN = ["日", "一", "二", "三", "四", "五", "六"];
 const WEEK_LABEL = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 const HOUR_H = 48;
-const DAY_MS = 86400000;
 const STRIP_RADIUS = 8;   // 周条 ±8 周
 const DAY_RADIUS = 21;    // 时间轴 ±21 天（7 天/页时也够滑三页，且整周对齐）
 
-const addDaysIso = (iso: string, n: number) => formatIsoDate(new Date(parseIsoDate(iso).getTime() + n * DAY_MS));
-const sundayStartOf = (iso: string) => {
+// 按日历日加减，不按毫秒：夏令时切换那天有 23 或 25 小时，「+n×24 小时」会
+// 停在同一天（比如多伦多 11 月 1 日加一天还是 11 月 1 日），日期条就会重复一天。
+const addDaysIso = (iso: string, n: number) => {
   const d = parseIsoDate(iso);
-  return addDaysIso(iso, -d.getDay());
+  d.setDate(d.getDate() + n);
+  return formatIsoDate(d);
+};
+/** 这一周第一天：周一开头或周日开头 */
+const weekStartOf = (iso: string, mondayFirst: boolean) => {
+  const day = parseIsoDate(iso).getDay();
+  return addDaysIso(iso, -(mondayFirst ? (day + 6) % 7 : day));
 };
 
 type PositionedEvent = {
@@ -90,6 +96,8 @@ export function CalendarDetailPage({
   onBack,
   onSelectedChange,
   onEditItem,
+  weekStartDay,
+  bannerPanel,
 }: {
   initialDate: string;
   todayIso: string;
@@ -106,7 +114,13 @@ export function CalendarDetailPage({
   onBack: () => void;
   onSelectedChange: (iso: string) => void;
   onEditItem: (item: CalendarScheduleItem) => void;
+  /** 每周从周一还是周日开始；只影响显示顺序 */
+  weekStartDay: "monday" | "sunday";
+  /** 全天日程、节假日、待办横幅，渲染在经期行下面、时间轴列头上面 */
+  bannerPanel: ReactNode;
 }) {
+  const mondayFirst = weekStartDay === "monday";
+  const weekdayLabels = mondayFirst ? [...WEEKDAY_CN.slice(1), WEEKDAY_CN[0]] : WEEKDAY_CN;
   const [center, setCenter] = useState(initialDate);
   const [selectedIso, setSelectedIso] = useState(initialDate);
   const selectedRef = useRef(initialDate);
@@ -122,9 +136,9 @@ export function CalendarDetailPage({
   );
 
   const weeks = useMemo(() => {
-    const base = sundayStartOf(center);
+    const base = weekStartOf(center, mondayFirst);
     return Array.from({ length: STRIP_RADIUS * 2 + 1 }, (_, i) => addDaysIso(base, (i - STRIP_RADIUS) * 7));
-  }, [center]);
+  }, [center, mondayFirst]);
 
   const days = useMemo(
     () => Array.from({ length: DAY_RADIUS * 2 + 1 }, (_, i) => addDaysIso(center, i - DAY_RADIUS)),
@@ -142,7 +156,7 @@ export function CalendarDetailPage({
     strip.querySelectorAll<HTMLElement>(".calendar-strip-bubble").forEach(b => { b.style.display = "none"; });
     strip.querySelectorAll(".calendar-strip-cell.is-selected").forEach(c => c.classList.remove("is-selected"));
     const sel = selectedRef.current;
-    const panel = strip.querySelector<HTMLElement>(`[data-week="${sundayStartOf(sel)}"]`);
+    const panel = strip.querySelector<HTMLElement>(`[data-week="${weekStartOf(sel, mondayFirst)}"]`);
     if (!panel) return;
     const cell = panel.querySelector<HTMLElement>(`[data-date="${sel}"]`);
     if (!cell) return;
@@ -152,7 +166,7 @@ export function CalendarDetailPage({
     const x = cell.offsetLeft + cell.offsetWidth / 2 - 24;
     bubble.style.display = "block";
     bubble.classList.toggle("is-today", sel === todayIso);
-    const samePanelPrev = prevIso && sundayStartOf(prevIso) === sundayStartOf(sel);
+    const samePanelPrev = prevIso && weekStartOf(prevIso, mondayFirst) === weekStartOf(sel, mondayFirst);
     if (animate && samePanelPrev && !reducedMotion) {
       const prevCell = panel.querySelector<HTMLElement>(`[data-date="${prevIso}"]`);
       const x0 = prevCell ? prevCell.offsetLeft + prevCell.offsetWidth / 2 - 24 : x;
@@ -188,20 +202,23 @@ export function CalendarDetailPage({
     const frac = fIdx - Math.floor(fIdx);
     const d0 = list[base];
     if (!d0) return;
-    const panel = strip.querySelector<HTMLElement>(`[data-week="${sundayStartOf(d0)}"]`);
+    const panel = strip.querySelector<HTMLElement>(`[data-week="${weekStartOf(d0, mondayFirst)}"]`);
     if (!panel) return;
     const pill = panel.querySelector<HTMLElement>(".calendar-strip-range");
     if (!pill) return;
     const cellW = panel.clientWidth / 7;
     pill.style.display = "block";
     pill.style.width = `${cellW * dppRef.current}px`;
-    pill.style.transform = `translateX(${(parseIsoDate(d0).getDay() + frac) * cellW}px)`;
+    // 列号要按周起始日换算：周一开头时周一是第 0 格，不能直接拿 getDay()
+    const day = parseIsoDate(d0).getDay();
+    const column = mondayFirst ? (day + 6) % 7 : day;
+    pill.style.transform = `translateX(${(column + frac) * cellW}px)`;
   };
 
   const snapStripTo = (iso: string, smooth: boolean) => {
     const strip = stripRef.current;
     if (!strip) return;
-    const panel = strip.querySelector<HTMLElement>(`[data-week="${sundayStartOf(iso)}"]`);
+    const panel = strip.querySelector<HTMLElement>(`[data-week="${weekStartOf(iso, mondayFirst)}"]`);
     if (!panel) return;
     strip.scrollTo({ left: panel.offsetLeft - strip.offsetLeft, behavior: smooth ? "smooth" : "auto" });
   };
@@ -333,7 +350,7 @@ export function CalendarDetailPage({
       </div>
 
       <div className="calendar-weekday-head calendar-strip-head" aria-hidden="true">
-        {WEEKDAY_CN.map(w => (
+        {weekdayLabels.map(w => (
           <span key={w}>{w}</span>
         ))}
       </div>
@@ -369,6 +386,8 @@ export function CalendarDetailPage({
       </div>
 
       {cyclePanel}
+
+      {bannerPanel}
 
       {/* 列头版头：固定在时间轴上方，横向随时间轴同步滚动 */}
       <div className="calendar-tl-headrow">

@@ -45,7 +45,7 @@ import { AppMarketApp } from "@/components/app-market/app-market-app";
 import { CustomAppRunner } from "@/components/app-market/custom-app-runner";
 import { CustomAppForegroundBoundary } from "@/components/app-market/custom-app-failure";
 import { hydrateKvDb, kvGet, kvSet, kvRemove, kvKeysWithPrefix } from "@/lib/kv-db";
-import { migrateCalendarExtrasFromPlugin } from "@/lib/calendar-extras";
+import { migrateCalendarExtrasFromPlugin, migrateCalendarSettingsFromPlugin } from "@/lib/calendar-extras";
 import { deleteDatabase } from "@/lib/data-management/idb";
 import { hydrateStoryStorage } from "@/lib/story-storage";
 import { hydrateMomentsStorage } from "@/lib/moments-storage";
@@ -1808,6 +1808,15 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
         }
       } catch (err) {
         console.warn("[Calendar] 日历增强数据迁移失败:", err);
+      }
+      // 设置单独记一个「搬过了」，所以数据已经搬过的老用户这次也会补搬设置
+      try {
+        const settingsMigration = migrateCalendarSettingsFromPlugin();
+        if (settingsMigration.status === "migrated") {
+          console.info(`[Calendar] 已从插件 ${settingsMigration.from} 搬入日历设置`);
+        }
+      } catch (err) {
+        console.warn("[Calendar] 日历设置迁移失败:", err);
       }
 
       // One-time cleanup of the orphaned folder-backup handle DB. The removed

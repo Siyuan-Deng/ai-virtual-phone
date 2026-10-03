@@ -13,7 +13,8 @@ const WEEKDAY_CN = ["日", "一", "二", "三", "四", "五", "六"];
 type MonthCell = {
   iso: string;
   day: number;
-  weekday: number;      // 0 = 周日
+  /** 在这一行的第几格（0 起）；按周起始日换算过，不是 getDay() */
+  weekday: number;
   lunarLabel: string;
   lunarFirst: boolean;
 };
@@ -27,7 +28,12 @@ type MonthBlock = {
 };
 
 /** 构建 today ±12 个月的月历数据（农历只算一次） */
-function buildMonths(todayIso: string): MonthBlock[] {
+/** 星期几在这一行里排第几格：周一开头时周一是第 0 格、周日是第 6 格 */
+function columnOf(weekday: number, mondayFirst: boolean): number {
+  return mondayFirst ? (weekday + 6) % 7 : weekday;
+}
+
+function buildMonths(todayIso: string, mondayFirst: boolean): MonthBlock[] {
   const today = new Date(`${todayIso}T00:00:00`);
   const blocks: MonthBlock[] = [];
   for (let m = -12; m <= 12; m++) {
@@ -39,7 +45,7 @@ function buildMonths(todayIso: string): MonthBlock[] {
     let week: MonthCell[] = [];
     for (let day = 1; day <= daysInMonth; day++) {
       const d = new Date(year, month, day);
-      if (week.length > 0 && d.getDay() === 0) {
+      if (week.length > 0 && columnOf(d.getDay(), mondayFirst) === 0) {
         weeks.push(week);
         week = [];
       }
@@ -47,13 +53,13 @@ function buildMonths(todayIso: string): MonthBlock[] {
       week.push({
         iso: formatIsoDate(d),
         day,
-        weekday: d.getDay(),
+        weekday: columnOf(d.getDay(), mondayFirst),
         lunarLabel: lunar?.cellLabel ?? "",
         lunarFirst: lunar?.isFirstDay ?? false,
       });
     }
     if (week.length > 0) weeks.push(week);
-    blocks.push({ ym: `${year}-${month}`, year, month, firstWeekday: first.getDay(), weeks });
+    blocks.push({ ym: `${year}-${month}`, year, month, firstWeekday: columnOf(first.getDay(), mondayFirst), weeks });
   }
   return blocks;
 }
@@ -66,7 +72,9 @@ export function CalendarMonthPage({
   onPickDay,
   onClose,
   onOpenTheme,
+  weekStartDay,
 }: {
+  weekStartDay: "monday" | "sunday";
   todayIso: string;
   itemsByDate: Map<string, CalendarScheduleItem[]>;
   cycleMap: Map<string, MenstrualDayState> | null;
@@ -75,7 +83,9 @@ export function CalendarMonthPage({
   onClose: () => void;
   onOpenTheme: () => void;
 }) {
-  const months = useMemo(() => buildMonths(todayIso), [todayIso]);
+  const mondayFirst = weekStartDay === "monday";
+  const months = useMemo(() => buildMonths(todayIso, mondayFirst), [todayIso, mondayFirst]);
+  const weekdayLabels = mondayFirst ? [...WEEKDAY_CN.slice(1), WEEKDAY_CN[0]] : WEEKDAY_CN;
   const todayYm = useMemo(() => {
     const d = new Date(`${todayIso}T00:00:00`);
     return `${d.getFullYear()}-${d.getMonth()}`;
@@ -198,7 +208,7 @@ export function CalendarMonthPage({
           <strong>{MONTH_CN[titleMonth] ?? ""}</strong>
         </div>
         <div className="calendar-weekday-head" aria-hidden="true">
-          {WEEKDAY_CN.map(w => (
+          {weekdayLabels.map(w => (
             <span key={w}>{w}</span>
           ))}
         </div>

@@ -6,6 +6,7 @@
 // 数据要原样搬进来，形状对不上就得写转换，转换就有丢字段的风险。
 
 import { kvGet, kvKeysWithPrefix, kvSet, registerKvMigration } from "./kv-db";
+import { loadCalendarConfig, normalizeCalendarConfig, saveCalendarConfig } from "./calendar-storage";
 
 const EXTRAS_KEY = "ai_phone_calendar_extras_v1";
 registerKvMigration(EXTRAS_KEY);
@@ -330,4 +331,56 @@ export function migrateCalendarExtrasFromPlugin(): CalendarMigrationResult {
         };
     }
     return { status: "nothing" };
+}
+
+// ── 设置也搬 ──
+// 插件的设置不在数据桶里，而在已安装插件列表 chat_plugins_v3 里那一项的
+// .settings 下。数据桶的 key 里带着插件 id，按 id 找到那一项就行。
+
+const PLUGIN_LIST_KEY = "chat_plugins_v3";
+const PLUGIN_SETTING_KEYS = [
+    "scope", "nearMinutes", "futureDays", "maxEvents", "weekStartDay",
+    "includePastToday", "chinaHolidays", "ontarioHolidays", "chinaHolidayColor", "ontarioHolidayColor",
+] as const;
+
+type InstalledPluginLike = { manifest?: { id?: string; settings?: Array<{ key?: string }> }; settings?: Record<string, unknown> };
+
+/** 找日历插件那一项：优先按数据桶记下的 id，找不到再按设置项的形状认 */
+function findCalendarPluginEntry(list: InstalledPluginLike[], preferredId: string | null): InstalledPluginLike | null {
+    if (preferredId) {
+        const byId = list.find((entry) => entry?.manifest?.id === preferredId);
+        if (byId) return byId;
+    }
+    return list.find((entry) => {
+        const keys = (entry?.manifest?.settings || []).map((field) => field?.key);
+        return keys.includes("weekStartDay") && keys.includes("chinaHolidays") && keys.includes("nearMinutes");
+    }) || null;
+}
+
+export function migrateCalendarSettingsFromPlugin(): { status: "already" | "nothing" } | { status: "migrated"; from: string } {
+    if (typeof window === "undefined") return { status: "nothing" };
+    const config = loadCalendarConfig();
+    if (config.pluginSettingsMigratedFrom) return { status: "already" };
+
+    let list: InstalledPluginLike[] = [];
+    try {
+        const parsed = JSON.parse(kvGet(PLUGIN_LIST_KEY) || "[]");
+        list = Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return { status: "nothing" };
+    }
+
+    const bucket = loadCalendarExtras().migratedFrom || "";
+    const preferredId = bucket.startsWith(PLUGIN_DATA_PREFIX) ? bucket.slice(PLUGIN_DATA_PREFIX.length) : null;
+    const entry = findCalendarPluginEntry(list, preferredId);
+    const id = entry?.manifest?.id;
+    if (!entry || !id) return { status: "nothing" };
+
+    const picked: Record<string, unknown> = {};
+    for (const key of PLUGIN_SETTING_KEYS) {
+        if (entry.settings && key in entry.settings) picked[key] = entry.settings[key];
+    }
+    // 走一遍规范化：插件里存的值也可能越界或类型不对
+    saveCalendarConfig(normalizeCalendarConfig({ ...config, ...picked, pluginSettingsMigratedFrom: id }));
+    return { status: "migrated", from: id };
 }
