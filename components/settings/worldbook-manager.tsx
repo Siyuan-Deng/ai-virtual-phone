@@ -331,15 +331,14 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
         }
         setSubpageRightAction("worldbook",
             <div className="flex items-center gap-2">
-                {/* 文件夹只有一层：在文件夹里面不再显示「新建文件夹」。
-                    标题栏右边只留了一点位置，三个带字的按钮会盖住返回键，所以这个只放图标 */}
+                {/* 三个都只放图标、不带阴影；文件夹只有一层，在文件夹里面不再显示「新建文件夹」 */}
                 {currentFolderId ? null : (
                     <button
                         type="button"
                         onClick={() => openFolderNameDialog({ mode: "create" })}
                         aria-label="新建文件夹"
                         title="新建文件夹"
-                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white text-gray-800 shadow-sm transition-all hover:bg-gray-50 hover:shadow-md active:scale-95 focus:outline-none"
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white text-gray-800 transition-all hover:bg-gray-50 active:scale-95 focus:outline-none"
                     >
                         <FolderPlus size={16} strokeWidth={1.8} />
                     </button>
@@ -347,18 +346,20 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                 <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-[20px] border border-black/10 bg-white px-4 text-xs font-bold text-gray-800 shadow-sm transition-all hover:bg-gray-50 hover:shadow-md active:scale-95 focus:outline-none"
+                    aria-label="导入世界书"
+                    title="导入世界书"
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white text-gray-800 transition-all hover:bg-gray-50 active:scale-95 focus:outline-none"
                 >
-                    <Upload size={15} strokeWidth={1.8} />
-                    <span>导入世界书</span>
+                    <Upload size={16} strokeWidth={1.8} />
                 </button>
                 <button
                     type="button"
                     onClick={addBook}
-                    className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-[20px] bg-black px-4 text-xs font-bold text-white shadow-sm transition-all hover:bg-gray-800 hover:shadow-md active:scale-95 focus:outline-none"
+                    aria-label="新建世界书"
+                    title="新建世界书"
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-black text-white transition-all hover:bg-gray-800 active:scale-95 focus:outline-none"
                 >
-                    <Plus size={15} strokeWidth={1.8} />
-                    <span>新建世界书</span>
+                    <Plus size={16} strokeWidth={1.8} />
                 </button>
             </div>
         );
@@ -617,7 +618,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                             <button
                                 type="button"
                                 onClick={() => setMoveSelection(new Set())}
-                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] bg-black px-4 text-xs font-bold text-white shadow-sm transition-all hover:bg-gray-800 hover:shadow-md active:scale-95"
+                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] bg-black px-4 text-xs font-bold text-white transition-all hover:bg-gray-800 active:scale-95"
                             >
                                 <FolderInput size={15} strokeWidth={1.8} />
                                 <span>移入世界书</span>
@@ -625,7 +626,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                             <button
                                 type="button"
                                 onClick={() => openFolderNameDialog({ mode: "rename", id: currentFolder.id })}
-                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] border border-black/10 bg-white px-4 text-xs font-bold text-gray-800 shadow-sm transition-all hover:bg-gray-50 hover:shadow-md active:scale-95"
+                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] border border-black/10 bg-white px-4 text-xs font-bold text-gray-800 transition-all hover:bg-gray-50 active:scale-95"
                             >
                                 <Pencil size={15} strokeWidth={1.8} />
                                 <span>重命名</span>
@@ -633,7 +634,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                             <button
                                 type="button"
                                 onClick={() => setConfirmDeleteFolderId(currentFolder.id)}
-                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] border border-black/10 bg-white px-4 text-xs font-bold text-[var(--c-danger)] shadow-sm transition-all hover:bg-gray-50 hover:shadow-md active:scale-95"
+                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] border border-black/10 bg-white px-4 text-xs font-bold text-[var(--c-danger)] transition-all hover:bg-gray-50 active:scale-95"
                             >
                                 <Trash2 size={15} strokeWidth={1.8} />
                                 <span>删除文件夹</span>
@@ -735,7 +736,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                 <button
                                     type="button"
                                     onClick={() => duplicateBook(activeBook)}
-                                    className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-[20px] border border-black/10 bg-white px-3 text-xs font-bold text-gray-800 shadow-sm transition-all hover:bg-gray-50 hover:shadow-md active:scale-95"
+                                    className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-[20px] border border-black/10 bg-white px-3 text-xs font-bold text-gray-800 transition-all hover:bg-gray-50 active:scale-95"
                                 >
                                     <Copy size={15} strokeWidth={1.8} />
                                     <span>复制世界书</span>
@@ -743,7 +744,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                 <button
                                     type="button"
                                     onClick={() => handleExport(activeBook)}
-                                    className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-[20px] bg-black px-3 text-xs font-bold text-white shadow-sm transition-all hover:bg-gray-800 hover:shadow-md active:scale-95"
+                                    className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-[20px] bg-black px-3 text-xs font-bold text-white transition-all hover:bg-gray-800 active:scale-95"
                                 >
                                     <Download size={15} strokeWidth={1.8} />
                                     <span>导出世界书</span>
@@ -751,7 +752,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                 <button
                                     type="button"
                                     onClick={() => setConfirmDeleteTarget({ type: 'book', id: activeBook.id })}
-                                    className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-[20px] border border-black/10 bg-white px-3 text-xs font-bold text-[var(--c-danger)] shadow-sm transition-all hover:bg-gray-50 hover:shadow-md active:scale-95"
+                                    className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-[20px] border border-black/10 bg-white px-3 text-xs font-bold text-[var(--c-danger)] transition-all hover:bg-gray-50 active:scale-95"
                                 >
                                     <Trash2 size={15} strokeWidth={1.8} />
                                     <span>删除世界书</span>
