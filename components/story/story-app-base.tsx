@@ -694,9 +694,9 @@ export function StoryApp({ onClose }: StoryAppProps) {
     setDrawerOpen(true);
   }
 
+  /** 换角色时保持当前是正篇还是番外 */
   function pickCharacter(characterId: string) {
     setActiveCharacterId(characterId);
-    setMode("main");
     setDrawerSheet(null);
     setDrawerOpen(false);
   }
@@ -1051,6 +1051,13 @@ export function StoryApp({ onClose }: StoryAppProps) {
           }}
         />
 
+        <StoryRecentSection
+          entries={characterEntries}
+          activeId={activeCharacterId}
+          onPick={pickCharacter}
+          onOpenAll={() => setDrawerSheet({ type: "characters" })}
+        />
+
         {isExtra && extraConfig ? (
           <>
             <StoryExtraBindingsSection
@@ -1099,14 +1106,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
               </button>
             </div>
           </>
-        ) : (
-          <StoryRecentSection
-            entries={characterEntries}
-            activeId={activeCharacterId}
-            onPick={pickCharacter}
-            onOpenAll={() => setDrawerSheet({ type: "characters" })}
-          />
-        )}
+        ) : null}
 
         <div className="story-drawer-section">
           <div className="story-drawer-eyebrow">显示选项</div>

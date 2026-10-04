@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useContext, useCallback } from "react";
-import { Plus, BookOpen, Trash2, Upload, Download, ChevronLeft, AlertCircle, Maximize2, Replace } from "lucide-react";
+import { Plus, BookOpen, Trash2, Upload, Download, ChevronLeft, AlertCircle, Maximize2, Replace, Copy, Folder, FolderPlus, FolderInput, Pencil, Check } from "lucide-react";
 import {
     loadWorldBooks,
     saveWorldBooks,
@@ -12,8 +12,15 @@ import {
 } from "@/lib/settings-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import type { WorldBookConfig, WorldBookEntry } from "@/lib/settings-types";
+import {
+    createWorldBookFolder,
+    groupWorldBooksByFolder,
+    loadWorldBookFolders,
+    saveWorldBookFolders,
+    type WorldBookFolder,
+} from "@/lib/worldbook-folders";
 import { SettingsContext } from "../phone-settings-app";
-import { BottomSheet, ConfirmDialog, TextExpandModal } from "@/components/ui/modal";
+import { BottomSheet, ConfirmDialog, ContentDialog, TextExpandModal } from "@/components/ui/modal";
 import { SwipeActionRow, useSwipeActions } from "@/components/ui/swipe-actions";
 import { notifyMascotPageContext } from "@/lib/mascot-events";
 
@@ -26,6 +33,13 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
     const [isLoaded, setIsLoaded] = useState(false);
     const [expandUid, setExpandUid] = useState<string | null>(null);
     const [importError, setImportError] = useState<string | null>(null);
+    // 文件夹：currentFolderId 是正在看的文件夹（null = 最外层）
+    const [folders, setFolders] = useState<WorldBookFolder[]>([]);
+    const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+    const [folderNameDialog, setFolderNameDialog] = useState<{ mode: "create" } | { mode: "rename"; id: string } | null>(null);
+    const [folderNameDraft, setFolderNameDraft] = useState("");
+    const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState<string | null>(null);
+    const [moveSelection, setMoveSelection] = useState<Set<string> | null>(null);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -38,6 +52,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
             setBooks(loaded);
             setActiveBookId(loaded[0]?.id || "");
         }
+        setFolders(loadWorldBookFolders());
         setIsLoaded(true);
     }, []);
 
@@ -46,22 +61,33 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
         saveWorldBooks(newBooks);
     }, []);
 
+    const persistFolders = useCallback((next: WorldBookFolder[]) => {
+        setFolders(next);
+        saveWorldBookFolders(next);
+    }, []);
+
+    const currentFolder = currentFolderId ? folders.find(f => f.id === currentFolderId) ?? null : null;
+
     const wbContainerRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
         if (viewMode === "detail" && activeBookId) {
+            // 从文件夹里点进来的，返回回到那个文件夹
             setOverrideBack(() => () => setViewMode("list"));
             const target = books.find(b => b.id === activeBookId);
             setSubpageTitle(target?.name || "世界书详情");
+        } else if (currentFolder) {
+            setOverrideBack(() => () => setCurrentFolderId(null));
+            setSubpageTitle(currentFolder.name);
         } else {
             setOverrideBack(null);
             setSubpageTitle(null);
         }
-    }, [viewMode, activeBookId, books, setOverrideBack, setSubpageTitle]);
+    }, [viewMode, activeBookId, books, currentFolder, setOverrideBack, setSubpageTitle]);
 
     useEffect(() => {
         const scrollParent = wbContainerRef.current?.closest(".page-body");
         if (scrollParent) scrollParent.scrollTop = 0;
-    }, [viewMode, activeBookId]);
+    }, [viewMode, activeBookId, currentFolderId]);
 
     // Refresh trigger — incremented when returning from binding page
     const [ctxRefreshKey, setCtxRefreshKey] = useState(0);
@@ -237,11 +263,66 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
 
     // --- Book Level Operations ---
     const addBook = useCallback(() => {
-        const newBook = createWorldBook("新世界书");
+        // 在文件夹里新建就直接放进这个文件夹
+        const newBook = { ...createWorldBook("新世界书"), ...(currentFolderId ? { folderId: currentFolderId } : {}) };
         persist([newBook, ...books]);
         setActiveBookId(newBook.id);
         setViewMode("detail");
-    }, [books, persist]);
+    }, [books, currentFolderId, persist]);
+
+    /** 复制一份：条目全部带上（换新 uid），放在同一个文件夹，打开副本 */
+    const duplicateBook = (book: WorldBookConfig) => {
+        const source = JSON.parse(JSON.stringify(book)) as WorldBookConfig;
+        const base = createWorldBook(`${source.name || "世界书"} 副本`);
+        const copy: WorldBookConfig = {
+            ...source,
+            id: base.id,
+            name: base.name,
+            createdAt: base.createdAt,
+            updatedAt: base.updatedAt,
+            entries: (source.entries || []).map((entry, index) => ({ ...entry, uid: `wb-entry-${base.createdAt}-${index}` })),
+        };
+        persist([copy, ...books]);
+        setActiveBookId(copy.id);
+        setEditingUid(null);
+        setViewMode("detail");
+    };
+
+    // --- Folder Operations ---
+    const openFolderNameDialog = (dialog: { mode: "create" } | { mode: "rename"; id: string }) => {
+        setFolderNameDraft(dialog.mode === "rename" ? folders.find(f => f.id === dialog.id)?.name ?? "" : "");
+        setFolderNameDialog(dialog);
+    };
+
+    const submitFolderName = () => {
+        const dialog = folderNameDialog;
+        if (!dialog) return;
+        setFolderNameDialog(null);
+        if (dialog.mode === "create") {
+            const folder = createWorldBookFolder(folderNameDraft);
+            persistFolders([folder, ...folders]);
+            // 建好直接进去，方便马上把世界书移进来
+            setCurrentFolderId(folder.id);
+            return;
+        }
+        const name = folderNameDraft.trim().slice(0, 40);
+        if (!name) return;
+        persistFolders(folders.map(f => f.id === dialog.id ? { ...f, name } : f));
+    };
+
+    const removeFolder = (folderId: string) => {
+        persistFolders(folders.filter(f => f.id !== folderId));
+        // 里面的世界书回到未分类
+        if (books.some(b => b.folderId === folderId)) {
+            persist(books.map(b => b.folderId === folderId ? { ...b, folderId: undefined, updatedAt: Date.now() } : b));
+        }
+        if (currentFolderId === folderId) setCurrentFolderId(null);
+    };
+
+    const moveBooksToFolder = (bookIds: Set<string>, folderId: string | undefined) => {
+        if (bookIds.size === 0) return;
+        persist(books.map(b => bookIds.has(b.id) ? { ...b, folderId, updatedAt: Date.now() } : b));
+    };
 
     useEffect(() => {
         if (viewMode !== "list") {
@@ -250,6 +331,19 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
         }
         setSubpageRightAction("worldbook",
             <div className="flex items-center gap-2">
+                {/* 文件夹只有一层：在文件夹里面不再显示「新建文件夹」。
+                    标题栏右边只留了一点位置，三个带字的按钮会盖住返回键，所以这个只放图标 */}
+                {currentFolderId ? null : (
+                    <button
+                        type="button"
+                        onClick={() => openFolderNameDialog({ mode: "create" })}
+                        aria-label="新建文件夹"
+                        title="新建文件夹"
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white text-gray-800 shadow-sm transition-all hover:bg-gray-50 hover:shadow-md active:scale-95 focus:outline-none"
+                    >
+                        <FolderPlus size={16} strokeWidth={1.8} />
+                    </button>
+                )}
                 <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -269,7 +363,8 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
             </div>
         );
         return () => setSubpageRightAction("worldbook", null);
-    }, [addBook, setSubpageRightAction, viewMode]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [addBook, setSubpageRightAction, viewMode, currentFolderId, folders]);
 
     const updateBook = (id: string, updates: Partial<WorldBookConfig>) => {
         persist(books.map(b => b.id === id ? { ...b, ...updates, updatedAt: Date.now() } : b));
@@ -296,6 +391,8 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                 const text = event.target?.result as string;
                 const parsed = parseWorldBookFromJson(text);
                 if (parsed) {
+                    // 在文件夹里导入就放进这个文件夹
+                    if (currentFolderId) parsed.folderId = currentFolderId;
                     persist([parsed, ...books]);
                     setActiveBookId(parsed.id);
                 } else {
@@ -470,17 +567,104 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
 
     if (!isLoaded) return null;
 
+    const openBook = (bookId: string) => {
+        setActiveBookId(bookId);
+        setViewMode("detail");
+    };
+
+    const renderBookCard = (book: WorldBookConfig) => (
+        <div
+            key={book.id}
+            className="ui-config-card min-w-0 cursor-pointer"
+            style={{ aspectRatio: "3 / 2", padding: "12px", justifyContent: "space-between" }}
+            role="button"
+            tabIndex={0}
+            aria-label={`编辑 ${book.name || "世界书"}`}
+            onClick={() => openBook(book.id)}
+            onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    openBook(book.id);
+                }
+            }}
+        >
+            <div className="min-w-0 flex flex-col gap-1.5">
+                <div className="min-w-0 flex items-center gap-[6px]">
+                    <BookOpen size={16} className="shrink-0" />
+                    <span className="truncate text-[calc(14.4px*var(--app-text-scale,1))] font-bold leading-tight text-[var(--c-text-title)]">{book.name}</span>
+                </div>
+                <span className="menu-desc truncate">{book.description || `${book.entries?.length || 0} 个条目`}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+                <span className="menu-desc ts-12">条目 {book.entries?.length || 0}</span>
+                <ChevronLeft size={16} className="opacity-40" style={{ transform: "rotate(180deg)" }} />
+            </div>
+        </div>
+    );
+
     return (
         <div ref={wbContainerRef} className="flex flex-col gap-5 h-full">
             <input type="file" accept=".json" className="hidden" ref={fileInputRef} onChange={handleImport} />
             <input type="file" accept=".json" className="hidden" ref={entryFileInputRef} onChange={handleEntryImportFile} />
             {viewMode === "list" ? (
+                currentFolder ? (
+                    <>
+                        <div className="flex items-center">
+                            <h2 className="m-0 mx-2 min-w-0 truncate ts-28 font-bold italic leading-none text-black">{currentFolder.name}</h2>
+                        </div>
+                        <div className="flex justify-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setMoveSelection(new Set())}
+                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] bg-black px-4 text-xs font-bold text-white shadow-sm transition-all hover:bg-gray-800 hover:shadow-md active:scale-95"
+                            >
+                                <FolderInput size={15} strokeWidth={1.8} />
+                                <span>移入世界书</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => openFolderNameDialog({ mode: "rename", id: currentFolder.id })}
+                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] border border-black/10 bg-white px-4 text-xs font-bold text-gray-800 shadow-sm transition-all hover:bg-gray-50 hover:shadow-md active:scale-95"
+                            >
+                                <Pencil size={15} strokeWidth={1.8} />
+                                <span>重命名</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setConfirmDeleteFolderId(currentFolder.id)}
+                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] border border-black/10 bg-white px-4 text-xs font-bold text-[var(--c-danger)] shadow-sm transition-all hover:bg-gray-50 hover:shadow-md active:scale-95"
+                            >
+                                <Trash2 size={15} strokeWidth={1.8} />
+                                <span>删除文件夹</span>
+                            </button>
+                        </div>
+                        {(() => {
+                            const inside = groupWorldBooksByFolder(books, folders).inFolder(currentFolder.id);
+                            return inside.length === 0 ? (
+                                <div className="ui-empty mt-2">
+                                    <div className="ui-icon-circle">
+                                        <Folder size={24} />
+                                    </div>
+                                    <span className="menu-label font-semibold">文件夹是空的</span>
+                                    <span className="menu-desc text-center max-w-[240px] !mt-0">
+                                        点「移入世界书」把已有的世界书放进来，或者在这里直接新建、导入。
+                                    </span>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 gap-3">
+                                    {inside.map(renderBookCard)}
+                                </div>
+                            );
+                        })()}
+                    </>
+                ) : (
                 <>
                     <div className="flex items-center">
                         <h2 className="m-0 mx-2 ts-28 font-bold italic leading-none text-black">Worldbooks</h2>
                     </div>
 
-                    {books.length === 0 ? (
+                    {books.length === 0 && folders.length === 0 ? (
                         <div className="ui-empty mt-2">
                             <div className="ui-icon-circle">
                                 <BookOpen size={24} />
@@ -495,40 +679,53 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                         </div>
                     ) : (
                         <div className="grid grid-cols-2 gap-3">
-                            {books.map(book => (
-                                <div
-                                    key={book.id}
-                                    className="ui-config-card min-w-0 cursor-pointer"
-                                    style={{ aspectRatio: "3 / 2", padding: "12px", justifyContent: "space-between" }}
-                                    role="button"
-                                    tabIndex={0}
-                                    aria-label={`编辑 ${book.name || "世界书"}`}
-                                    onClick={() => { setActiveBookId(book.id); setViewMode("detail"); }}
-                                    onKeyDown={(event) => {
-                                        if (event.target !== event.currentTarget) return;
-                                        if (event.key === "Enter" || event.key === " ") {
-                                            event.preventDefault();
-                                            setActiveBookId(book.id);
-                                            setViewMode("detail");
-                                        }
-                                    }}
-                                >
-                                    <div className="min-w-0 flex flex-col gap-1.5">
-                                        <div className="min-w-0 flex items-center gap-[6px]">
-                                            <BookOpen size={16} className="shrink-0" />
-                                            <span className="truncate text-[calc(14.4px*var(--app-text-scale,1))] font-bold leading-tight text-[var(--c-text-title)]">{book.name}</span>
-                                        </div>
-                                        <span className="menu-desc truncate">{book.description || `${book.entries?.length || 0} 个条目`}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-2">
-                                        <span className="menu-desc ts-12">条目 {book.entries?.length || 0}</span>
-                                        <ChevronLeft size={16} className="opacity-40" style={{ transform: "rotate(180deg)" }} />
-                                    </div>
-                                </div>
-                            ))}
+                            {(() => {
+                                const grouped = groupWorldBooksByFolder(books, folders);
+                                return (
+                                    <>
+                                        {folders.map(folder => {
+                                            const inside = grouped.inFolder(folder.id);
+                                            return (
+                                                <div
+                                                    key={folder.id}
+                                                    className="ui-config-card min-w-0 cursor-pointer"
+                                                    style={{ aspectRatio: "3 / 2", padding: "12px", justifyContent: "space-between" }}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    aria-label={`打开文件夹 ${folder.name}`}
+                                                    onClick={() => setCurrentFolderId(folder.id)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.target !== event.currentTarget) return;
+                                                        if (event.key === "Enter" || event.key === " ") {
+                                                            event.preventDefault();
+                                                            setCurrentFolderId(folder.id);
+                                                        }
+                                                    }}
+                                                >
+                                                    <div className="min-w-0 flex flex-col gap-1.5">
+                                                        <div className="min-w-0 flex items-center gap-[6px]">
+                                                            <Folder size={16} className="shrink-0" />
+                                                            <span className="truncate text-[calc(14.4px*var(--app-text-scale,1))] font-bold leading-tight text-[var(--c-text-title)]">{folder.name}</span>
+                                                        </div>
+                                                        <span className="menu-desc truncate">
+                                                            {inside.length > 0 ? inside.map(b => b.name).join("、") : "空文件夹"}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className="menu-desc ts-12">世界书 {inside.length}</span>
+                                                        <ChevronLeft size={16} className="opacity-40" style={{ transform: "rotate(180deg)" }} />
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                        {grouped.unfiled.map(renderBookCard)}
+                                    </>
+                                );
+                            })()}
                         </div>
                     )}
                 </>
+                )
             ) : (
                 <>
                     {/* Detail View — matches preset-manager layout */}
@@ -537,8 +734,16 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                             <div className="flex justify-center gap-2">
                                 <button
                                     type="button"
+                                    onClick={() => duplicateBook(activeBook)}
+                                    className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-[20px] border border-black/10 bg-white px-3 text-xs font-bold text-gray-800 shadow-sm transition-all hover:bg-gray-50 hover:shadow-md active:scale-95"
+                                >
+                                    <Copy size={15} strokeWidth={1.8} />
+                                    <span>复制世界书</span>
+                                </button>
+                                <button
+                                    type="button"
                                     onClick={() => handleExport(activeBook)}
-                                    className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] bg-black px-4 text-xs font-bold text-white shadow-sm transition-all hover:bg-gray-800 hover:shadow-md active:scale-95"
+                                    className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-[20px] bg-black px-3 text-xs font-bold text-white shadow-sm transition-all hover:bg-gray-800 hover:shadow-md active:scale-95"
                                 >
                                     <Download size={15} strokeWidth={1.8} />
                                     <span>导出世界书</span>
@@ -546,7 +751,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                 <button
                                     type="button"
                                     onClick={() => setConfirmDeleteTarget({ type: 'book', id: activeBook.id })}
-                                    className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] border border-black/10 bg-white px-4 text-xs font-bold text-[var(--c-danger)] shadow-sm transition-all hover:bg-gray-50 hover:shadow-md active:scale-95"
+                                    className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-[20px] border border-black/10 bg-white px-3 text-xs font-bold text-[var(--c-danger)] shadow-sm transition-all hover:bg-gray-50 hover:shadow-md active:scale-95"
                                 >
                                     <Trash2 size={15} strokeWidth={1.8} />
                                     <span>删除世界书</span>
@@ -565,6 +770,22 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                         className="ui-input font-medium"
                                     />
                                 </div>
+
+                                {folders.length > 0 && (
+                                    <div className="flex flex-col gap-2">
+                                        <label className="menu-label ts-13 font-semibold ml-1">所在文件夹</label>
+                                        <select
+                                            value={activeBook.folderId && folders.some(f => f.id === activeBook.folderId) ? activeBook.folderId : ""}
+                                            onChange={(e) => updateBook(activeBook.id, { folderId: e.target.value || undefined })}
+                                            className="ui-select"
+                                        >
+                                            <option value="">未分类</option>
+                                            {folders.map(folder => (
+                                                <option key={folder.id} value={folder.id}>{folder.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
 
                                 <div className="flex flex-col gap-2">
                                     <label className="menu-label ts-13 font-semibold ml-1">简介描述</label>
@@ -873,6 +1094,98 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                     onCancel={() => setConfirmDeleteTarget(null)}
                 />
             )}
+
+            {folderNameDialog && (
+                <ContentDialog
+                    title={folderNameDialog.mode === "create" ? "新建文件夹" : "重命名文件夹"}
+                    confirmLabel={folderNameDialog.mode === "create" ? "新建" : "保存"}
+                    cancelLabel="取消"
+                    onConfirm={submitFolderName}
+                    onCancel={() => setFolderNameDialog(null)}
+                >
+                    <input
+                        type="text"
+                        value={folderNameDraft}
+                        maxLength={40}
+                        autoFocus
+                        placeholder="文件夹名称"
+                        onChange={(e) => setFolderNameDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                                e.preventDefault();
+                                submitFolderName();
+                            }
+                        }}
+                        className="ui-input w-full"
+                    />
+                </ContentDialog>
+            )}
+
+            {confirmDeleteFolderId && (
+                <ConfirmDialog
+                    title="删除文件夹？"
+                    message="只删文件夹，里面的世界书不会删除，会回到未分类。"
+                    icon={AlertCircle}
+                    variant="danger"
+                    confirmLabel="删除文件夹"
+                    cancelLabel="取消"
+                    onConfirm={() => {
+                        removeFolder(confirmDeleteFolderId);
+                        setConfirmDeleteFolderId(null);
+                    }}
+                    onCancel={() => setConfirmDeleteFolderId(null)}
+                />
+            )}
+
+            {moveSelection && currentFolder && (() => {
+                const candidates = books.filter(b => b.folderId !== currentFolder.id);
+                const folderName = (book: WorldBookConfig) =>
+                    folders.find(f => f.id === book.folderId)?.name ?? "未分类";
+                return (
+                    <BottomSheet title={`移入「${currentFolder.name}」`} onClose={() => setMoveSelection(null)}>
+                        <div className="flex flex-col gap-2">
+                            {candidates.length === 0 ? (
+                                <div className="menu-desc text-center py-6">没有别的世界书可以移进来了</div>
+                            ) : (
+                                <div className="flex max-h-[50vh] flex-col gap-1 overflow-y-auto">
+                                    {candidates.map(book => {
+                                        const checked = moveSelection.has(book.id);
+                                        return (
+                                            <button
+                                                key={book.id}
+                                                type="button"
+                                                className="binding-sheet-option"
+                                                data-selected={checked}
+                                                aria-pressed={checked}
+                                                onClick={() => setMoveSelection(prev => {
+                                                    const next = new Set(prev ?? []);
+                                                    if (next.has(book.id)) next.delete(book.id); else next.add(book.id);
+                                                    return next;
+                                                })}
+                                            >
+                                                <span className="binding-sheet-check">{checked && <Check size={15} />}</span>
+                                                <span className="binding-sheet-option-text">{book.name}</span>
+                                                <span className="binding-sheet-option-meta">{folderName(book)}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                            <button
+                                type="button"
+                                className="ui-btn ui-btn-primary w-full"
+                                disabled={moveSelection.size === 0}
+                                onClick={() => {
+                                    moveBooksToFolder(moveSelection, currentFolder.id);
+                                    setMoveSelection(null);
+                                }}
+                            >
+                                <FolderInput size={16} /> 移入{moveSelection.size > 0 ? `（${moveSelection.size}）` : ""}
+                            </button>
+                        </div>
+                    </BottomSheet>
+                );
+            })()}
 
             {importError && (
                 <ConfirmDialog

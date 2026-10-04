@@ -25,6 +25,8 @@ export type WorldBookEntry = {
 
 export type WorldBookConfig = SettingItemMeta & {
     entries: WorldBookEntry[];
+    /** 所在文件夹（lib/worldbook-folders）；没有或文件夹已删就是未分类 */
+    folderId?: string;
 };
 
 // --- Preset ---

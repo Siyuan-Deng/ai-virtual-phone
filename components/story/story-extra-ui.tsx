@@ -4,10 +4,11 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Save, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Folder, Save, Trash2, X } from "lucide-react";
 import { Avatar } from "@/components/ui/primitives";
 import type { Character } from "@/lib/character-types";
 import { loadApiConfigs, loadPresets, loadRegexes, loadWorldBooks } from "@/lib/settings-storage";
+import { groupWorldBooksByFolder, loadWorldBookFolders } from "@/lib/worldbook-folders";
 import type {
   StoryExtraBindings,
   StoryExtraConfig,
@@ -221,14 +222,14 @@ const BINDING_LABELS: Record<StoryBindingKind, string> = {
   regexes: "正则",
 };
 
-type Option = { id: string; name: string };
+type Option = { id: string; name: string; folderId?: string };
 
 function bindingOptions(kind: StoryBindingKind): Option[] {
   if (kind === "api") {
     return loadApiConfigs().map((config) => ({ id: config.id, name: config.name || `${config.provider} · ${config.defaultModel}` }));
   }
   if (kind === "preset") return loadPresets().map((preset) => ({ id: preset.id, name: preset.name }));
-  if (kind === "worldBooks") return loadWorldBooks().map((book) => ({ id: book.id, name: book.name }));
+  if (kind === "worldBooks") return loadWorldBooks().map((book) => ({ id: book.id, name: book.name, folderId: book.folderId }));
   return loadRegexes().map((regex) => ({ id: regex.id, name: regex.name }));
 }
 
@@ -289,6 +290,13 @@ export function StoryBindingPicker({
   const multi = kind === "worldBooks" || kind === "regexes";
   const selected = selectedBindingIds(kind, bindings);
   const label = BINDING_LABELS[kind];
+  // 世界书有文件夹时分层：外面是文件夹和未分类的，点文件夹进去勾；不同文件夹里的可以同时勾
+  const folders = useMemo(() => (kind === "worldBooks" ? loadWorldBookFolders() : []), [kind]);
+  const grouped = groupWorldBooksByFolder(options, folders);
+  const usedFolders = folders.filter((folder) => grouped.inFolder(folder.id).length > 0);
+  const [openFolderId, setOpenFolderId] = useState<string | null>(null);
+  const openFolder = openFolderId ? usedFolders.find((folder) => folder.id === openFolderId) : undefined;
+  const visibleOptions = openFolder ? grouped.inFolder(openFolder.id) : usedFolders.length > 0 ? grouped.unfiled : options;
 
   const setIds = (next: string[] | undefined) => {
     if (kind === "api") onChange({ ...bindings, apiConfigId: next?.[0] });
@@ -302,17 +310,34 @@ export function StoryBindingPicker({
       <SheetHead title={`番外${label}`} onClose={onClose} />
       <div className="story-sheet-body">
         <div className="story-sheet-scroll">
-          <button
-            type="button"
-            className="story-option-row"
-            data-active={selected === undefined ? "true" : undefined}
-            onClick={() => { setIds(undefined); if (!multi) onClose(); }}
-          >
-            <span>跟随剧情</span>
-            {selected === undefined ? <Check size={15} /> : null}
-          </button>
+          {openFolder ? (
+            <button type="button" className="story-option-row story-option-folder" onClick={() => setOpenFolderId(null)}>
+              <span className="story-option-folder-name"><ChevronLeft size={15} />{openFolder.name}</span>
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="story-option-row"
+                data-active={selected === undefined ? "true" : undefined}
+                onClick={() => { setIds(undefined); if (!multi) onClose(); }}
+              >
+                <span>跟随剧情</span>
+                {selected === undefined ? <Check size={15} /> : null}
+              </button>
+              {usedFolders.map((folder) => {
+                const count = grouped.inFolder(folder.id).filter((option) => selected?.includes(option.id)).length;
+                return (
+                  <button key={folder.id} type="button" className="story-option-row story-option-folder" onClick={() => setOpenFolderId(folder.id)}>
+                    <span className="story-option-folder-name"><Folder size={15} />{folder.name}</span>
+                    <span className="story-option-folder-meta">{count > 0 ? `已选 ${count}` : null}<ChevronRight size={15} /></span>
+                  </button>
+                );
+              })}
+            </>
+          )}
           {options.length === 0 ? <div className="story-sheet-empty">还没有可选的{label}</div> : null}
-          {options.map((option) => {
+          {visibleOptions.map((option) => {
             const on = Boolean(selected?.includes(option.id));
             return (
               <button

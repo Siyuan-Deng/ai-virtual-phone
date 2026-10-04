@@ -1319,6 +1319,20 @@
         .story-option-row svg {
           flex-shrink: 0;
         }
+        /* 世界书文件夹：外层是文件夹行，点进去是里面的世界书 */
+        .story-option-folder-name {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .story-option-folder-meta {
+          flex-shrink: 0;
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+          font-size: calc(11px*var(--app-text-scale,1));
+          color: var(--c-story-sub, #94a3b8);
+        }
         .story-preset-row {
           display: flex;
           align-items: center;

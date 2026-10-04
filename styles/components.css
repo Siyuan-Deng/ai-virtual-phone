@@ -820,6 +820,20 @@
   font-size: calc(10.8px*var(--app-text-scale,1));
 }
 
+/* 世界书文件夹行：右边「已选 N ›」；也用在「移入世界书」里标出原来所在的文件夹 */
+.binding-sheet-option-meta {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--c-text);
+  font-size: calc(11px*var(--app-text-scale,1));
+}
+
+.binding-sheet-folder-back .binding-sheet-option-text {
+  font-weight: 700;
+}
+
 .binding-contact-item {
   position: relative;
   border: none;
@@ -2036,6 +2050,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 世界书文件夹：虚线描边，和世界书本身的选项区分开 */
+.quick-action-folder-chip {
+  box-shadow: inset 0 0 0 1px rgba(25, 127, 130, 0.28);
 }
 
 .quick-action-empty {

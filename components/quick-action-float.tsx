@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
-import { BookOpen, Check, ChevronDown, Code2, SlidersHorizontal, UserRound, X } from "lucide-react";
+import { BookOpen, Check, ChevronDown, ChevronLeft, Code2, Folder, SlidersHorizontal, UserRound, X } from "lucide-react";
+import { groupWorldBooksByFolder, loadWorldBookFolders, type WorldBookFolder } from "@/lib/worldbook-folders";
 import { CHAT_APP_SETTINGS_UPDATED_EVENT, loadChatAppSettings } from "@/lib/chat-storage";
 import {
     getFloatingDockState,
@@ -63,6 +64,9 @@ export function QuickActionFloat() {
     const [config, setConfig] = useState<BindingConfig>(EMPTY_BINDING_CONFIG);
     const [apiConfigs, setApiConfigs] = useState<ApiConfig[]>([]);
     const [worldBooks, setWorldBooks] = useState<WorldBookConfig[]>([]);
+    const [worldBookFolders, setWorldBookFolders] = useState<WorldBookFolder[]>([]);
+    // 世界书按文件夹分层时，点进了哪个文件夹（null = 最外层）
+    const [wbOpenFolderId, setWbOpenFolderId] = useState<string | null>(null);
     const [characters, setCharacters] = useState<Character[]>([]);
     const [floatingPosition, setFloatingPosition] = useState<FloatingPosition | null>(null);
     const [popoverPosition, setPopoverPosition] = useState<PopoverPosition | null>(null);
@@ -87,6 +91,8 @@ export function QuickActionFloat() {
         setConfig(loadBindingConfig());
         setApiConfigs(loadApiConfigs());
         setWorldBooks(loadWorldBooks());
+        setWorldBookFolders(loadWorldBookFolders());
+        setWbOpenFolderId(null);
         setCharacters(nextCharacters);
         setSelectedCharId(prev => {
             if (prev && nextCharacters.some(character => character.id === prev)) return prev;
@@ -572,22 +578,63 @@ export function QuickActionFloat() {
                                 <div className="quick-action-empty">暂无世界书</div>
                             ) : (
                                 <div className="quick-action-chip-grid">
-                                    {worldBooks.map(book => {
-                                        const selected = selectedWorldBookIds.includes(book.id);
+                                    {(() => {
+                                        // 有文件夹就分层：最外层是文件夹和未分类的，点文件夹进去勾；不同文件夹里的可以同时勾
+                                        const grouped = groupWorldBooksByFolder(worldBooks, worldBookFolders);
+                                        const folders = worldBookFolders.filter(folder => grouped.inFolder(folder.id).length > 0);
+                                        const openFolder = wbOpenFolderId ? folders.find(folder => folder.id === wbOpenFolderId) : undefined;
+                                        const bookChip = (book: WorldBookConfig) => {
+                                            const selected = selectedWorldBookIds.includes(book.id);
+                                            return (
+                                                <button
+                                                    type="button"
+                                                    key={book.id}
+                                                    className="quick-action-chip"
+                                                    data-selected={selected}
+                                                    disabled={characterDisabled}
+                                                    onClick={() => toggleWorldBook(book.id)}
+                                                >
+                                                    <span>{book.name}</span>
+                                                    {selected ? <Check size={14} /> : null}
+                                                </button>
+                                            );
+                                        };
+                                        if (openFolder) {
+                                            return (
+                                                <>
+                                                    <button
+                                                        type="button"
+                                                        className="quick-action-chip quick-action-folder-chip"
+                                                        onClick={() => setWbOpenFolderId(null)}
+                                                    >
+                                                        <ChevronLeft size={14} />
+                                                        <span>{openFolder.name}</span>
+                                                    </button>
+                                                    {grouped.inFolder(openFolder.id).map(bookChip)}
+                                                </>
+                                            );
+                                        }
                                         return (
-                                            <button
-                                                type="button"
-                                                key={book.id}
-                                                className="quick-action-chip"
-                                                data-selected={selected}
-                                                disabled={characterDisabled}
-                                                onClick={() => toggleWorldBook(book.id)}
-                                            >
-                                                <span>{book.name}</span>
-                                                {selected ? <Check size={14} /> : null}
-                                            </button>
+                                            <>
+                                                {folders.map(folder => {
+                                                    const count = grouped.inFolder(folder.id).filter(book => selectedWorldBookIds.includes(book.id)).length;
+                                                    return (
+                                                        <button
+                                                            type="button"
+                                                            key={folder.id}
+                                                            className="quick-action-chip quick-action-folder-chip"
+                                                            disabled={characterDisabled}
+                                                            onClick={() => setWbOpenFolderId(folder.id)}
+                                                        >
+                                                            <Folder size={14} />
+                                                            <span>{folder.name}{count > 0 ? ` · ${count}` : ""}</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                                {(folders.length > 0 ? grouped.unfiled : worldBooks).map(bookChip)}
+                                            </>
                                         );
-                                    })}
+                                    })()}
                                 </div>
                             )}
                         </section>

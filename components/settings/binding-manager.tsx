@@ -7,8 +7,10 @@ import {
     Box,
     Brain,
     Check,
+    ChevronLeft,
     ChevronRight,
     Code2,
+    Folder,
     Languages,
     Layers,
     Mic,
@@ -59,6 +61,7 @@ import {
     ensureSettingsStorageHydrated,
 } from "@/lib/settings-storage";
 import { hydrateKvDb } from "@/lib/kv-db";
+import { groupWorldBooksByFolder, loadWorldBookFolders, type WorldBookFolder } from "@/lib/worldbook-folders";
 import type { UserIdentity } from "@/components/settings/user-identity";
 import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
@@ -112,6 +115,9 @@ export function BindingManager() {
     const [voiceConfigs, setVoiceConfigs] = useState<VoiceApiConfig[]>([]);
     const [presets, setPresets] = useState<PresetConfig[]>([]);
     const [worldBooks, setWorldBooks] = useState<WorldBookConfig[]>([]);
+    const [worldBookFolders, setWorldBookFolders] = useState<WorldBookFolder[]>([]);
+    // 选世界书时点进了哪个文件夹（null = 最外层）
+    const [wbOpenFolderId, setWbOpenFolderId] = useState<string | null>(null);
     const [regexes, setRegexes] = useState<RegexConfig[]>([]);
     const [identities, setIdentities] = useState<UserIdentity[]>([]);
     const [customApps, setCustomApps] = useState<InstalledCustomApp[]>([]);
@@ -130,9 +136,14 @@ export function BindingManager() {
         setVoiceConfigs(loadVoiceConfigs());
         setPresets(loadPresets());
         setWorldBooks(loadWorldBooks());
+        setWorldBookFolders(loadWorldBookFolders());
         setRegexes(loadRegexes());
         setIdentities(loadUserIdentities());
     };
+
+    useEffect(() => {
+        setWbOpenFolderId(null);
+    }, [activeGlobalSheetField, activeSlotSheetField]);
 
     useEffect(() => {
         let cancelled = false;
@@ -637,6 +648,71 @@ export function BindingManager() {
     const isRequiredGlobalField = (field: BindingField): boolean =>
         field === "apiConfigId" || field === "presetId" || field === "userIdentityId";
 
+    /** 有文件夹时，世界书分层显示：最外层是文件夹和未分类的世界书，点文件夹进去勾里面的。
+     *  勾选是整体的一份，不同文件夹里的可以同时勾。 */
+    const hasWorldBookFolders = worldBookFolders.some(folder => worldBooks.some(book => book.folderId === folder.id));
+    const renderWorldBookPickerOptions = (
+        selectedIds: string[],
+        toggle: (id: string) => void,
+        unsetRow: React.ReactNode,
+    ) => {
+        const grouped = groupWorldBooksByFolder(worldBooks, worldBookFolders);
+        const folders = worldBookFolders.filter(folder => grouped.inFolder(folder.id).length > 0);
+        const bookRow = (book: WorldBookConfig) => {
+            const selected = selectedIds.includes(book.id);
+            return (
+                <button
+                    key={book.id}
+                    type="button"
+                    className="binding-sheet-option"
+                    data-selected={selected}
+                    aria-pressed={selected}
+                    onClick={() => toggle(book.id)}
+                >
+                    <span className="binding-sheet-check">{selected && <Check size={15} />}</span>
+                    <span className="binding-sheet-option-text">{book.name}</span>
+                </button>
+            );
+        };
+        const openFolder = wbOpenFolderId ? folders.find(folder => folder.id === wbOpenFolderId) : undefined;
+        if (openFolder) {
+            return (
+                <>
+                    <button type="button" className="binding-sheet-option binding-sheet-folder-back" onClick={() => setWbOpenFolderId(null)}>
+                        <span className="binding-sheet-check"><ChevronLeft size={15} /></span>
+                        <span className="binding-sheet-option-text">{openFolder.name}</span>
+                    </button>
+                    {grouped.inFolder(openFolder.id).map(bookRow)}
+                </>
+            );
+        }
+        return (
+            <>
+                {unsetRow}
+                {folders.map(folder => {
+                    const count = grouped.inFolder(folder.id).filter(book => selectedIds.includes(book.id)).length;
+                    return (
+                        <button
+                            key={folder.id}
+                            type="button"
+                            className="binding-sheet-option"
+                            aria-label={`打开文件夹 ${folder.name}`}
+                            onClick={() => setWbOpenFolderId(folder.id)}
+                        >
+                            <span className="binding-sheet-check"><Folder size={15} /></span>
+                            <span className="binding-sheet-option-text">{folder.name}</span>
+                            <span className="binding-sheet-option-meta">
+                                {count > 0 ? `已选 ${count}` : null}
+                                <ChevronRight size={15} />
+                            </span>
+                        </button>
+                    );
+                })}
+                {grouped.unfiled.map(bookRow)}
+            </>
+        );
+    };
+
     const renderGlobalPickerSheet = () => {
         if (!activeGlobalSheetField) return null;
         const field = activeGlobalSheetField;
@@ -693,6 +769,17 @@ export function BindingManager() {
                     </div>
                     <div className="binding-picker-body">
                         <div className="binding-sheet-list">
+                            {field === "worldBookIds" && hasWorldBookFolders ? renderWorldBookPickerOptions(selectedIds, toggleMulti, !hideUnsetOption && (
+                                <button
+                                    type="button"
+                                    className="binding-sheet-option"
+                                    data-selected={selectedIds.length === 0}
+                                    onClick={clearSelection}
+                                >
+                                    <span className="binding-sheet-check">{selectedIds.length === 0 && <Check size={15} />}</span>
+                                    <span className="binding-sheet-option-text">未设置</span>
+                                </button>
+                            )) : (<>
                             {!hideUnsetOption && (
                                 <button
                                     type="button"
@@ -731,6 +818,7 @@ export function BindingManager() {
                                     );
                                 })
                             )}
+                            </>)}
                         </div>
                     </div>
                 </div>
@@ -794,6 +882,17 @@ export function BindingManager() {
                     </div>
                     <div className="binding-picker-body">
                         <div className="binding-sheet-list">
+                            {field === "worldBookIds" && hasWorldBookFolders ? renderWorldBookPickerOptions(selectedIds, toggleMulti, (
+                                <button
+                                    type="button"
+                                    className="binding-sheet-option"
+                                    data-selected={selectedIds.length === 0}
+                                    onClick={clearSelection}
+                                >
+                                    <span className="binding-sheet-check">{selectedIds.length === 0 && <Check size={15} />}</span>
+                                    <span className="binding-sheet-option-text">{emptyLabel}</span>
+                                </button>
+                            )) : (<>
                             {/* 全局层的 API/预设/身份不提供"未设置"（角色/应用层保留"跟随上级"） */}
                             {!(level === "global" && isRequiredGlobalField(field)) && (
                                 <button
@@ -833,6 +932,7 @@ export function BindingManager() {
                                     );
                                 })
                             )}
+                            </>)}
                         </div>
                     </div>
                 </div>

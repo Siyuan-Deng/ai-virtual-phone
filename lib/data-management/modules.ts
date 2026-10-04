@@ -90,6 +90,7 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
           "ai_phone_voice_configs_v1",
           "ai_phone_image_generation_settings_v1",
           "ai_phone_bindings_v1",
+          "ai_phone_worldbook_folders_v1",
           "ai_phone_follow_up_config_v1",
           "ai_phone_chat_send_config_v1",
           "ai_phone_user_identities_v1",
