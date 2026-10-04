@@ -1033,7 +1033,7 @@
         }
         .story-mode-switch button[data-active="true"] {
           background: var(--c-story-heading, #1e293b);
-          color: var(--c-story-bg-top, #ffffff);
+          color: var(--c-story-on-heading, var(--c-story-drawer-top, #ffffff));
         }
         .story-recent-grid {
           display: grid;
@@ -1103,10 +1103,13 @@
           z-index: 12;
           display: flex;
           flex-direction: column;
-          /* 侧栏底色是半透明的；这层盖在侧栏上，垫一层实色免得下面的字透出来 */
+          /* 侧栏底色是半透明的；这层盖在侧栏上，垫一层实色免得下面的字透出来。
+             自定义主题把 bg-top 设成透明时，再靠模糊把下面的字糊掉 */
           background:
             linear-gradient(180deg, var(--c-story-drawer-top, rgba(253, 253, 254, 0.98)), var(--c-story-drawer-bottom, rgba(248, 249, 250, 0.98))),
             var(--c-story-bg-top, #ffffff);
+          -webkit-backdrop-filter: blur(20px);
+          backdrop-filter: blur(20px);
           box-shadow:
             -2px 0 8px rgba(0, 0, 0, 0.04),
             -14px 0 32px rgba(0, 0, 0, 0.03);
@@ -1402,7 +1405,7 @@
           border: none;
           border-radius: 0;
           background: var(--c-story-heading, #1e293b);
-          color: var(--c-story-bg-top, #ffffff);
+          color: var(--c-story-on-heading, var(--c-story-drawer-top, #ffffff));
           font: inherit;
           font-size: calc(12px*var(--app-text-scale,1));
           letter-spacing: 0.1em;
@@ -1417,7 +1420,13 @@
           z-index: 9;
           display: flex;
           flex-direction: column;
-          background: var(--c-story-bg-top, #ffffff);
+          /* 上层是页面底色；自定义主题把底色设成透明（比如用壁纸）时，露出下层的侧栏色，
+             不让后面的正文透上来 */
+          background:
+            linear-gradient(var(--c-story-bg-top, #ffffff), var(--c-story-bg-top, #ffffff)),
+            linear-gradient(180deg, var(--c-story-drawer-top, rgba(253, 253, 254, 0.98)), var(--c-story-drawer-bottom, rgba(248, 249, 250, 0.98)));
+          -webkit-backdrop-filter: blur(20px);
+          backdrop-filter: blur(20px);
           box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.12);
         }
         .story-template-head {
@@ -1508,7 +1517,7 @@
         }
         .story-template-options button[data-active="true"] {
           background: var(--c-story-heading, #1e293b);
-          color: var(--c-story-bg-top, #ffffff);
+          color: var(--c-story-on-heading, var(--c-story-drawer-top, #ffffff));
           box-shadow: none;
         }
         .story-template-toggle {
@@ -1532,7 +1541,8 @@
           flex: 0 0 auto;
           width: 32px;
           height: 18px;
-          background: rgba(0, 0, 0, 0.12);
+          /* 跟着主题的次要文字色走，深色主题下也看得见 */
+          background: color-mix(in srgb, var(--c-story-sub, #94a3b8) 40%, transparent);
           transition: background 0.18s ease;
         }
         .story-template-toggle i::after {
@@ -1550,7 +1560,7 @@
         }
         .story-template-toggle[data-on="true"] i::after {
           transform: translateX(14px);
-          background: var(--c-story-bg-top, #ffffff);
+          background: var(--c-story-on-heading, var(--c-story-drawer-top, #ffffff));
         }
         .story-template-send {
           flex-shrink: 0;
@@ -1559,11 +1569,72 @@
           border: none;
           border-radius: 0;
           background: var(--c-story-heading, #1e293b);
-          color: var(--c-story-bg-top, #ffffff);
+          color: var(--c-story-on-heading, var(--c-story-drawer-top, #ffffff));
           font: inherit;
           font-size: calc(14px*var(--app-text-scale,1));
           letter-spacing: 0.2em;
         }
         .story-template-send:disabled {
           opacity: 0.45;
+        }
+
+        /* === 番外方案：替换大概内容前的确认 === */
+        .story-confirm-overlay {
+          position: absolute;
+          inset: 0;
+          z-index: 30;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0 32px;
+          background: var(--c-story-overlay, rgba(0, 0, 0, 0.2));
+          -webkit-backdrop-filter: blur(2px);
+          backdrop-filter: blur(2px);
+          animation: fade-in 0.2s ease;
+        }
+        .story-confirm {
+          width: 100%;
+          max-width: 300px;
+          box-sizing: border-box;
+          padding: 20px 20px 16px;
+          background:
+            linear-gradient(180deg, var(--c-story-drawer-top, rgba(253, 253, 254, 0.98)), var(--c-story-drawer-bottom, rgba(248, 249, 250, 0.98))),
+            var(--c-story-bg-top, #ffffff);
+          -webkit-backdrop-filter: blur(20px);
+          backdrop-filter: blur(20px);
+          box-shadow: var(--story-paper-shadow);
+        }
+        .story-confirm-title {
+          font-size: calc(15px*var(--app-text-scale,1));
+          font-weight: 600;
+          letter-spacing: 0.04em;
+          color: var(--c-story-heading, #1e293b);
+        }
+        .story-confirm-text {
+          margin-top: 8px;
+          font-size: calc(13px*var(--app-text-scale,1));
+          line-height: 1.7;
+          color: var(--c-story-text-light, #475569);
+        }
+        .story-confirm-actions {
+          display: flex;
+          gap: 10px;
+          margin-top: 18px;
+        }
+        .story-confirm-actions button {
+          flex: 1;
+          height: 38px;
+          border: none;
+          border-radius: 0;
+          background: var(--c-story-panel, rgba(255, 255, 255, 0.5));
+          box-shadow: var(--story-paper-shadow-soft);
+          color: var(--c-story-text, #3a3b3c);
+          font: inherit;
+          font-size: calc(13px*var(--app-text-scale,1));
+          letter-spacing: 0.1em;
+        }
+        .story-confirm-actions button[data-primary="true"] {
+          background: var(--c-story-heading, #1e293b);
+          color: var(--c-story-on-heading, var(--c-story-drawer-top, #ffffff));
+          box-shadow: none;
         }

@@ -3,6 +3,7 @@
 // 剧情侧栏（选角色）和番外用到的几块界面，版式照用户选定的方案 C。
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, Save, Trash2, X } from "lucide-react";
 import { Avatar } from "@/components/ui/primitives";
 import type { Character } from "@/lib/character-types";
@@ -337,15 +338,14 @@ export function StoryBindingPicker({
   );
 }
 
-// ── 番外方案：模板 + 绑定成套保存、切换 ──
+// ── 番外方案：模板（含大概内容和开关）+ 绑定成套保存、切换 ──
 
-/** 大概内容每篇都不一样、「带上之前的番外」每次自己选，这两项不进方案；切方案时保留现在的 */
-function presetPart(config: StoryExtraConfig): StoryExtraConfig {
-  return { ...config, template: { ...config.template, content: "", includePrevious: false } };
-}
-
-function presetKey(config: StoryExtraConfig): string {
-  return JSON.stringify(presetPart(config));
+/** 方案里大概内容空着：切过去时保留现在写的那段，比较时也不管这一项 */
+function matchesPreset(preset: StoryExtraConfig, current: StoryExtraConfig): boolean {
+  const comparable = preset.template.content.trim()
+    ? current
+    : { ...current, template: { ...current.template, content: "" } };
+  return JSON.stringify(preset) === JSON.stringify(comparable);
 }
 
 export function StoryExtraPresetBar({
@@ -355,16 +355,47 @@ export function StoryExtraPresetBar({
   config: StoryExtraConfig;
   onLoad: (config: StoryExtraConfig) => void;
 }) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [presets, setPresets] = useState<StoryExtraPreset[]>(() => loadStoryExtraPresets());
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // 方案和现在都写了大概内容：先问一句再替换
+  const [pendingReplace, setPendingReplace] = useState<StoryExtraPreset | null>(null);
   // 下拉框只在现在的设置和某套方案一致时显示它；改过就回到占位，方便重新选回去
-  const currentKey = presetKey(config);
-  const selectedId = presets.find((preset) => presetKey(preset.config) === currentKey)?.id ?? "";
+  const selectedId = presets.find((preset) => matchesPreset(preset.config, config))?.id ?? "";
+
+  const apply = (preset: StoryExtraPreset) => {
+    const content = preset.config.template.content.trim() ? preset.config.template.content : config.template.content;
+    onLoad({ ...preset.config, template: { ...preset.config.template, content } });
+  };
+
+  // 弹窗挂到剧情页最外层，盖住整页（侧栏会滚动，挂在侧栏里会跟着跑）
+  const dialogHost = pendingReplace ? rootRef.current?.closest(".story-app-shell") : null;
+  const dialog = pendingReplace ? (
+    <div className="story-confirm-overlay" onClick={() => setPendingReplace(null)}>
+      <div className="story-confirm" role="alertdialog" aria-label="替换大概内容" onClick={(event) => event.stopPropagation()}>
+        <div className="story-confirm-title">替换大概内容？</div>
+        <div className="story-confirm-text">「{pendingReplace.name}」里存了大概内容，切换后会替换你现在写的这段。</div>
+        <div className="story-confirm-actions">
+          <button type="button" onClick={() => setPendingReplace(null)}>取消</button>
+          <button
+            type="button"
+            data-primary="true"
+            onClick={() => {
+              apply(pendingReplace);
+              setPendingReplace(null);
+            }}
+          >
+            继续
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   return (
-    <div className="story-drawer-section">
+    <div className="story-drawer-section" ref={rootRef}>
       <div className="story-drawer-eyebrow">番外方案</div>
       <div className="story-preset-row">
         <select
@@ -374,8 +405,13 @@ export function StoryExtraPresetBar({
             setConfirmingDelete(false);
             const preset = presets.find((item) => item.id === event.target.value);
             if (!preset) return;
-            const { content, includePrevious } = config.template;
-            onLoad({ ...preset.config, template: { ...preset.config.template, content, includePrevious } });
+            const incoming = preset.config.template.content.trim();
+            const current = config.template.content.trim();
+            if (incoming && current && incoming !== current) {
+              setPendingReplace(preset);
+              return;
+            }
+            apply(preset);
           }}
         >
           <option value="">{presets.length > 0 ? "选一套保存过的方案" : "还没有保存过方案"}</option>
@@ -424,7 +460,7 @@ export function StoryExtraPresetBar({
             className="story-preset-btn"
             aria-label="确认保存"
             onClick={() => {
-              saveStoryExtraPreset(name || "未命名", presetPart(config));
+              saveStoryExtraPreset(name || "未命名", config);
               setPresets(loadStoryExtraPresets());
               setNaming(false);
             }}
@@ -436,7 +472,8 @@ export function StoryExtraPresetBar({
           </button>
         </div>
       ) : null}
-      <div className="story-drawer-note">文风、字数、人称、其它要求和上面的绑定存成一套，同名会覆盖。</div>
+      <div className="story-drawer-note">模板和上面的绑定一起存成一套，同名会覆盖。方案里大概内容空着的话，切换时保留你正在写的。</div>
+      {dialog && dialogHost ? createPortal(dialog, dialogHost) : dialog}
     </div>
   );
 }

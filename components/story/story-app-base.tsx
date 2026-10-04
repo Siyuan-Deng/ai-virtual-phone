@@ -672,6 +672,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
   function openDrawer() {
     setDrawerSheet(null);
     setConfirmingClearExtra(false);
+    // 模板面板先收起（会把填的内容存回去），免得侧栏里切了方案又被面板里的旧草稿盖掉
+    setTemplateTop(null);
     setDrawerOpen(true);
   }
 
