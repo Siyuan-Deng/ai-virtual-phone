@@ -101,6 +101,8 @@ export type LlmRequestPayload = {
     /** 请求用途：appId（"chat" 单聊等）；群聊等场景可结合 sessionId 自查 session.isGroup */
     purpose: string;
     sessionId?: string;
+    /** 这次请求是替哪个角色生成的（宿主知道时才有，比如剧情没有会话但知道角色） */
+    characterId?: string;
     /** 采样参数改写（留空则用用户配置；仅在该次请求带预设时生效） */
     temperature?: number;
     maxTokens?: number;

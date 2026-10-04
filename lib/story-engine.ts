@@ -158,7 +158,7 @@ export async function generateStoryCompletion(
 
   const rawOutput = await sendLLMRequest(apiConfig, preset, llmMessages, regexes, {
     characterName: character.name,
-  }, { skipOutputRegex: true, includeReasoning: true, appId: "story", appTags: ["story"], signal: options?.signal });
+  }, { skipOutputRegex: true, includeReasoning: true, appId: "story", appTags: ["story"], characterId, signal: options?.signal });
 
   const parsed = parseStoryResponse(rawOutput, regexes, {
     summaryTag,

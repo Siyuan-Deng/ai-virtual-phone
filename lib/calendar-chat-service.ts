@@ -114,26 +114,22 @@ function allowedCharacterIds(extras: CalendarExtras): Set<string> {
 }
 
 function payloadCharacterIds(payload: LlmRequestPayload): string[] {
+    // 宿主明确说了替谁生成（剧情、番外）就用它。以前剧情请求是在整段提示词里找角色名，
+    // 角色名没出现、却提到了别的已勾选角色（世界书、记忆里常有）时就会把日历给错人
+    if (payload.characterId) return [String(payload.characterId)];
     if (payload.sessionId) {
         const session = loadChatSessions().find((item) => item.id === payload.sessionId);
         if (session?.isGroup) return Array.isArray(session.participantIds) ? session.participantIds : [];
         if (session?.contactId) return [session.contactId];
     }
-    if (payload.purpose !== "story") return [];
-    // 剧情请求不带会话：按正文里出现的角色名认
-    const haystack = (payload.messages || [])
-        .map((message) => (typeof message?.content === "string" ? message.content : ""))
-        .join("\n");
-    return loadCharacters()
-        .filter((character) => character.name && haystack.includes(character.name))
-        .map((character) => character.id);
+    return [];
 }
 
 function canPayloadReadCalendar(payload: LlmRequestPayload, extras: CalendarExtras): boolean {
     const allowed = allowedCharacterIds(extras);
     const ids = payloadCharacterIds(payload).map(String);
     if (ids.length > 0) return ids.every((id) => allowed.has(id));
-    // 明确保存过权限之后，认不出是谁的剧情请求宁可不给，免得把日历泄露给没授权的角色
+    // 明确保存过权限之后，认不出是谁的请求宁可不给，免得把日历泄露给没授权的角色
     return extras.characterAccess === null;
 }
 

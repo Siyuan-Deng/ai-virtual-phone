@@ -567,12 +567,14 @@ async function applyChatPluginLlmRequest<T extends { role: string }>(
     messages: T[],
     purpose: string,
     sessionId?: string,
+    characterId?: string,
 ): Promise<{ messages: T[]; preset: PresetConfig | null }> {
     if (typeof window === "undefined") return { messages, preset };
     const payload = await runChatPluginTransform("llm.request", {
         messages: messages as unknown as LlmRequestPayload["messages"],
         purpose,
         sessionId,
+        characterId,
     });
     let nextPreset = preset;
     if (preset && (payload.temperature !== undefined || payload.maxTokens !== undefined)) {
@@ -799,12 +801,14 @@ export async function sendLLMStreamRequest(
         appTags?: string[];
         followUpCount?: number;
         debugSessionId?: string;
+        /** 替哪个角色生成（宿主知道时填）：插件 hook 据此判断权限，比如日历谁能看 */
+        characterId?: string;
         signal?: AbortSignal;
     },
     callbacks?: ChatCompletionStreamCallbacks,
 ): Promise<ChatCompletionStreamResult> {
     const pluginPurpose = options?.appId ?? "chat";
-    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId);
+    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId, options?.characterId);
     const effectivePreset = afterPlugins.preset;
     const originalOnDelta = callbacks?.onDelta;
     const pluginCallbacks: ChatCompletionStreamCallbacks | undefined = callbacks ? {
@@ -902,11 +906,13 @@ export async function sendLLMRequest(
         appTags?: string[];
         followUpCount?: number;
         debugSessionId?: string;
+        /** 替哪个角色生成（宿主知道时填）：插件 hook 据此判断权限，比如日历谁能看 */
+        characterId?: string;
         signal?: AbortSignal;
     },
 ): Promise<string> {
     const pluginPurpose = options?.appId ?? "chat";
-    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId);
+    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId, options?.characterId);
     const effectivePreset = afterPlugins.preset;
     const requestMessages = toLlmRequestMessages(afterPlugins.messages);
     const request = buildProviderRequest(config, effectivePreset, requestMessages);
@@ -1094,6 +1100,8 @@ export async function sendLLMToolStreamRequest(
         appTags?: string[];
         followUpCount?: number;
         debugSessionId?: string;
+        /** 替哪个角色生成（宿主知道时填）：插件 hook 据此判断权限，比如日历谁能看 */
+        characterId?: string;
         signal?: AbortSignal;
         /** 单次最大输出 token：按调用覆盖预设值（工坊输出护栏用） */
         maxTokens?: number;
@@ -1102,7 +1110,7 @@ export async function sendLLMToolStreamRequest(
 ): Promise<LLMToolRequestResult> {
     void regexes;
     const pluginPurpose = options?.appId ?? "chat";
-    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId);
+    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId, options?.characterId);
     const effectivePreset = afterPlugins.preset;
     const request = buildProviderRequest(config, effectivePreset, afterPlugins.messages, { tools, stream: true, maxTokens: options?.maxTokens });
     publishDebugPromptSnapshot({ request, config, preset: effectivePreset, meta, options, requestKind: "native-tools-stream", tools });
@@ -1252,11 +1260,13 @@ export async function sendLLMToolRequest(
         appTags?: string[];
         followUpCount?: number;
         debugSessionId?: string;
+        /** 替哪个角色生成（宿主知道时填）：插件 hook 据此判断权限，比如日历谁能看 */
+        characterId?: string;
         signal?: AbortSignal;
     },
 ): Promise<LLMToolRequestResult> {
     const pluginPurpose = options?.appId ?? "chat";
-    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId);
+    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId, options?.characterId);
     const effectivePreset = afterPlugins.preset;
     const request = buildProviderRequest(config, effectivePreset, afterPlugins.messages, { tools });
     publishDebugPromptSnapshot({ request, config, preset: effectivePreset, meta, options, requestKind: "native-tools", tools });
