@@ -50,6 +50,7 @@ import {
 import {
   clearStoryMessages,
   createOrGetStorySession,
+  findLastActiveStorySession,
   findMainStorySession,
   hydrateStoryStorage,
   loadStoryMessages,
@@ -59,7 +60,7 @@ import {
   deleteStoryMessagesFrom,
   editStoryMessage,
   type StoryExtraConfig,
-  type StoryExtraTemplate,
+  type StoryExtraOrder,
   type StoryMessage,
   type StorySession,
   updateStorySession,
@@ -155,7 +156,9 @@ function getStoryPreview(messages: StoryMessage[]): string {
   return text.slice(0, 60) || "继续上次的场景。";
 }
 
-/** 番外窗口的主题 / CSS / 折叠标签没单独改过就跟正篇一样 */
+const DEFAULT_STORY_META_QUOTE = "“有些故事，在开始之前就已经写好了结局。”";
+
+/** 番外窗口的主题 / CSS / 折叠标签 / 引言没单独改过就跟正篇一样 */
 function storyDisplaySettings(session: StorySession) {
   const main = session.kind === "extra" ? findMainStorySession(session.characterId) : undefined;
   return {
@@ -163,6 +166,7 @@ function storyDisplaySettings(session: StorySession) {
     customCSS: session.customCSS ?? main?.customCSS ?? "",
     foldTags: session.foldTags ?? main?.foldTags,
     contextExcludedTags: session.contextExcludedTags ?? main?.contextExcludedTags,
+    metaQuote: session.metaQuote ?? main?.metaQuote ?? DEFAULT_STORY_META_QUOTE,
   };
 }
 
@@ -316,6 +320,9 @@ export function StoryApp({ onClose }: StoryAppProps) {
   // 正篇还是番外；换角色时回到正篇
   const [mode, setMode] = useState<"main" | "extra">("main");
   const [templateTop, setTemplateTop] = useState<number | null>(null);
+  // 顶部阅读卡的引言：点一下就地编辑
+  const [editingQuote, setEditingQuote] = useState(false);
+  const quoteCancelRef = useRef(false);
   const [activeCharacterId, setActiveCharacterId] = useState<string>("");
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [messages, setMessages] = useState<StoryMessage[]>([]);
@@ -369,6 +376,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
   const extraConfig = isExtra ? normalizeStoryExtraConfig(currentSession?.extraConfig) : null;
   const extraBindings = extraConfig?.bindings;
   const extraBindingsKey = extraBindings ? JSON.stringify(extraBindings) : "";
+  // 番外模板、指令里代入的名字（剧情历史不走宏替换）
+  const storyUserName = userIdentity?.name?.trim() || "用户";
 
   const markGenerating = useCallback((sessionId: string, on: boolean) => {
     setGeneratingSessionIds((prev) => {
@@ -391,17 +400,24 @@ export function StoryApp({ onClose }: StoryAppProps) {
 
   useEffect(() => {
     hydrateStoryStorage().then(() => {
-      const initialChar = loadCharacters()[0]?.id || "";
+      const allCharacters = loadCharacters();
+      // 回到最近一次聊过的那个窗口（正篇或番外）；角色删了或者还没聊过就第一个角色的正篇
+      const last = findLastActiveStorySession();
+      const resume = last && allCharacters.some((character) => character.id === last.characterId) ? last : undefined;
+      const initialChar = resume?.characterId || allCharacters[0]?.id || "";
+      const initialMode = resume?.kind === "extra" ? "extra" : "main";
       if (initialChar) {
-        const session = createOrGetStorySession(initialChar);
+        const session = createOrGetStorySession(initialChar, initialMode);
+        const sessionDisplay = storyDisplaySettings(session);
+        setMode(initialMode);
         setActiveCharacterId(initialChar);
         setActiveSessionId(session.id);
         activeSessionIdRef.current = session.id; // 同步更新，堵住生成完成回调的守卫空窗
         setVisibleMessageCount(STORY_INITIAL_LOAD);
         setMessages(loadStoryMessages(session.id));
-        setCustomCssDraft(session.customCSS || "");
-        setFoldTagsDraft(session.foldTags ?? "think,thinking");
-        setContextExcludedTagsDraft(session.contextExcludedTags ?? "think,thinking");
+        setCustomCssDraft(sessionDisplay.customCSS);
+        setFoldTagsDraft(sessionDisplay.foldTags ?? "think,thinking");
+        setContextExcludedTagsDraft(sessionDisplay.contextExcludedTags ?? "think,thinking");
         setStorageVersion((value) => value + 1);
       }
       setReady(true);
@@ -420,6 +436,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
     setFoldTagsDraft(sessionDisplay.foldTags ?? "think,thinking");
     setContextExcludedTagsDraft(sessionDisplay.contextExcludedTags ?? "think,thinking");
     setTemplateTop(null);
+    setEditingQuote(false);
     setStorageVersion((value) => value + 1);
   }, [activeCharacterId, mode]);
 
@@ -684,13 +701,21 @@ export function StoryApp({ onClose }: StoryAppProps) {
     setDrawerOpen(false);
   }
 
+  function saveMetaQuote(value: string) {
+    setEditingQuote(false);
+    const text = value.trim();
+    if (!currentSession || text === display?.metaQuote) return;
+    // 清空就回到默认那句（番外回到跟正篇一样）
+    applySessionUpdates({ metaQuote: text || undefined });
+  }
+
   function openTemplate() {
     const shell = shellInnerRef.current;
     const header = shell?.querySelector<HTMLElement>(".story-header");
     setTemplateTop(shell && header ? header.getBoundingClientRect().bottom - shell.getBoundingClientRect().top : 96);
   }
 
-  async function handleSend(userTextInput: string, extraOrder?: StoryExtraTemplate) {
+  async function handleSend(userTextInput: string, extraOrder?: StoryExtraOrder) {
     const userText = userTextInput.trim();
     if (!activeSessionId || !userText || isGenerating) return;
     const sessionId = activeSessionId;
@@ -1226,10 +1251,50 @@ export function StoryApp({ onClose }: StoryAppProps) {
                   <div className="story-meta-tags">
                     {userIdentity?.name || "我"} x {currentCharacter.name}
                   </div>
-                  <div className="story-meta-desc">
-                    {/* Character type might not have description, so we use a stylized default text */}
-                    “有些故事，在开始之前就已经写好了结局。”
-                  </div>
+                  {editingQuote ? (
+                    <textarea
+                      className="story-meta-desc story-meta-desc-input"
+                      rows={3}
+                      autoFocus
+                      defaultValue={display?.metaQuote}
+                      aria-label="编辑引言"
+                      onFocus={(event) => {
+                        const el = event.currentTarget;
+                        el.setSelectionRange(el.value.length, el.value.length);
+                      }}
+                      onBlur={(event) => {
+                        if (quoteCancelRef.current) {
+                          quoteCancelRef.current = false;
+                          setEditingQuote(false);
+                          return;
+                        }
+                        saveMetaQuote(event.currentTarget.value);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                          event.preventDefault();
+                          event.currentTarget.blur();
+                        }
+                        if (event.key === "Escape") {
+                          quoteCancelRef.current = true;
+                          event.currentTarget.blur();
+                        }
+                      }}
+                    />
+                  ) : (
+                    <div
+                      className="story-meta-desc"
+                      role="button"
+                      tabIndex={0}
+                      aria-label="点一下编辑引言"
+                      onClick={() => {
+                        autoBottomLockRef.current = false;
+                        setEditingQuote(true);
+                      }}
+                    >
+                      {display?.metaQuote}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1297,7 +1362,12 @@ export function StoryApp({ onClose }: StoryAppProps) {
                       ) : null}
                       <div className="story-bubble-wrap" style={{ position: "relative" }}>
                         {extraOrder ? (
-                          <StoryExtraOrderCard order={extraOrder} rawContent={message.rawContent} />
+                          <StoryExtraOrderCard
+                            order={extraOrder}
+                            rawContent={message.rawContent}
+                            userName={storyUserName}
+                            charName={currentCharacter.name}
+                          />
                         ) : (
                         <div className="story-bubble">
                           {editingMessageId === message.id ? (
@@ -1385,13 +1455,19 @@ export function StoryApp({ onClose }: StoryAppProps) {
         <StoryExtraTemplateSheet
           key={currentSession.id}
           initial={extraConfig.template}
+          bindings={extraConfig.bindings}
+          userName={storyUserName}
+          charName={currentCharacter.name}
           top={templateTop}
           sending={isGenerating}
           onSave={(template) => updateExtraConfig(currentSession.id, { template })}
+          onBindingsChange={(bindings) => updateExtraConfig(currentSession.id, { bindings })}
           onSend={(template) => {
             updateExtraConfig(currentSession.id, { template });
             setTemplateTop(null);
-            void handleSend(buildStoryExtraInstruction(template), template);
+            const names = { user: storyUserName, char: currentCharacter.name };
+            const instruction = buildStoryExtraInstruction(template, names);
+            void handleSend(instruction, { ...template, userName: names.user, charName: names.char, instruction });
           }}
           onClose={() => setTemplateTop(null)}
         />

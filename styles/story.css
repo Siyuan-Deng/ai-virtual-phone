@@ -325,6 +325,29 @@
           padding-left: 10px;
           border-left: 2px solid var(--c-story-accent-light, #e2e8f0);
         }
+        /* 引言点一下就地编辑 */
+        .story-meta-desc[role="button"] {
+          cursor: text;
+          white-space: pre-wrap;
+        }
+        .story-meta-desc-input {
+          display: block;
+          width: 100%;
+          box-sizing: border-box;
+          margin-bottom: 0;
+          padding-top: 4px;
+          padding-bottom: 4px;
+          padding-right: 8px;
+          border-top: none;
+          border-right: none;
+          border-bottom: none;
+          border-radius: 0;
+          outline: none;
+          resize: none;
+          background: var(--c-story-css-box-bg, rgba(255, 251, 246, 0.88));
+          -webkit-user-select: text;
+          user-select: text;
+        }
 
         .story-empty {
           min-height: 30vh;
@@ -1490,15 +1513,24 @@
           grid-template-columns: 1fr 1fr;
           gap: 12px;
         }
-        /* 人称：标签和选项同一行 */
-        .story-template-inline {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        .story-template-inline .story-template-label {
+        /* 番外方案：标签、下拉和按钮同一行 */
+        .story-template-preset .story-template-label {
           margin-bottom: 0;
           flex-shrink: 0;
+        }
+        /* 人称：user / char 各一行，标签一列、选项一列对齐 */
+        .story-template-persons {
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr);
+          align-items: center;
+          gap: 8px 12px;
+        }
+        .story-template-persons .story-template-label {
+          margin-bottom: 0;
+          max-width: 9em;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .story-template-options {
           display: flex;

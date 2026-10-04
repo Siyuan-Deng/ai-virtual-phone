@@ -4,22 +4,27 @@
 // 读记忆区但不写进记忆区。用「番外模板」填几项，发出去的就是一条拼好的系统指令。
 
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
-import type { StoryExtraBindings, StoryExtraConfig, StoryExtraTemplate, StoryMessage } from "./story-storage";
+import type { StoryExtraBindings, StoryExtraConfig, StoryExtraPerson, StoryExtraTemplate, StoryMessage } from "./story-storage";
 
 const PRESET_KEY = "ai_phone_story_extra_presets_v1";
 registerKvMigration(PRESET_KEY);
 
-const PERSONS: StoryExtraTemplate["person"][] = ["第一人称", "第二人称", "第三人称"];
+const PERSONS: StoryExtraPerson[] = ["第一人称", "第二人称", "第三人称"];
 export const STORY_EXTRA_PERSONS = PERSONS;
 
 export const DEFAULT_STORY_EXTRA_TEMPLATE: StoryExtraTemplate = {
     content: "",
     style: "",
     words: "",
-    person: "第二人称",
+    userPerson: "第二人称",
+    charPerson: "第三人称",
     extra: "",
     includePrevious: false,
 };
+
+function person(value: unknown): StoryExtraPerson | undefined {
+    return PERSONS.includes(value as StoryExtraPerson) ? value as StoryExtraPerson : undefined;
+}
 
 function text(value: unknown, max = 8000): string {
     return typeof value === "string" ? value.slice(0, max) : "";
@@ -31,14 +36,13 @@ function ids(value: unknown): string[] | undefined {
 
 export function normalizeStoryExtraTemplate(value: unknown): StoryExtraTemplate {
     const raw = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
-    const person = PERSONS.includes(raw.person as StoryExtraTemplate["person"])
-        ? raw.person as StoryExtraTemplate["person"]
-        : DEFAULT_STORY_EXTRA_TEMPLATE.person;
     return {
         content: text(raw.content),
         style: text(raw.style, 200),
         words: text(raw.words, 40),
-        person,
+        // 旧版只有一个 person（指 user 的人称）
+        userPerson: person(raw.userPerson) ?? person(raw.person) ?? DEFAULT_STORY_EXTRA_TEMPLATE.userPerson,
+        charPerson: person(raw.charPerson) ?? DEFAULT_STORY_EXTRA_TEMPLATE.charPerson,
         extra: text(raw.extra, 2000),
         includePrevious: raw.includePrevious === true,
     };
@@ -78,17 +82,18 @@ function cleanWords(value: string): string {
 
 /** 模板拼成发出去的那句指令，格式照用户给的范例：
  *  （$系统指令：现在暂停当前剧情，为我生成一个番外小剧场。不需要记忆区，标题自拟。大概内容为……。
- *   内容要4000字以上，文风……，以第二人称称呼user。其它要求）
- *  哪项没填就省掉那一句。 */
-export function buildStoryExtraInstruction(template: StoryExtraTemplate): string {
+ *   内容要4000字以上，文风……，以第二人称称呼{user}，以第三人称称呼{char}。其它要求）
+ *  哪项没填就省掉那一句。剧情历史不走宏替换，所以名字在这里直接代入。 */
+export function buildStoryExtraInstruction(template: StoryExtraTemplate, names: { user: string; char: string }): string {
     let body = "现在暂停当前剧情，为我生成一个番外小剧场。不需要记忆区，标题自拟。";
     if (template.content.trim()) body += asSentence(`大概内容为${template.content.trim()}`);
     const clauses: string[] = [];
     const words = cleanWords(template.words);
     if (words) clauses.push(`内容要${words}字以上`);
     if (template.style.trim()) clauses.push(`文风${template.style.trim()}`);
-    if (template.person) clauses.push(`以${template.person}称呼user`);
-    if (clauses.length > 0) body += `${clauses.join("，")}。`;
+    clauses.push(`以${template.userPerson}称呼${names.user}`);
+    clauses.push(`以${template.charPerson}称呼${names.char}`);
+    body += `${clauses.join("，")}。`;
     if (template.extra.trim()) body += asSentence(template.extra);
     return `（$系统指令：${body}）`;
 }

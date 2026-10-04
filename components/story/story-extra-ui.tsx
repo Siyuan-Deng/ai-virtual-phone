@@ -2,18 +2,25 @@
 
 // 剧情侧栏（选角色）和番外用到的几块界面，版式照用户选定的方案 C。
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, Save, Trash2, X } from "lucide-react";
 import { Avatar } from "@/components/ui/primitives";
 import type { Character } from "@/lib/character-types";
 import { loadApiConfigs, loadPresets, loadRegexes, loadWorldBooks } from "@/lib/settings-storage";
-import type { StoryExtraBindings, StoryExtraConfig, StoryExtraTemplate, StorySession } from "@/lib/story-storage";
+import type {
+  StoryExtraBindings,
+  StoryExtraConfig,
+  StoryExtraOrder,
+  StoryExtraPerson,
+  StoryExtraTemplate,
+  StorySession,
+} from "@/lib/story-storage";
 import {
   STORY_EXTRA_PERSONS,
-  buildStoryExtraInstruction,
   deleteStoryExtraPreset,
   loadStoryExtraPresets,
+  normalizeStoryExtraTemplate,
   saveStoryExtraPreset,
   type StoryExtraPreset,
 } from "@/lib/story-extra";
@@ -263,7 +270,6 @@ export function StoryExtraBindingsSection({
           </button>
         );
       })}
-      <div className="story-drawer-note">没单独选的项跟随剧情的绑定。</div>
     </div>
   );
 }
@@ -351,9 +357,12 @@ function matchesPreset(preset: StoryExtraConfig, current: StoryExtraConfig): boo
 export function StoryExtraPresetBar({
   config,
   onLoad,
+  variant = "drawer",
 }: {
   config: StoryExtraConfig;
   onLoad: (config: StoryExtraConfig) => void;
+  /** 侧栏里是单独一段；番外模板面板里只占一行 */
+  variant?: "drawer" | "template";
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [presets, setPresets] = useState<StoryExtraPreset[]>(() => loadStoryExtraPresets());
@@ -394,97 +403,130 @@ export function StoryExtraPresetBar({
     </div>
   ) : null;
 
+  const controls = (
+    <>
+      <select
+        className="story-preset-select"
+        value={selectedId}
+        onChange={(event) => {
+          setConfirmingDelete(false);
+          const preset = presets.find((item) => item.id === event.target.value);
+          if (!preset) return;
+          const incoming = preset.config.template.content.trim();
+          const current = config.template.content.trim();
+          if (incoming && current && incoming !== current) {
+            setPendingReplace(preset);
+            return;
+          }
+          apply(preset);
+        }}
+      >
+        <option value="">{presets.length > 0 ? "选一套保存过的方案" : "还没有保存过方案"}</option>
+        {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+      </select>
+      {selectedId ? (
+        <button
+          type="button"
+          className={`story-preset-btn${confirmingDelete ? " is-danger" : ""}`}
+          aria-label={confirmingDelete ? "确认删除这套方案" : "删除这套方案"}
+          onClick={() => {
+            if (!confirmingDelete) { setConfirmingDelete(true); return; }
+            deleteStoryExtraPreset(selectedId);
+            setConfirmingDelete(false);
+            setPresets(loadStoryExtraPresets());
+          }}
+        >
+          <Trash2 size={15} />
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="story-preset-btn"
+        aria-label="把现在的模板和绑定存成一套"
+        onClick={() => {
+          setName(presets.find((item) => item.id === selectedId)?.name ?? "");
+          setNaming(true);
+          setConfirmingDelete(false);
+        }}
+      >
+        <Save size={15} />
+      </button>
+    </>
+  );
+
+  const namingRow = naming ? (
+    <div className="story-preset-row">
+      <input
+        className="story-preset-input"
+        value={name}
+        maxLength={30}
+        placeholder="给这套方案起个名字"
+        autoFocus
+        onChange={(event) => setName(event.target.value)}
+      />
+      <button
+        type="button"
+        className="story-preset-btn"
+        aria-label="确认保存"
+        onClick={() => {
+          saveStoryExtraPreset(name || "未命名", config);
+          setPresets(loadStoryExtraPresets());
+          setNaming(false);
+        }}
+      >
+        <Check size={15} />
+      </button>
+      <button type="button" className="story-preset-btn" aria-label="取消" onClick={() => setNaming(false)}>
+        <X size={15} />
+      </button>
+    </div>
+  ) : null;
+
+  const dialogNode = dialog && dialogHost ? createPortal(dialog, dialogHost) : dialog;
+
+  if (variant === "template") {
+    return (
+      <div className="story-template-preset" ref={rootRef}>
+        <div className="story-preset-row">
+          <span className="story-template-label">番外方案</span>
+          {controls}
+        </div>
+        {namingRow}
+        {dialogNode}
+      </div>
+    );
+  }
+
   return (
     <div className="story-drawer-section" ref={rootRef}>
       <div className="story-drawer-eyebrow">番外方案</div>
-      <div className="story-preset-row">
-        <select
-          className="story-preset-select"
-          value={selectedId}
-          onChange={(event) => {
-            setConfirmingDelete(false);
-            const preset = presets.find((item) => item.id === event.target.value);
-            if (!preset) return;
-            const incoming = preset.config.template.content.trim();
-            const current = config.template.content.trim();
-            if (incoming && current && incoming !== current) {
-              setPendingReplace(preset);
-              return;
-            }
-            apply(preset);
-          }}
-        >
-          <option value="">{presets.length > 0 ? "选一套保存过的方案" : "还没有保存过方案"}</option>
-          {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
-        </select>
-        {selectedId ? (
-          <button
-            type="button"
-            className={`story-preset-btn${confirmingDelete ? " is-danger" : ""}`}
-            aria-label={confirmingDelete ? "确认删除这套方案" : "删除这套方案"}
-            onClick={() => {
-              if (!confirmingDelete) { setConfirmingDelete(true); return; }
-              deleteStoryExtraPreset(selectedId);
-              setConfirmingDelete(false);
-              setPresets(loadStoryExtraPresets());
-            }}
-          >
-            <Trash2 size={15} />
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className="story-preset-btn"
-          aria-label="把现在的模板和绑定存成一套"
-          onClick={() => {
-            setName(presets.find((item) => item.id === selectedId)?.name ?? "");
-            setNaming(true);
-            setConfirmingDelete(false);
-          }}
-        >
-          <Save size={15} />
-        </button>
-      </div>
-      {naming ? (
-        <div className="story-preset-row">
-          <input
-            className="story-preset-input"
-            value={name}
-            maxLength={30}
-            placeholder="给这套方案起个名字"
-            autoFocus
-            onChange={(event) => setName(event.target.value)}
-          />
-          <button
-            type="button"
-            className="story-preset-btn"
-            aria-label="确认保存"
-            onClick={() => {
-              saveStoryExtraPreset(name || "未命名", config);
-              setPresets(loadStoryExtraPresets());
-              setNaming(false);
-            }}
-          >
-            <Check size={15} />
-          </button>
-          <button type="button" className="story-preset-btn" aria-label="取消" onClick={() => setNaming(false)}>
-            <X size={15} />
-          </button>
-        </div>
-      ) : null}
-      <div className="story-drawer-note">模板和上面的绑定一起存成一套，同名会覆盖。方案里大概内容空着的话，切换时保留你正在写的。</div>
-      {dialog && dialogHost ? createPortal(dialog, dialogHost) : dialog}
+      <div className="story-preset-row">{controls}</div>
+      {namingRow}
+      <div className="story-drawer-note">包括绑定信息与番外指令。</div>
+      {dialogNode}
     </div>
   );
 }
 
 // ── 番外指令卡：模板发出去的那条，默认折叠 ──
 
-export function StoryExtraOrderCard({ order, rawContent }: { order: StoryExtraTemplate; rawContent: string }) {
+export function StoryExtraOrderCard({
+  order,
+  rawContent,
+  userName,
+  charName,
+}: {
+  order: StoryExtraOrder;
+  rawContent: string;
+  /** 现在的名字；发送时记下的名字优先 */
+  userName: string;
+  charName: string;
+}) {
   const [open, setOpen] = useState(false);
-  // 指令被手动编辑过就不再拿模板字段概括它
-  const edited = rawContent !== buildStoryExtraInstruction(order);
-  const words = order.words.trim().replace(/字(以上)?$/, "").trim();
+  const template = normalizeStoryExtraTemplate(order);
+  // 指令被手动编辑过就不再拿模板字段概括它（早先的消息没记原文，当作没改过）
+  const edited = order.instruction !== undefined && rawContent !== order.instruction;
+  const words = template.words.trim().replace(/字(以上)?$/, "").trim();
   return (
     <div className="story-extra-order">
       <button type="button" className="story-extra-order-head" onClick={() => setOpen((value) => !value)}>
@@ -492,14 +534,16 @@ export function StoryExtraOrderCard({ order, rawContent }: { order: StoryExtraTe
         <span>{open ? "收起" : "展开"}</span>
       </button>
       <div className={`story-extra-order-text${open ? " is-open" : ""}`}>
-        {open || edited || !order.content.trim() ? rawContent : order.content}
+        {open || edited || !template.content.trim() ? rawContent : template.content}
       </div>
       {edited ? null : (
         <div className="story-extra-chips">
           {words ? <span>{words} 字以上</span> : null}
-          {order.style.trim() ? <span>{order.style.trim()}</span> : null}
-          <span>{order.person}</span>
-          {order.includePrevious ? <span>带上之前的番外</span> : null}
+          {template.style.trim() ? <span>{template.style.trim()}</span> : null}
+          <span>{order.userName || userName} · {template.userPerson}</span>
+          {/* 早先的指令只定了 user 的人称 */}
+          {order.charPerson ? <span>{order.charName || charName} · {template.charPerson}</span> : null}
+          {template.includePrevious ? <span>带上之前的番外</span> : null}
         </div>
       )}
     </div>
@@ -510,18 +554,27 @@ export function StoryExtraOrderCard({ order, rawContent }: { order: StoryExtraTe
 
 export function StoryExtraTemplateSheet({
   initial,
+  bindings,
+  userName,
+  charName,
   top,
   sending,
   onSave,
+  onBindingsChange,
   onSend,
   onClose,
 }: {
   initial: StoryExtraTemplate;
+  bindings: StoryExtraBindings;
+  userName: string;
+  charName: string;
   /** 面板从标题栏下沿开始 */
   top: number;
   sending: boolean;
   /** 面板关掉（包括整页关掉）时，把填的内容存回番外窗口 */
   onSave: (template: StoryExtraTemplate) => void;
+  /** 在面板里切方案时，方案里的绑定直接存回番外窗口 */
+  onBindingsChange: (bindings: StoryExtraBindings) => void;
   onSend: (template: StoryExtraTemplate) => void;
   onClose: () => void;
 }) {
@@ -533,6 +586,10 @@ export function StoryExtraTemplateSheet({
   useEffect(() => () => onSaveRef.current(draftRef.current), []);
 
   const set = (patch: Partial<StoryExtraTemplate>) => setDraft((prev) => ({ ...prev, ...patch }));
+  const personRows = [
+    { name: userName, value: draft.userPerson, pick: (value: StoryExtraPerson) => set({ userPerson: value }) },
+    { name: charName, value: draft.charPerson, pick: (value: StoryExtraPerson) => set({ charPerson: value }) },
+  ];
 
   return (
     <div className="story-template-sheet" style={{ top }} role="dialog" aria-label="番外模板">
@@ -541,6 +598,14 @@ export function StoryExtraTemplateSheet({
         <button type="button" className="story-top-btn" aria-label="关闭" onClick={onClose}><X size={16} /></button>
       </div>
       <div className="story-template-body">
+        <StoryExtraPresetBar
+          variant="template"
+          config={{ template: draft, bindings }}
+          onLoad={(next) => {
+            setDraft(next.template);
+            onBindingsChange(next.bindings);
+          }}
+        />
         <label className="story-template-field">
           <span className="story-template-label">大概内容</span>
           <textarea rows={5} value={draft.content} placeholder="这篇番外大概写什么" onChange={(event) => set({ content: event.target.value })} />
@@ -555,15 +620,19 @@ export function StoryExtraTemplateSheet({
             <input value={draft.words} inputMode="numeric" placeholder="比如 4000" onChange={(event) => set({ words: event.target.value })} />
           </label>
         </div>
-        <div className="story-template-inline">
-          <span className="story-template-label">人称</span>
-          <div className="story-template-options">
-            {STORY_EXTRA_PERSONS.map((person) => (
-              <button key={person} type="button" data-active={draft.person === person ? "true" : undefined} onClick={() => set({ person })}>
-                {person}
-              </button>
-            ))}
-          </div>
+        <div className="story-template-persons">
+          {personRows.map((row, index) => (
+            <Fragment key={index}>
+              <span className="story-template-label">{row.name}人称</span>
+              <div className="story-template-options">
+                {STORY_EXTRA_PERSONS.map((value) => (
+                  <button key={value} type="button" data-active={row.value === value ? "true" : undefined} onClick={() => row.pick(value)}>
+                    {value}
+                  </button>
+                ))}
+              </div>
+            </Fragment>
+          ))}
         </div>
         <label className="story-template-field">
           <span className="story-template-label">其它要求</span>

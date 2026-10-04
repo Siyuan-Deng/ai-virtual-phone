@@ -8,13 +8,17 @@ export type StoryUiPrefs = {
   theme?: string;
 };
 
+export type StoryExtraPerson = "第一人称" | "第二人称" | "第三人称";
+
 /** 番外模板里的几项。用模板发出去的那条用户消息会带着它，标记「从这里开始新的一篇」 */
 export type StoryExtraTemplate = {
   content: string;
   style: string;
   /** 字数，原样保存用户填的（「4000」「四千」都行） */
   words: string;
-  person: "第一人称" | "第二人称" | "第三人称";
+  /** 用什么人称写 user / char，分开选 */
+  userPerson: StoryExtraPerson;
+  charPerson: StoryExtraPerson;
   extra: string;
   /** 这一篇要不要带上之前的番外一起发给模型 */
   includePrevious: boolean;
@@ -35,6 +39,14 @@ export type StoryExtraConfig = {
   bindings: StoryExtraBindings;
 };
 
+/** 消息上记的番外指令：发送时的模板 + 当时代入的名字 + 拼好的原文 */
+export type StoryExtraOrder = StoryExtraTemplate & {
+  userName?: string;
+  charName?: string;
+  /** 发出去的指令原文；和消息正文对不上说明被手动编辑过 */
+  instruction?: string;
+};
+
 export type StorySession = {
   id: string;
   characterId: string;
@@ -48,6 +60,8 @@ export type StorySession = {
   foldTags?: string;            // Comma-separated tag names to fold for this session.
   contextExcludedTags?: string; // Comma-separated tag names stripped before sending story history to the LLM.
   uiPrefs?: StoryUiPrefs;
+  /** 顶部阅读卡里那句引言；没改过就用默认的，番外没改过跟正篇 */
+  metaQuote?: string;
   lastMessageId?: string;
   lastMessagePreview?: string;
 };
@@ -65,7 +79,7 @@ export type StoryMessage = {
   parserVersion?: number;
   createdAt: string;
   /** 番外：用模板发出的指令，带着当时填的模板 */
-  extraOrder?: StoryExtraTemplate;
+  extraOrder?: StoryExtraOrder;
 };
 
 export type StoryProjectionEntry = {
@@ -189,6 +203,15 @@ export function loadStoryMessages(sessionId: string): StoryMessage[] {
   return _messagesCache
     .filter((message) => message.sessionId === sessionId)
     .sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+}
+
+/** 最近一次有消息的会话（正篇或番外都算）；进剧情 App 时回到这里 */
+export function findLastActiveStorySession(): StorySession | undefined {
+  let latest: StoryMessage | undefined;
+  for (const message of _messagesCache) {
+    if (!latest || (message.createdAt || "") > (latest.createdAt || "")) latest = message;
+  }
+  return latest ? _sessionsCache.find((session) => session.id === latest.sessionId) : undefined;
 }
 
 /** 这个角色的正篇会话（不会拿到番外那个） */
