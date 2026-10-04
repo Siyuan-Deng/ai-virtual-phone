@@ -346,6 +346,7 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
         label: "创作玩法配置",
         keys: [
           "ai_phone_vn_scenes_v1",
+          "ai_phone_story_extra_presets_v1",
           "ai_phone_vn_sprites_v1",
           "map_adventure_interaction_config_v1",
           "map_dm_prompts",

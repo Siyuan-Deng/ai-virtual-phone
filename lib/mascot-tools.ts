@@ -1607,7 +1607,8 @@ async function resolveStorySession(sessionName: string | undefined, ctx: MascotT
     const charNameById = new Map(chars.map((c) => [c.id, c.name || ""]));
 
     const buildDisplayName = (s: typeof sessions[number]): string => {
-        return s.title || charNameById.get((s as Record<string, unknown>).characterId as string || "") || s.id;
+        const base = s.title || charNameById.get((s as Record<string, unknown>).characterId as string || "") || s.id;
+        return s.kind === "extra" ? `${base}（番外）` : base;
     };
 
     if (sessionName) {

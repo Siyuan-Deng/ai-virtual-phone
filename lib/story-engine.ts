@@ -19,7 +19,7 @@ import { buildCalendarScheduleMarker, getCurrentCalendarScheduleForPrompt } from
 import { getWeekStartIso } from "./calendar-utils";
 import { parseStoryResponse } from "./story-parser";
 import { STORY_PARSER_VERSION } from "./story-parser";
-import { loadStoryMessages, replaceStoryMessages, type StoryMessage } from "./story-storage";
+import { loadStoryMessages, replaceStoryMessages, type StoryExtraBindings, type StoryMessage } from "./story-storage";
 import type { ChatMessage } from "./chat-storage";
 import { MacroEngine } from "./macro-engine";
 
@@ -68,7 +68,8 @@ function toHistoryMessage(message: StoryMessage, contextExcludedTags?: string): 
   };
 }
 
-function resolveStoryConfigs(characterId: string): {
+/** overrides：番外单独的绑定。哪项没填（或绑的东西已经删了）就跟随剧情 */
+function resolveStoryConfigs(characterId: string, overrides?: StoryExtraBindings): {
   apiConfig: ApiConfig;
   preset: PresetConfig | null;
   regexes: RegexConfig[];
@@ -87,13 +88,16 @@ function resolveStoryConfigs(characterId: string): {
     throw new ChatEngineError(`No API Configuration bound for ${character.name}. Please go to Settings -> 绑定管理 -> 剧情 to assign one.`);
   }
 
-  const apiConfig = loadApiConfigs().find((config) => config.id === activeSlot.apiConfigId);
+  const apiConfigs = loadApiConfigs();
+  const apiConfig = (overrides?.apiConfigId ? apiConfigs.find((config) => config.id === overrides.apiConfigId) : undefined)
+    ?? apiConfigs.find((config) => config.id === activeSlot.apiConfigId);
   if (!apiConfig) {
     throw new ChatEngineError(`API Configuration not found for ${character.name}.`);
   }
 
   const presets = loadPresets();
-  let preset = activeSlot.presetId ? presets.find((item) => item.id === activeSlot.presetId) || null : null;
+  const overridePreset = overrides?.presetId ? presets.find((item) => item.id === overrides.presetId) || null : null;
+  let preset = overridePreset ?? (activeSlot.presetId ? presets.find((item) => item.id === activeSlot.presetId) || null : null);
   if (!preset) {
     preset = presets.find((item) => item.builtIn) ?? null;
   }
@@ -101,15 +105,16 @@ function resolveStoryConfigs(characterId: string): {
   const allRegexes = loadRegexes();
   const charBinding = bindings.characterBindings.find((item) => item.characterId === characterId);
   const storyOverrideRegexIds = charBinding?.appOverrides.story?.regexIds;
-  const regexIds = storyOverrideRegexIds && storyOverrideRegexIds.length > 0
-    ? storyOverrideRegexIds
-    : activeSlot.regexIds || [];
+  const regexIds = overrides?.regexIds
+    ?? (storyOverrideRegexIds && storyOverrideRegexIds.length > 0
+      ? storyOverrideRegexIds
+      : activeSlot.regexIds || []);
   const regexes = regexIds
     .map((id) => allRegexes.find((regex) => regex.id === id))
     .filter(Boolean) as RegexConfig[];
 
   const allWorldBooks = loadWorldBooks();
-  const worldBooks = (activeSlot.worldBookIds || [])
+  const worldBooks = (overrides?.worldBookIds ?? activeSlot.worldBookIds ?? [])
     .map((id) => allWorldBooks.find((worldBook) => worldBook.id === id))
     .filter(Boolean) as WorldBookConfig[];
   const summaryTag = preset?.story_summary_tag?.trim() || "summary";
@@ -124,8 +129,8 @@ function resolveStoryConfigs(characterId: string): {
   };
 }
 
-export function getStoryRenderSignature(characterId: string): { regexSignature: string; parserVersion: number; regexes: RegexConfig[] } {
-  const { regexSignature, regexes } = resolveStoryConfigs(characterId);
+export function getStoryRenderSignature(characterId: string, overrides?: StoryExtraBindings): { regexSignature: string; parserVersion: number; regexes: RegexConfig[] } {
+  const { regexSignature, regexes } = resolveStoryConfigs(characterId, overrides);
   return {
     regexSignature,
     parserVersion: STORY_PARSER_VERSION,
@@ -136,14 +141,14 @@ export function getStoryRenderSignature(characterId: string): { regexSignature: 
 export async function generateStoryCompletion(
   characterId: string,
   history: StoryMessage[],
-  options?: { sessionFoldTags?: string; sessionContextExcludedTags?: string; signal?: AbortSignal },
+  options?: { sessionFoldTags?: string; sessionContextExcludedTags?: string; signal?: AbortSignal; bindings?: StoryExtraBindings },
 ): Promise<StoryGenerationResult> {
   const character = loadCharacters().find((item) => item.id === characterId);
   if (!character) {
     throw new ChatEngineError(`Character not found: ${characterId}`);
   }
 
-  const { apiConfig, preset, regexes, worldBooks, regexSignature, summaryTag } = resolveStoryConfigs(characterId);
+  const { apiConfig, preset, regexes, worldBooks, regexSignature, summaryTag } = resolveStoryConfigs(characterId, options?.bindings);
   const effectiveFoldTags = options?.sessionFoldTags?.trim() || DEFAULT_STORY_FOLD_TAGS;
   const effectiveContextExcludedTags = options?.sessionContextExcludedTags?.trim() || DEFAULT_STORY_CONTEXT_EXCLUDED_TAGS;
   const llmMessages = await buildStoryPromptMessages(characterId, history, preset, regexes, worldBooks, effectiveContextExcludedTags);
@@ -239,9 +244,13 @@ export async function previewStoryPromptPayload(
   };
 }
 
-export function rebuildStorySessionRenderCache(characterId: string, sessionId: string, options?: { sessionFoldTags?: string }): StoryMessage[] {
-  const { regexSignature, parserVersion } = getStoryRenderSignature(characterId);
-  const { regexes, summaryTag } = resolveStoryConfigs(characterId);
+export function rebuildStorySessionRenderCache(
+  characterId: string,
+  sessionId: string,
+  options?: { sessionFoldTags?: string; bindings?: StoryExtraBindings },
+): StoryMessage[] {
+  const { regexSignature, parserVersion } = getStoryRenderSignature(characterId, options?.bindings);
+  const { regexes, summaryTag } = resolveStoryConfigs(characterId, options?.bindings);
   const effectiveFoldTags = options?.sessionFoldTags?.trim() || DEFAULT_STORY_FOLD_TAGS;
 
   const character = loadCharacters().find((c) => c.id === characterId);

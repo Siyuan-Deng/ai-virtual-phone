@@ -8,9 +8,40 @@ export type StoryUiPrefs = {
   theme?: string;
 };
 
+/** 番外模板里的几项。用模板发出去的那条用户消息会带着它，标记「从这里开始新的一篇」 */
+export type StoryExtraTemplate = {
+  content: string;
+  style: string;
+  /** 字数，原样保存用户填的（「4000」「四千」都行） */
+  words: string;
+  person: "第一人称" | "第二人称" | "第三人称";
+  extra: string;
+  /** 这一篇要不要带上之前的番外一起发给模型 */
+  includePrevious: boolean;
+};
+
+/** 番外单独的绑定；没填的那项跟随剧情 */
+export type StoryExtraBindings = {
+  apiConfigId?: string;
+  presetId?: string;
+  /** undefined 跟随剧情；[] 不用世界书 */
+  worldBookIds?: string[];
+  /** undefined 跟随剧情；[] 不用正则 */
+  regexIds?: string[];
+};
+
+export type StoryExtraConfig = {
+  template: StoryExtraTemplate;
+  bindings: StoryExtraBindings;
+};
+
 export type StorySession = {
   id: string;
   characterId: string;
+  /** 正篇（缺省）还是番外。每个角色各一个 */
+  kind?: "main" | "extra";
+  /** 番外窗口的模板和单独绑定 */
+  extraConfig?: StoryExtraConfig;
   title?: string;
   updatedAt: string;
   customCSS?: string;
@@ -33,6 +64,8 @@ export type StoryMessage = {
   regexSignature?: string;
   parserVersion?: number;
   createdAt: string;
+  /** 番外：用模板发出的指令，带着当时填的模板 */
+  extraOrder?: StoryExtraTemplate;
 };
 
 export type StoryProjectionEntry = {
@@ -87,8 +120,13 @@ function isPreferredStorySession(candidate: StorySession, current: StorySession)
   return candidate.id.localeCompare(current.id) > 0;
 }
 
+function storySessionSlot(session: Pick<StorySession, "characterId" | "kind">): string {
+  return `${session.characterId}:${session.kind === "extra" ? "extra" : "main"}`;
+}
+
 function normalizeStorySessions(sessions: StorySession[]): { items: StorySession[]; changed: boolean } {
   const normalized: StorySession[] = [];
+  // 每个角色一个正篇 + 一个番外；同一格里有重复的只留最新那个
   const indexByCharacter = new Map<string, number>();
   let changed = false;
 
@@ -102,9 +140,10 @@ function normalizeStorySessions(sessions: StorySession[]): { items: StorySession
     const item = id === session.id && characterId === session.characterId
       ? session
       : { ...session, id, characterId };
-    const existingIndex = indexByCharacter.get(characterId);
+    const slot = storySessionSlot(item);
+    const existingIndex = indexByCharacter.get(slot);
     if (existingIndex === undefined) {
-      indexByCharacter.set(characterId, normalized.length);
+      indexByCharacter.set(slot, normalized.length);
       normalized.push(item);
       if (item !== session) changed = true;
       continue;
@@ -152,18 +191,26 @@ export function loadStoryMessages(sessionId: string): StoryMessage[] {
     .sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
 }
 
-export function createOrGetStorySession(characterId: string): StorySession {
+/** 这个角色的正篇会话（不会拿到番外那个） */
+export function findMainStorySession(characterId: string): StorySession | undefined {
+  return _sessionsCache.find((session) => session.characterId === characterId && session.kind !== "extra");
+}
+
+export function createOrGetStorySession(characterId: string, kind: "main" | "extra" = "main"): StorySession {
   const normalized = normalizeStorySessions(_sessionsCache);
   if (normalized.changed) {
     _sessionsCache = normalized.items;
     persistStorySessionsSnapshot(normalized.items);
   }
-  const existing = _sessionsCache.find((session) => session.characterId === characterId);
+  const existing = _sessionsCache.find((session) => (
+    session.characterId === characterId && (session.kind === "extra" ? "extra" : "main") === kind
+  ));
   if (existing) return existing;
 
   const session: StorySession = {
     id: generateId("story_sess"),
     characterId,
+    ...(kind === "extra" ? { kind: "extra" as const } : {}),
     updatedAt: new Date().toISOString(),
     uiPrefs: {},
   };
@@ -239,6 +286,13 @@ export function editStoryMessage(messageId: string, newRawContent: string): void
     storyDb.messages.put(_messagesCache[idx]).catch(() => undefined);
 }
 
+/** 清空一个会话的全部消息（番外「清空番外」用） */
+export function clearStoryMessages(sessionId: string): void {
+  _messagesCache = _messagesCache.filter((message) => message.sessionId !== sessionId);
+  storyDb.messages.where("sessionId").equals(sessionId).delete().catch(() => undefined);
+  updateStorySession(sessionId, { lastMessageId: undefined, lastMessagePreview: undefined });
+}
+
 export function replaceStoryMessages(sessionId: string, messages: StoryMessage[]): void {
   _messagesCache = _messagesCache.filter((message) => message.sessionId !== sessionId);
   _messagesCache.push(...messages);
@@ -262,7 +316,8 @@ export function loadStoryProjectionEntries(
   characterId: string,
   options?: { afterTimestamp?: string; userName?: string; charName?: string }
 ): StoryProjectionEntry[] {
-  const session = _sessionsCache.find((item) => item.characterId === characterId);
+  // 只投正篇：番外里的内容不进记忆区
+  const session = findMainStorySession(characterId);
   if (!session) return [];
   const messages = loadStoryMessages(session.id);
   const projections: StoryProjectionEntry[] = [];

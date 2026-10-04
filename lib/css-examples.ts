@@ -1428,8 +1428,14 @@ export const STORY_CSS_EXAMPLE = `/* ═══ 剧情模式样式示例 ══�
   /* color: var(--c-story-sub); */
   /* font-size: calc(11px*var(--app-text-scale,1)); */
 }
-.story-character-chip {
+.story-now-card {
+  /* background: var(--c-story-panel); */
+}
+.story-character-row {
   /* border-radius: 10px; */
+}
+.story-extra-order {
+  /* 番外指令卡 */
   /* background: var(--c-story-panel); */
 }
 

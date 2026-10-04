@@ -26,7 +26,7 @@ import { loadCharacters } from "@/lib/character-storage";
 import { getAllPosts } from "@/lib/moments-storage";
 import type { LLMMessage } from "@/lib/llm-prompt-assembler";
 import { getWeekStartIso } from "@/lib/calendar-utils";
-import { loadStorySessions, loadStoryMessages } from "@/lib/story-storage";
+import { findMainStorySession, loadStoryMessages } from "@/lib/story-storage";
 import { previewStoryPromptPayload } from "@/lib/story-engine";
 import { loadVnSessions, loadVnMessages } from "@/lib/vn-storage";
 import { previewVnPromptPayload } from "@/lib/vn-engine";
@@ -439,7 +439,7 @@ export function DebugPromptPanel() {
         setError(null);
         setLoading(true);
         try {
-            const session = loadStorySessions().find(s => s.characterId === storyCharacterId);
+            const session = findMainStorySession(storyCharacterId);
             const history = session ? loadStoryMessages(session.id) : [];
             const result = await previewStoryPromptPayload(storyCharacterId, history, {
                 sessionContextExcludedTags: session?.contextExcludedTags,

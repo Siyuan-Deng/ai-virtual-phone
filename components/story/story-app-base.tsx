@@ -48,7 +48,9 @@ import {
   rebuildStorySessionRenderCache,
 } from "@/lib/story-engine";
 import {
+  clearStoryMessages,
   createOrGetStorySession,
+  findMainStorySession,
   hydrateStoryStorage,
   loadStoryMessages,
   loadStorySessions,
@@ -56,10 +58,25 @@ import {
   deleteStoryMessage,
   deleteStoryMessagesFrom,
   editStoryMessage,
+  type StoryExtraConfig,
+  type StoryExtraTemplate,
   type StoryMessage,
   type StorySession,
   updateStorySession,
 } from "@/lib/story-storage";
+import { buildStoryExtraInstruction, normalizeStoryExtraConfig, storyExtraHistory } from "@/lib/story-extra";
+import {
+  StoryBindingPicker,
+  StoryCharacterSheet,
+  StoryExtraBindingsSection,
+  StoryExtraOrderCard,
+  StoryExtraPresetBar,
+  StoryExtraTemplateSheet,
+  StoryNowCard,
+  StoryRecentSection,
+  orderStoryCharacters,
+  type StoryBindingKind,
+} from "@/components/story/story-extra-ui";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { STORY_CSS_EXAMPLE } from "@/lib/css-examples";
 import { applyEditOutputRegex } from "@/lib/llm-prompt-assembler";
@@ -138,6 +155,19 @@ function getStoryPreview(messages: StoryMessage[]): string {
   return text.slice(0, 60) || "继续上次的场景。";
 }
 
+/** 番外窗口的主题 / CSS / 折叠标签没单独改过就跟正篇一样 */
+function storyDisplaySettings(session: StorySession) {
+  const main = session.kind === "extra" ? findMainStorySession(session.characterId) : undefined;
+  return {
+    uiPrefs: session.uiPrefs?.theme ? session.uiPrefs : (main?.uiPrefs ?? session.uiPrefs ?? {}),
+    customCSS: session.customCSS ?? main?.customCSS ?? "",
+    foldTags: session.foldTags ?? main?.foldTags,
+    contextExcludedTags: session.contextExcludedTags ?? main?.contextExcludedTags,
+  };
+}
+
+type StoryDrawerSheet = { type: "characters" } | { type: "binding"; kind: StoryBindingKind };
+
 function resizeStoryComposerTextarea(el: HTMLTextAreaElement) {
   el.style.height = "auto";
   el.style.height = Math.min(el.scrollHeight, 120) + "px";
@@ -200,12 +230,15 @@ const StoryComposer = memo(function StoryComposer({
   appendRequest,
   onSend,
   onStop,
+  onOpenTemplate,
 }: {
   characterName: string;
   isGenerating: boolean;
   appendRequest: StoryComposerAppendRequest | null;
   onSend: (text: string) => void;
   onStop: () => void;
+  /** 番外窗口：左边多一个「模板」 */
+  onOpenTemplate?: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -240,6 +273,9 @@ const StoryComposer = memo(function StoryComposer({
 
   return (
     <div className="story-composer">
+      {onOpenTemplate ? (
+        <button type="button" className="story-template-btn" onClick={onOpenTemplate}>模板</button>
+      ) : null}
       <textarea
         ref={textareaRef}
         rows={1}
@@ -255,7 +291,7 @@ const StoryComposer = memo(function StoryComposer({
             submit();
           }
         }}
-        placeholder={`以你和“${characterName}”为主角继续这一段剧情……`}
+        placeholder={onOpenTemplate ? "继续写番外，或说想怎么改……" : `以你和“${characterName}”为主角继续这一段剧情……`}
       />
       <button
         className={`story-send-btn${isGenerating ? " is-generating" : ""}`}
@@ -274,6 +310,12 @@ export function StoryApp({ onClose }: StoryAppProps) {
   const [ready, setReady] = useState(false);
   const [, setStorageVersion] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // 侧栏里再盖的一层：全部角色 / 番外绑定的选项
+  const [drawerSheet, setDrawerSheet] = useState<StoryDrawerSheet | null>(null);
+  const [confirmingClearExtra, setConfirmingClearExtra] = useState(false);
+  // 正篇还是番外；换角色时回到正篇
+  const [mode, setMode] = useState<"main" | "extra">("main");
+  const [templateTop, setTemplateTop] = useState<number | null>(null);
   const [activeCharacterId, setActiveCharacterId] = useState<string>("");
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [messages, setMessages] = useState<StoryMessage[]>([]);
@@ -319,8 +361,14 @@ export function StoryApp({ onClose }: StoryAppProps) {
     () => sessions.find((session) => session.id === activeSessionId) || null,
     [sessions, activeSessionId]
   );
-  const uiPrefs = currentSession?.uiPrefs || {};
+  const display = currentSession ? storyDisplaySettings(currentSession) : null;
+  const uiPrefs = display?.uiPrefs || {};
   const isGenerating = Boolean(activeSessionId) && generatingSessionIds.has(activeSessionId);
+  // 番外：单独的绑定，历史只取当前这一篇，不写记忆区
+  const isExtra = currentSession?.kind === "extra";
+  const extraConfig = isExtra ? normalizeStoryExtraConfig(currentSession?.extraConfig) : null;
+  const extraBindings = extraConfig?.bindings;
+  const extraBindingsKey = extraBindings ? JSON.stringify(extraBindings) : "";
 
   const markGenerating = useCallback((sessionId: string, on: boolean) => {
     setGeneratingSessionIds((prev) => {
@@ -362,16 +410,18 @@ export function StoryApp({ onClose }: StoryAppProps) {
 
   useEffect(() => {
     if (!activeCharacterId) return;
-    const session = createOrGetStorySession(activeCharacterId);
+    const session = createOrGetStorySession(activeCharacterId, mode);
+    const sessionDisplay = storyDisplaySettings(session);
     setActiveSessionId(session.id);
     activeSessionIdRef.current = session.id; // 同步更新，堵住生成完成回调的守卫空窗
     setVisibleMessageCount(STORY_INITIAL_LOAD);
     setMessages(loadStoryMessages(session.id));
-    setCustomCssDraft(session.customCSS || "");
-    setFoldTagsDraft(session.foldTags ?? "think,thinking");
-    setContextExcludedTagsDraft(session.contextExcludedTags ?? "think,thinking");
+    setCustomCssDraft(sessionDisplay.customCSS);
+    setFoldTagsDraft(sessionDisplay.foldTags ?? "think,thinking");
+    setContextExcludedTagsDraft(sessionDisplay.contextExcludedTags ?? "think,thinking");
+    setTemplateTop(null);
     setStorageVersion((value) => value + 1);
-  }, [activeCharacterId]);
+  }, [activeCharacterId, mode]);
 
   // Listen for live CSS updates from 小卷
   useEffect(() => {
@@ -536,7 +586,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
     // 抛出去会让整个剧情页白屏，所以失败时跳过缓存刷新，错误留到发送时提示
     let signature: { regexSignature: string; parserVersion: number };
     try {
-      signature = getStoryRenderSignature(activeCharacterId);
+      signature = getStoryRenderSignature(activeCharacterId, extraBindings);
     } catch {
       return;
     }
@@ -560,7 +610,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
       if (cancelled) return;
       let rebuilt: StoryMessage[];
       try {
-        rebuilt = rebuildStorySessionRenderCache(activeCharacterId, currentSession.id, { sessionFoldTags: currentSession.foldTags });
+        rebuilt = rebuildStorySessionRenderCache(activeCharacterId, currentSession.id, { sessionFoldTags: display?.foldTags, bindings: extraBindings });
       } catch {
         if (cacheRefreshKeyRef.current === refreshKey) cacheRefreshKeyRef.current = null;
         return;
@@ -596,29 +646,62 @@ export function StoryApp({ onClose }: StoryAppProps) {
     // 依赖用 id/foldTags 原始值而不是 session 对象：会话缓存归一化会更换对象
     // 引用，按对象依赖会让本 effect 在无关渲染中反复重跑
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, activeCharacterId, currentSession?.id, currentSession?.foldTags, messages, isGenerating]);
+  }, [ready, activeCharacterId, currentSession?.id, display?.foldTags, extraBindingsKey, messages, isGenerating]);
 
   function applySessionUpdates(updates: Partial<StorySession>) {
     if (!currentSession) return;
     const next = updateStorySession(currentSession.id, updates);
     if (!next) return;
-    setCustomCssDraft(next.customCSS || "");
-    setFoldTagsDraft(next.foldTags ?? "think,thinking");
-    setContextExcludedTagsDraft(next.contextExcludedTags ?? "think,thinking");
+    const nextDisplay = storyDisplaySettings(next);
+    setCustomCssDraft(nextDisplay.customCSS);
+    setFoldTagsDraft(nextDisplay.foldTags ?? "think,thinking");
+    setContextExcludedTagsDraft(nextDisplay.contextExcludedTags ?? "think,thinking");
     setStorageVersion((value) => value + 1);
   }
 
-  async function handleSend(userTextInput: string) {
+  function updateExtraConfig(sessionId: string, patch: Partial<StoryExtraConfig>) {
+    const session = loadStorySessions().find((item) => item.id === sessionId);
+    if (!session || session.kind !== "extra") return;
+    const base = normalizeStoryExtraConfig(session.extraConfig);
+    const next = { ...base, ...patch };
+    if (JSON.stringify(next) === JSON.stringify(base)) return;
+    updateStorySession(sessionId, { extraConfig: next });
+    if (mountedRef.current) setStorageVersion((value) => value + 1);
+  }
+
+  function openDrawer() {
+    setDrawerSheet(null);
+    setConfirmingClearExtra(false);
+    setDrawerOpen(true);
+  }
+
+  function pickCharacter(characterId: string) {
+    setActiveCharacterId(characterId);
+    setMode("main");
+    setDrawerSheet(null);
+    setDrawerOpen(false);
+  }
+
+  function openTemplate() {
+    const shell = shellInnerRef.current;
+    const header = shell?.querySelector<HTMLElement>(".story-header");
+    setTemplateTop(shell && header ? header.getBoundingClientRect().bottom - shell.getBoundingClientRect().top : 96);
+  }
+
+  async function handleSend(userTextInput: string, extraOrder?: StoryExtraTemplate) {
     const userText = userTextInput.trim();
     if (!activeSessionId || !userText || isGenerating) return;
     const sessionId = activeSessionId;
     const characterId = activeCharacterId;
+    const extra = isExtra;
+    const bindings = extraBindings;
 
     const userMessage = pushStoryMessage({
       sessionId,
       role: "user",
       rawContent: userText,
       renderedContent: userText,
+      ...(extraOrder ? { extraOrder } : {}),
     });
     setMessages((prev) => [...prev, userMessage]);
     setStorageVersion((value) => value + 1);
@@ -628,11 +711,13 @@ export function StoryApp({ onClose }: StoryAppProps) {
     const isCurrentGeneration = () => mountedRef.current && isStoryGenerationRunActive(sessionId, generationRunId);
 
     try {
-      const historyForGeneration = loadStoryMessages(sessionId);
+      const sessionHistory = loadStoryMessages(sessionId);
+      const historyForGeneration = extra ? storyExtraHistory(sessionHistory) : sessionHistory;
       const result = await generateStoryCompletion(characterId, historyForGeneration, {
-        sessionFoldTags: currentSession?.foldTags,
-        sessionContextExcludedTags: currentSession?.contextExcludedTags,
+        sessionFoldTags: display?.foldTags,
+        sessionContextExcludedTags: display?.contextExcludedTags,
         signal: generationRun.controller.signal,
+        bindings,
       });
       if (!isCurrentGeneration()) return;
       const assistantMessage = pushStoryMessage({
@@ -650,7 +735,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
       setStorageVersion((value) => value + 1);
 
       const storyCharacter = characters.find((character) => character.id === characterId);
-      if (storyCharacter) {
+      // 番外读记忆区但不写进去，也不触发总结
+      if (storyCharacter && !extra) {
         void (async () => {
           try {
             incrementEventCounter(characterId);
@@ -705,7 +791,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
     // 从右边缘向左滑打开
     const screenW = typeof window !== "undefined" ? window.innerWidth : 400;
     if (!drawerOpen && dragStartX > screenW - 32 && dragDeltaX < -54) {
-      setDrawerOpen(true);
+      openDrawer();
     }
     // 向右滑关闭
     if (drawerOpen && dragDeltaX > 54) {
@@ -780,7 +866,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
     let newRawContent = draft.trim();
     // Apply runOnEdit regex rules (placement=2, isEdit=true) to the edited content.
     try {
-      const { regexes } = getStoryRenderSignature(activeCharacterId);
+      const { regexes } = getStoryRenderSignature(activeCharacterId, extraBindings);
       if (regexes.length > 0) {
         const macroEngine = new MacroEngine(currentCharacter?.name ?? "", userIdentity?.name ?? "用户");
         newRawContent = applyEditOutputRegex(newRawContent, regexes, { macroEngine, activeTags: ["story"] });
@@ -836,10 +922,11 @@ export function StoryApp({ onClose }: StoryAppProps) {
     const generationRunId = generationRun.runId;
     const isCurrentGeneration = () => mountedRef.current && isStoryGenerationRunActive(sessionId, generationRunId);
     try {
-      const result = await generateStoryCompletion(characterId, contextMessages, {
-        sessionFoldTags: currentSession?.foldTags,
-        sessionContextExcludedTags: currentSession?.contextExcludedTags,
+      const result = await generateStoryCompletion(characterId, isExtra ? storyExtraHistory(contextMessages) : contextMessages, {
+        sessionFoldTags: display?.foldTags,
+        sessionContextExcludedTags: display?.contextExcludedTags,
         signal: generationRun.controller.signal,
+        bindings: extraBindings,
       });
       if (!isCurrentGeneration()) return;
       const assistantMessage = pushStoryMessage({
@@ -903,6 +990,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
   if (!currentCharacter || !currentSession) return null;
 
   const sessionScope = `.story-session-${currentSession.id}`;
+  const mainSession = sessions.find((session) => session.characterId === activeCharacterId && session.kind !== "extra") || null;
+  const characterEntries = orderStoryCharacters(characters, sessions);
 
   return (
     <div
@@ -919,31 +1008,78 @@ export function StoryApp({ onClose }: StoryAppProps) {
       onMouseLeave={handleTouchEnd}
     >
       {/* Styles moved to styles/story.css */}
-      {currentSession.customCSS ? (
-        <SessionCustomCSS css={currentSession.customCSS} scope={sessionScope} />
+      {display?.customCSS ? (
+        <SessionCustomCSS css={display.customCSS} scope={sessionScope} />
       ) : null}
 
       {drawerOpen ? <div className="story-drawer-overlay" onClick={() => setDrawerOpen(false)} /> : null}
       <aside className="story-drawer" style={{ transform: drawerOpen ? "translateX(0)" : "translateX(106%)", transition: "transform 220ms ease" }}>
-        <div className="story-drawer-section">
-          <div className="story-drawer-eyebrow">剧情角色</div>
-          <div className="story-character-list">
-            {characters.map((character) => (
+        <StoryNowCard
+          character={currentCharacter}
+          mainSession={mainSession}
+          mode={isExtra ? "extra" : "main"}
+          onSwitchMode={(next) => {
+            setConfirmingClearExtra(false);
+            setMode(next);
+          }}
+        />
+
+        {isExtra && extraConfig ? (
+          <>
+            <StoryExtraBindingsSection
+              bindings={extraConfig.bindings}
+              onOpen={(kind) => setDrawerSheet({ type: "binding", kind })}
+            />
+            <StoryExtraPresetBar
+              config={extraConfig}
+              onLoad={(config) => updateExtraConfig(currentSession.id, config)}
+            />
+            <div className="story-drawer-section">
+              <div className="story-drawer-eyebrow">工具</div>
               <button
-                key={character.id}
-                className="story-character-chip"
-                data-active={character.id === activeCharacterId ? "true" : undefined}
+                type="button"
+                className={`story-tool-btn${confirmingClearExtra ? " is-danger" : ""}`}
                 onClick={() => {
-                  setActiveCharacterId(character.id);
-                  setDrawerOpen(false);
+                  if (!confirmingClearExtra) {
+                    setConfirmingClearExtra(true);
+                    return;
+                  }
+                  cancelStoryGenerationRun(currentSession.id);
+                  markGenerating(currentSession.id, false);
+                  clearStoryMessages(currentSession.id);
+                  setMessages([]);
+                  setVisibleMessageCount(STORY_INITIAL_LOAD);
+                  setConfirmingClearExtra(false);
+                  setStorageVersion((value) => value + 1);
                 }}
               >
-                <Avatar src={character.avatar || undefined} name={character.name} size="lg" />
-                <span className="story-character-name">{character.name}</span>
+                {confirmingClearExtra ? "再点一次，清空这个番外窗口" : "清空番外"}
               </button>
-            ))}
-          </div>
-        </div>
+              <button
+                className="story-tool-btn"
+                onClick={() => {
+                  try {
+                    const rebuilt = rebuildStorySessionRenderCache(activeCharacterId, currentSession.id, { sessionFoldTags: display?.foldTags, bindings: extraBindings });
+                    setMessages(rebuilt);
+                    setStorageVersion((value) => value + 1);
+                    alert(`缓存重建完成，${rebuilt.length} 条消息已更新`);
+                  } catch (error) {
+                    alert(error instanceof Error ? error.message : "缓存重建失败，请检查 API 绑定配置");
+                  }
+                }}
+              >
+                重建渲染缓存
+              </button>
+            </div>
+          </>
+        ) : (
+          <StoryRecentSection
+            entries={characterEntries}
+            activeId={activeCharacterId}
+            onPick={pickCharacter}
+            onOpenAll={() => setDrawerSheet({ type: "characters" })}
+          />
+        )}
 
         <div className="story-drawer-section">
           <div className="story-drawer-eyebrow">显示选项</div>
@@ -995,25 +1131,44 @@ export function StoryApp({ onClose }: StoryAppProps) {
           </div>
         </div>
 
-        <div className="story-drawer-section">
-          <div className="story-drawer-eyebrow">工具</div>
-          <button
-            className="story-tool-btn"
-            onClick={() => {
-              try {
-                const rebuilt = rebuildStorySessionRenderCache(activeCharacterId, currentSession.id, { sessionFoldTags: currentSession.foldTags });
-                setMessages(rebuilt);
-                setStorageVersion((value) => value + 1);
-                alert(`缓存重建完成，${rebuilt.length} 条消息已更新`);
-              } catch (error) {
-                alert(error instanceof Error ? error.message : "缓存重建失败，请检查 API 绑定配置");
-              }
-            }}
-          >
-            重建渲染缓存
-          </button>
-        </div>
+        {isExtra ? null : (
+          <div className="story-drawer-section">
+            <div className="story-drawer-eyebrow">工具</div>
+            <button
+              className="story-tool-btn"
+              onClick={() => {
+                try {
+                  const rebuilt = rebuildStorySessionRenderCache(activeCharacterId, currentSession.id, { sessionFoldTags: currentSession.foldTags });
+                  setMessages(rebuilt);
+                  setStorageVersion((value) => value + 1);
+                  alert(`缓存重建完成，${rebuilt.length} 条消息已更新`);
+                } catch (error) {
+                  alert(error instanceof Error ? error.message : "缓存重建失败，请检查 API 绑定配置");
+                }
+              }}
+            >
+              重建渲染缓存
+            </button>
+          </div>
+        )}
       </aside>
+
+      {drawerOpen && drawerSheet?.type === "characters" ? (
+        <StoryCharacterSheet
+          entries={characterEntries}
+          activeId={activeCharacterId}
+          onPick={pickCharacter}
+          onClose={() => setDrawerSheet(null)}
+        />
+      ) : null}
+      {drawerOpen && drawerSheet?.type === "binding" && extraConfig ? (
+        <StoryBindingPicker
+          kind={drawerSheet.kind}
+          bindings={extraConfig.bindings}
+          onChange={(bindings) => updateExtraConfig(currentSession.id, { bindings })}
+          onClose={() => setDrawerSheet(null)}
+        />
+      ) : null}
 
       <div className="story-shell-inner" ref={shellInnerRef}>
 
@@ -1026,12 +1181,12 @@ export function StoryApp({ onClose }: StoryAppProps) {
                 <SolidBackIcon size={16} />
               </button>
             </div>
-            <div className="story-header-center">Story</div>
+            <div className="story-header-center">{isExtra ? "番外" : "Story"}</div>
             <div className="story-header-right" style={{ gap: 8 }}>
               <button className="story-top-btn" onClick={() => setCssModalOpen(true)} aria-label="页面样式">
                 <PaintBrushIcon width={16} height={16} />
               </button>
-              <button className="story-top-btn" onClick={() => setDrawerOpen(true)} aria-label="打开剧情侧栏">
+              <button className="story-top-btn" onClick={openDrawer} aria-label="打开剧情侧栏">
                 <SolidMenuIcon size={16} />
               </button>
             </div>
@@ -1065,7 +1220,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
                   )}
                 </div>
                 <div className="story-meta-body">
-                  <div className="story-meta-title">本次阅读：《 {currentCharacter.name} 》</div>
+                  <div className="story-meta-title">{isExtra ? "番外" : "本次阅读"}：《 {currentCharacter.name} 》</div>
                   <div className="story-meta-tags">
                     {userIdentity?.name || "我"} x {currentCharacter.name}
                   </div>
@@ -1081,8 +1236,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
               <div className="story-empty">
                 <BookOpenIcon width={28} height={28} opacity={0.45} />
                 <div>
-                  <div className="text-[calc(14px*var(--app-text-scale,1))] font-medium text-[var(--c-story-heading,#1e293b)] mb-1">故事从这里开始</div>
-                  <div className="text-[calc(12px*var(--app-text-scale,1))] opacity-70">从底部输入一段引导，剧情会继续展开。</div>
+                  <div className="text-[calc(14px*var(--app-text-scale,1))] font-medium text-[var(--c-story-heading,#1e293b)] mb-1">{isExtra ? "番外从这里开始" : "故事从这里开始"}</div>
+                  <div className="text-[calc(12px*var(--app-text-scale,1))] opacity-70">{isExtra ? "点左下角「模板」填好想看的番外，或者直接在下面写。" : "从底部输入一段引导，剧情会继续展开。"}</div>
                 </div>
               </div>
             ) : (
@@ -1110,6 +1265,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
                     : message.role === "assistant"
                       ? (currentCharacter.avatar || undefined)
                       : undefined;
+                  // 番外模板发出的指令折叠成一张卡；编辑时照常显示原文
+                  const extraOrder = message.extraOrder && editingMessageId !== message.id ? message.extraOrder : null;
                   return (
                     <article
                       key={message.id}
@@ -1125,7 +1282,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
                         setActiveMessageId(message.id);
                       }}
                     >
-                      {message.role !== "system" ? (
+                      {message.role !== "system" && !extraOrder ? (
                         <div className="story-msg-head">
                           <div className="story-avatar-wrap">
                             <Avatar src={avatarUrl} name={speakerName} size="md" />
@@ -1137,6 +1294,9 @@ export function StoryApp({ onClose }: StoryAppProps) {
                         </div>
                       ) : null}
                       <div className="story-bubble-wrap" style={{ position: "relative" }}>
+                        {extraOrder ? (
+                          <StoryExtraOrderCard order={extraOrder} rawContent={message.rawContent} />
+                        ) : (
                         <div className="story-bubble">
                           {editingMessageId === message.id ? (
                             <div className="story-inline-edit">
@@ -1170,6 +1330,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
                             />
                           )}
                         </div>
+                        )}
                         {activeMessageId === message.id && (() => {
                           const menu = (
                             <div
@@ -1215,7 +1376,24 @@ export function StoryApp({ onClose }: StoryAppProps) {
         appendRequest={composerAppendRequest}
         onSend={(text) => { void handleSend(text); }}
         onStop={handleStopGeneration}
+        onOpenTemplate={isExtra ? openTemplate : undefined}
       />
+
+      {isExtra && extraConfig && templateTop != null ? (
+        <StoryExtraTemplateSheet
+          key={currentSession.id}
+          initial={extraConfig.template}
+          top={templateTop}
+          sending={isGenerating}
+          onSave={(template) => updateExtraConfig(currentSession.id, { template })}
+          onSend={(template) => {
+            updateExtraConfig(currentSession.id, { template });
+            setTemplateTop(null);
+            void handleSend(buildStoryExtraInstruction(template), template);
+          }}
+          onClose={() => setTemplateTop(null)}
+        />
+      ) : null}
 
       {/* CSS Style Modal */}
       {cssModalOpen && (
