@@ -77,6 +77,9 @@ export type CalendarMemoPage = {
 /** sending：正在发；sent：发出去了；failed：生成报错了（隔一会儿再试，最多试 3 次） */
 export type CalendarReminderSentRecord = { at: number; status: "sending" | "sent" | "failed"; attempts?: number };
 
+/** 角色改过的日历动作：`${角色id}:${请求指纹}:${第几个动作}` → 执行记录。重试同一轮不会重复执行 */
+export type CalendarWriteReceipt = { at: number; action: string; summary: string };
+
 export type CalendarExtras = {
     /** 条目 id → 附加信息 */
     eventDetails: Record<string, CalendarEventDetails>;
@@ -87,6 +90,9 @@ export type CalendarExtras = {
     characterAccess: string[] | null;
     /** 角色 id → 待办完成后的回应方式 */
     todoReactions: Record<string, string>;
+    /** 角色 id → 能不能在私聊里改用户日历（不含删除）；还要同时在知情角色里勾上才算 */
+    writeAccess: Record<string, boolean>;
+    writeReceipts: Record<string, CalendarWriteReceipt>;
     todoCompletionQueue: unknown[];
     /** `${角色id}:${提醒key}` → 发送状态，用来保证每条只提醒一次 */
     reminderSent: Record<string, CalendarReminderSentRecord>;
@@ -97,6 +103,8 @@ export type CalendarExtras = {
     migratedAt?: string;
     /** 迁移之后插件那边又写过的东西补搬过了（插件现在不再运行，补一次就够） */
     pluginResyncedAt?: string;
+    /** 插件 4.3 加的「修改权限」补搬过了（早先的迁移按旧版插件做，没带上这一项） */
+    writeAccessMigratedAt?: string;
 };
 
 export const EMPTY_CALENDAR_EXTRAS: CalendarExtras = {
@@ -105,6 +113,8 @@ export const EMPTY_CALENDAR_EXTRAS: CalendarExtras = {
     memos: [],
     characterAccess: null,
     todoReactions: {},
+    writeAccess: {},
+    writeReceipts: {},
     todoCompletionQueue: [],
     reminderSent: {},
     clearBarrier: null,
@@ -227,6 +237,25 @@ export function normalizeCalendarExtras(value: unknown): CalendarExtras {
         for (const [id, mode] of Object.entries(reactionsSource)) todoReactions[id] = String(mode);
     }
 
+    // 插件里存的是 true 或 "allow"
+    const writeSource = (raw.writeAccess ?? raw.calendarWriteAccessV1) as Record<string, unknown> | undefined;
+    const writeAccess: Record<string, boolean> = {};
+    if (writeSource && typeof writeSource === "object" && !Array.isArray(writeSource)) {
+        for (const [id, value] of Object.entries(writeSource)) writeAccess[String(id)] = value === true || value === "allow";
+    }
+
+    const receiptSource = (raw.writeReceipts ?? raw.calendarWriteReceiptsV1) as Record<string, unknown> | undefined;
+    const writeReceipts: Record<string, CalendarWriteReceipt> = {};
+    if (receiptSource && typeof receiptSource === "object" && !Array.isArray(receiptSource)) {
+        const cutoff = Date.now() - 120 * 24 * 60 * 60 * 1000;
+        for (const [key, record] of Object.entries(receiptSource)) {
+            const entry = (record && typeof record === "object" ? record : {}) as Record<string, unknown>;
+            const at = Number(entry.at || 0);
+            if (!Number.isFinite(at) || at < cutoff) continue;
+            writeReceipts[key] = { at, action: String(entry.action || ""), summary: String(entry.summary || "") };
+        }
+    }
+
     const queueSource = (raw.todoCompletionQueue ?? raw.todoCompletionQueueV1) as unknown;
     const todoCompletionQueue = Array.isArray(queueSource) ? queueSource : [];
 
@@ -255,11 +284,14 @@ export function normalizeCalendarExtras(value: unknown): CalendarExtras {
         memos,
         characterAccess,
         todoReactions,
+        writeAccess,
+        writeReceipts,
         todoCompletionQueue,
         reminderSent,
         clearBarrier: clearedAt ? { clearedAt } : null,
         migratedFrom: typeof raw.migratedFrom === "string" ? raw.migratedFrom : undefined,
         pluginResyncedAt: typeof raw.pluginResyncedAt === "string" ? raw.pluginResyncedAt : undefined,
+        writeAccessMigratedAt: typeof raw.writeAccessMigratedAt === "string" ? raw.writeAccessMigratedAt : undefined,
         migratedAt: typeof raw.migratedAt === "string" ? raw.migratedAt : undefined,
     };
 }
@@ -566,6 +598,29 @@ export function resyncCalendarExtrasFromPlugin(): { status: "done" | "skipped"; 
     }
     saveCalendarExtras({ ...current, memos, eventDetails, series, pluginResyncedAt: new Date().toISOString() });
     return { status: "done", memos: memoCount, events: eventCount, series: seriesCount };
+}
+
+/** 早先的迁移是照旧版插件（4.2）做的，没带上 4.3 加的「修改权限」。插件数据桶还在的话补搬一次；
+ *  原生这边已经设过的角色不覆盖。桶已经随插件卸载没了，就只能在「日历知情角色」里重新选。 */
+export function migrateCalendarWriteAccessFromPlugin(): { status: "done" | "skipped"; count?: number } {
+    if (typeof window === "undefined") return { status: "skipped" };
+    const current = loadCalendarExtras();
+    if (!current.migratedFrom || current.writeAccessMigratedAt) return { status: "skipped" };
+    let count = 0;
+    const writeAccess = { ...current.writeAccess };
+    try {
+        const raw = kvGet(current.migratedFrom);
+        const bucket = raw ? normalizeCalendarExtras(JSON.parse(raw)) : null;
+        for (const [id, allowed] of Object.entries(bucket?.writeAccess ?? {})) {
+            if (id in writeAccess) continue;
+            writeAccess[id] = allowed;
+            count += 1;
+        }
+    } catch {
+        return { status: "skipped" };
+    }
+    saveCalendarExtras({ ...current, writeAccess, writeAccessMigratedAt: new Date().toISOString() });
+    return { status: "done", count };
 }
 
 // ── 设置也搬 ──

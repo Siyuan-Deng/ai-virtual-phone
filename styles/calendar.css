@@ -2248,9 +2248,9 @@
 
 .calendar-app-shell .caltool-access-row {
   display: grid;
-  grid-template-columns: 38px minmax(72px,.8fr) minmax(138px,1.35fr) 28px;
+  grid-template-columns: 38px minmax(62px,.9fr) minmax(70px,.82fr) minmax(70px,.82fr) 28px;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   padding: 9px 8px;
   border-radius: 12px;
   background: var(--c-calendar-surface);
@@ -2288,19 +2288,73 @@
   white-space: nowrap;
 }
 
-.calendar-app-shell .caltool-reaction-select {
-  width: 100%;
+/* 两个紧凑下拉（待办回应 / 修改权限）：原生 select 透明铺满，上面只显示短标签 */
+.calendar-app-shell .caltool-compact-select {
+  position: relative;
+  display: block;
   min-width: 0;
   height: 34px;
-  padding: 6px 28px 6px 10px!important;
-  border-radius: 9px!important;
-  font-size: 10px!important;
-  color: var(--c-calendar-sub)!important;
-  background-color: var(--c-calendar-sheet)!important;
+  border-radius: 9px;
+  background: var(--c-calendar-sheet);
+  overflow: hidden;
 }
 
-.calendar-app-shell .caltool-reaction-select:disabled {
-  opacity: .48;
+.calendar-app-shell .caltool-access-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0!important;
+  border: 0!important;
+  border-radius: 9px!important;
+  opacity: .01;
+  color: transparent!important;
+  background: transparent!important;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.calendar-app-shell .caltool-access-select option {
+  color: #222!important;
+  background: #fff!important;
+}
+
+.calendar-app-shell .caltool-compact-select-display {
+  position: absolute;
+  z-index: 1;
+  left: 9px;
+  right: 22px;
+  top: 50%;
+  transform: translateY(-50%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--c-calendar-sub);
+  font-size: 10px;
+  line-height: 1.2;
+  pointer-events: none;
+}
+
+.calendar-app-shell .caltool-compact-select-arrow {
+  position: absolute;
+  z-index: 1;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-57%);
+  color: var(--c-calendar-sub);
+  font-size: 12px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.calendar-app-shell .caltool-compact-select[data-disabled=true] {
+  opacity: .46;
+}
+
+.calendar-app-shell .caltool-compact-select[data-disabled=true] .caltool-access-select {
+  cursor: default;
 }
 
 .calendar-app-shell .caltool-access-row>input {
@@ -2318,19 +2372,29 @@
 
 @media (max-width: 360px) {
   .calendar-app-shell .caltool-access-row {
-    grid-template-columns: 34px minmax(62px,.7fr) minmax(122px,1.3fr) 24px;
-    gap: 6px;
+    grid-template-columns: 32px minmax(52px,.78fr) minmax(62px,.8fr) minmax(62px,.8fr) 22px;
+    gap: 5px;
+    padding-left: 6px;
+    padding-right: 6px;
   }
 
   .calendar-app-shell .caltool-access-avatar {
-    width: 32px;
-    height: 32px;
+    width: 31px;
+    height: 31px;
   }
 
-  .calendar-app-shell .caltool-reaction-select {
-    padding-left: 7px!important;
-    padding-right: 22px!important;
-    font-size: 9px!important;
+  .calendar-app-shell .caltool-access-name {
+    font-size: 12px;
+  }
+
+  .calendar-app-shell .caltool-compact-select-display {
+    left: 7px;
+    right: 18px;
+    font-size: 9px;
+  }
+
+  .calendar-app-shell .caltool-compact-select-arrow {
+    right: 6px;
   }
 }
 

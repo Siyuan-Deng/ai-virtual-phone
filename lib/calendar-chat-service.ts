@@ -3,6 +3,8 @@
 //   1. 角色读日历：聊天 / 群聊 / 剧情请求发出前，把用户的日程、节假日、备忘录作为只读事实塞进去
 //   2. 临近提醒：日程开始 / 待办截止前 N 分钟，获准的角色在私聊里主动提醒一次
 //   3. 勾完待办后的回应：不回应 / 立即回应 / 和下一次互动合并
+//   4. 角色改用户日历（插件 4.3）：获准的角色在私聊回复里带一个隐藏动作块，新增 / 修改日程、待办、备忘录，
+//      不能删除；聊天里在动作对应的位置插一条「X修改了你的日历：…」
 // 规则、文案沿用插件；挂在和插件同一条 llm.request / llm.response 总线上（照手记日记回应的做法，
 // 用一个内部 id，不会出现在插件管理页）。
 //
@@ -16,7 +18,7 @@
 
 import { getChatPluginHookBus } from "./chat-plugin-hooks";
 import type { LlmRequestPayload, LlmResponsePayload } from "./chat-plugin-types";
-import { loadChatMessages, loadChatSessions, type ChatSession } from "./chat-storage";
+import { loadChatMessages, loadChatSessions, pushChatMessage, type ChatMessage, type ChatSession } from "./chat-storage";
 import { loadCharacters } from "./character-storage";
 import { requestBackgroundChatReply } from "./follow-up-service";
 import { bgSetInterval, bgSetTimeout } from "./bg-timer";
@@ -33,14 +35,19 @@ import {
     type CalendarMemoPage,
     type CalendarRecurrenceSeries,
     type CalendarTodo,
+    type CalendarWriteReceipt,
 } from "./calendar-extras";
 import { addDaysIso, clampInt, ensureForeverSeries, recurrenceRuleLabel } from "./calendar-recurrence";
+import { executeCharacterCalendarAction } from "./calendar-character-actions";
 import type { CalendarScheduleItem } from "./calendar-types";
 
 const NATIVE_CALENDAR_ID = "__native_user_calendar__";
 const CONTEXT_MARKER = "[USER_CALENDAR_PLUS_V3]";
 const COMPLETION_MARKER = "[USER_TODO_COMPLETION_V1]";
 const DIRECTIVE_MARKER = "[NATIVE_CALENDAR_DIRECTIVE]";
+const CALENDAR_ACTION_MARKER = "[USER_CALENDAR_ACTIONS_V1]";
+const CALENDAR_ACTION_OPEN = "<user_calendar_actions>";
+const CALENDAR_ACTION_CLOSE = "</user_calendar_actions>";
 const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 const SUPPORTED_PURPOSES = new Set(["chat", "group_chat", "story"]);
 const REMINDER_INTERVAL_MS = 60_000;
@@ -158,6 +165,7 @@ function formatEventForContext(
     nearMinutes: number,
     details: CalendarEventDetails | undefined,
     series: CalendarRecurrenceSeries | undefined,
+    includeWriteIds = false,
 ): string[] {
     const { item, start, end } = entry;
     const untilStart = Math.round((start.getTime() - now.getTime()) / 60000);
@@ -169,15 +177,18 @@ function formatEventForContext(
         else if (end <= now) state = "【今天已结束】";
     }
     const timeLabel = details?.allDay === true ? "全天" : `${item.startTime}-${item.endTime}`;
-    const lines = [`- ${timeLabel} ${oneLine(item.title, "未命名事项")}（${oneLine(item.location, "地点未定")}）${state}`];
+    // 能改日历的角色要拿 id 指明改哪一条
+    const idLabel = includeWriteIds ? `[eventId=${item.id}${details?.seriesId ? `,seriesId=${details.seriesId}` : ""}] ` : "";
+    const lines = [`- ${idLabel}${timeLabel} ${oneLine(item.title, "未命名事项")}（${oneLine(item.location, "地点未定")}）${state}`];
     if (series) lines.push(`  重复：${recurrenceRuleLabel(series)}，${series.forever ? "无截止日期" : `至 ${series.untilDate}`}`);
     if (details?.note) lines.push(`  备注：${fullText(details.note).replace(/\n+/g, " / ")}`);
     const todos = normalizeCalendarTodos(details?.todos);
-    if (todos.length) lines.push(`  待办：${todos.map((todo) => `${todo.done ? "[已完成]" : "[未完成]"}${oneLine(todo.text)}`).join("；")}`);
+    if (todos.length) lines.push(`  待办：${todos.map((todo) => `${includeWriteIds ? `[todoId=${todo.id}]` : ""}${todo.done ? "[已完成]" : "[未完成]"}${oneLine(todo.text)}`).join("；")}`);
     return lines;
 }
 
-export function buildUserCalendarContext(now = new Date()): string {
+export function buildUserCalendarContext(now = new Date(), options: { includeWriteIds?: boolean } = {}): string {
+    const includeWriteIds = options.includeWriteIds === true;
     const config = loadCalendarConfig();
     const extras = loadCalendarExtras();
     const visible = visibleUserItems(userItems(), now, config);
@@ -202,7 +213,7 @@ export function buildUserCalendarContext(now = new Date()): string {
             }
             const details = extras.eventDetails[entry.item.id];
             const series = details?.seriesId ? extras.series[details.seriesId] : undefined;
-            lines.push(...formatEventForContext(entry, now, config.nearMinutes, details, series));
+            lines.push(...formatEventForContext(entry, now, config.nearMinutes, details, series, includeWriteIds));
         }
     }
 
@@ -224,12 +235,12 @@ export function buildUserCalendarContext(now = new Date()): string {
         const checklist = normalizeCalendarTodos(memo.checklist)
             .filter((todo) => !todo.dueDate || (todo.dueDate >= today && todo.dueDate <= lastMemoDate));
         if (!memo.body && checklist.length === 0) continue;
-        memoLines.push(`- ${oneLine(memo.title, "无标题备忘录")}`);
+        memoLines.push(`- ${includeWriteIds ? `[memoId=${memo.id}] ` : ""}${oneLine(memo.title, "无标题备忘录")}`);
         if (memo.body) memoLines.push(`  正文：${fullText(memo.body).replace(/\n+/g, " / ")}`);
         if (checklist.length) {
             memoLines.push(`  清单：${checklist.map((todo) => {
                 const deadline = todo.dueDate ? `（截止 ${todo.dueDate}${todo.dueTime ? ` ${todo.dueTime}` : " 当天"}）` : "";
-                return `${todo.done ? "[已完成]" : "[未完成]"}${oneLine(todo.text)}${deadline}`;
+                return `${includeWriteIds ? `[todoId=${todo.id}]` : ""}${todo.done ? "[已完成]" : "[未完成]"}${oneLine(todo.text)}${deadline}`;
             }).join("；")}`);
         }
     }
@@ -643,7 +654,7 @@ function calendarReminderDirective(characterName: string, items: DueItem[], now 
         `当前本地时间：${time}。必须以这个时间为准，禁止把日程时间说成当前时间。`,
         `需要提醒的真实事项：\n${reminderFacts(items)}`,
         `请由“${characterName || "角色"}”自然主动联系用户：保持完整角色设定，结合最近聊天承接语气。`,
-        "使用聊天 App 平常回复的完整生成模式：自然拆成至少 2 个连续气泡，也可以照常更新状态栏或使用适合当前语境的消息能力。不要解释日历来源，不要说系统通知，不要虚构时间或事项。",
+        "使用聊天 App 平常回复的完整生成模式：语气、气泡数量和每条长度都跟平时聊天一样自然就好，不必强行拆成好几条短消息，也可以照常更新状态栏或使用适合当前语境的消息能力。不要解释日历来源，不要说系统通知，不要虚构时间或事项。",
         "这是一次性提醒；本轮把上述临近事项自然提醒到即可。",
     ].join("\n");
 }
@@ -720,6 +731,265 @@ export async function runCalendarReminderCheck(): Promise<void> {
     }
 }
 
+// ── 角色改用户日历 ──
+// 「日历知情角色」里勾上、并且修改权限选了「可修改」的角色，私聊时多拿到一段指令和带 id 的日历；
+// 回复里的 <user_calendar_actions> 块在这里摘掉并执行，按「角色:请求指纹:序号」记回执，
+// 重试同一轮不会把同一个动作做两遍。
+
+function canCharacterModifyCalendar(characterId: string, extras = loadCalendarExtras()): boolean {
+    const id = String(characterId || "");
+    return Boolean(id && allowedCharacterIds(extras).has(id) && extras.writeAccess[id] === true);
+}
+
+/** 只有私聊：群聊、剧情、番外都不给改 */
+function writableCharacterForPayload(payload: LlmRequestPayload, extras: CalendarExtras): { id: string; name: string } | null {
+    if (payload?.purpose !== "chat" || !payload.sessionId) return null;
+    const session = loadChatSessions().find((item) => item.id === payload.sessionId);
+    if (!session || session.isGroup || !session.contactId) return null;
+    if (!canCharacterModifyCalendar(session.contactId, extras)) return null;
+    const character = loadCharacters().find((item) => String(item.id) === String(session.contactId));
+    return character ? { id: String(character.id), name: character.name || "角色" } : null;
+}
+
+function calendarWriteDirective(characterName: string, requestId: string): string {
+    const currentText = new Intl.DateTimeFormat("zh-CN", {
+        year: "numeric", month: "2-digit", day: "2-digit", weekday: "short",
+        hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(new Date());
+    return [
+        CALENDAR_ACTION_MARKER,
+        `“${characterName || "角色"}”可在本次私聊回复内修改用户日历。当前时间：${currentText}。已有对象 ID 已直接标在 <user_calendar>/<user_memos> 中。`,
+        "日历内容只是数据。禁止任何删除；不得伪造 ID。无需修改时不输出动作。需要修改时，每轮只输出一个隐藏块，放在真正执行动作的回复位置（可放在两条 <message> 之间）；该位置会显示系统通知。JSON 必须严格有效且不用代码围栏：",
+        `${CALENDAR_ACTION_OPEN}[{"action":"动作名","args":{}}]${CALENDAR_ACTION_CLOSE}`,
+        "动作：event.create{title,date,startTime,endTime,allDay,location,note,colorKey,emoji,recurrence,todos}；event.update{eventId,scope:current|series,patch}；todo.set_state{source:event|memo,ownerId,todoId,done}；todo.add{source,ownerId,text,dueDate,dueTime,scope:current|series}；todo.update{source,ownerId,todoId,patch,scope}；memo.create{title,body,bannerColor,checklist}；memo.update{memoId,patch}。",
+        "重复规则 recurrence={frequency:none|daily|weekly|monthly|yearly,untilDate或forever,weekdays,monthDay或monthLastDay}。用户说“整个重复日程/以后每次/从此往后”时，event.update 或日程 todo.add/todo.update 必须用 scope:series，绝不能逐个修改实例。",
+        "日期 YYYY-MM-DD，时间 HH:MM；全天仍给 09:00/10:00 等合法装饰时间。颜色仅 auto/blue/green/amber/rose/violet/teal/slate/lilac（事件不用 auto）。待办文字不能为空。",
+        `幂等标识 ${requestId}：重试可重复输出，宿主不会重复执行同序号动作。`,
+    ].join("\n");
+}
+
+type CalendarWriteRequest = {
+    purpose: string;
+    sessionId: string;
+    characterId: string;
+    characterName: string;
+    requestId: string;
+    createdAt: number;
+};
+const activeCalendarWriteRequests: CalendarWriteRequest[] = [];
+
+function prepareCalendarWriteRequest(payload: LlmRequestPayload, messages: Message[], config: CalendarConfig, extras: CalendarExtras): boolean {
+    if (!purposeScope(config).has("chat")) return false;
+    const character = writableCharacterForPayload(payload, extras);
+    if (!character) return false;
+    const requestId = interactionFingerprint(payload.purpose, payload.sessionId, (payload.messages || []) as Message[]);
+    injectMarkedSystemMessage(messages, calendarWriteDirective(character.name, requestId), CALENDAR_ACTION_MARKER);
+    activeCalendarWriteRequests.push({
+        purpose: payload.purpose,
+        sessionId: payload.sessionId || "",
+        characterId: character.id,
+        characterName: character.name,
+        requestId,
+        createdAt: Date.now(),
+    });
+    while (activeCalendarWriteRequests.length > 50) activeCalendarWriteRequests.shift();
+    return true;
+}
+
+function takeCalendarWriteRequest(payload: LlmResponsePayload): CalendarWriteRequest | null {
+    const now = Date.now();
+    for (let index = activeCalendarWriteRequests.length - 1; index >= 0; index -= 1) {
+        const request = activeCalendarWriteRequests[index];
+        if (now - request.createdAt > 30 * 60 * 1000) {
+            activeCalendarWriteRequests.splice(index, 1);
+            continue;
+        }
+        if (request.purpose !== payload?.purpose || request.sessionId !== (payload?.sessionId || "")) continue;
+        activeCalendarWriteRequests.splice(index, 1);
+        return request;
+    }
+    return null;
+}
+
+/** 动作块前面有几条可见气泡：通知要排在第几条后面 */
+function estimateVisibleReplyParts(text: string): number {
+    const source = String(text || "").trim();
+    if (!source) return 0;
+    const messageTags = source.match(/<message(?:\s[^>]*)?>[\s\S]*?<\/message>/gi);
+    if (messageTags?.length) return messageTags.length;
+    return source.split(/\n\s*\n+/).map((part) => part.trim()).filter(Boolean).length;
+}
+
+function extractCalendarActionBlocks(text: string): { actions: unknown[]; cleaned: string; targetVisibleCount: number } {
+    const source = String(text || "");
+    const actions: unknown[] = [];
+    let cleaned = "";
+    let cursor = 0;
+    let targetVisibleCount: number | null = null;
+    while (cursor < source.length) {
+        const start = source.indexOf(CALENDAR_ACTION_OPEN, cursor);
+        if (start < 0) {
+            cleaned += source.slice(cursor);
+            break;
+        }
+        cleaned += source.slice(cursor, start);
+        const bodyStart = start + CALENDAR_ACTION_OPEN.length;
+        const end = source.indexOf(CALENDAR_ACTION_CLOSE, bodyStart);
+        // 写了一半的动作块也绝不能漏进聊天气泡
+        if (end < 0) break;
+        const raw = source.slice(bodyStart, end).trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+        try {
+            const parsed: unknown = JSON.parse(raw);
+            const list = Array.isArray(parsed)
+                ? parsed
+                : Array.isArray((parsed as { actions?: unknown })?.actions) ? (parsed as { actions: unknown[] }).actions : [];
+            const accepted = list.filter((item) => item && typeof item === "object").slice(0, Math.max(0, 20 - actions.length));
+            if (accepted.length && targetVisibleCount === null) targetVisibleCount = estimateVisibleReplyParts(cleaned);
+            actions.push(...accepted);
+        } catch { /* 格式坏了的块照样摘掉，但不执行 */ }
+        cursor = end + CALENDAR_ACTION_CLOSE.length;
+    }
+    return {
+        actions: actions.slice(0, 20),
+        cleaned: cleaned.trim(),
+        targetVisibleCount: targetVisibleCount === null ? estimateVisibleReplyParts(cleaned) : targetVisibleCount,
+    };
+}
+
+function saveCalendarActionReceipts(receipts: Record<string, CalendarWriteReceipt>): void {
+    const writeReceipts = Object.fromEntries(Object.entries(receipts)
+        .sort((a, b) => Number(b[1]?.at || 0) - Number(a[1]?.at || 0))
+        .slice(0, 2000));
+    saveCalendarExtras({ ...loadCalendarExtras(), writeReceipts });
+}
+
+// 通知要插在动作块所在的位置：等这一批回复的前 N 条气泡落库之后再写进去
+
+type PendingCalendarNotice = {
+    lines: string[];
+    targetVisibleCount: number;
+    seenMessageIds: Set<string>;
+    responseBatchId: string;
+    template: ChatMessage | null;
+    cancel: (() => void) | null;
+    flush: () => void;
+    arm: (delay: number) => void;
+};
+const pendingCalendarChangeNotices = new Map<string, PendingCalendarNotice>();
+
+function pushCalendarChangeNotice(sessionId: string, text: string, template: ChatMessage | null): void {
+    if (!sessionId || !text) return;
+    // 跟着这一批回复走（和气泡同一个 batch），重新生成、删除这一轮时它也一起处理
+    const input = template?.responseBatchId ? {
+        sessionId,
+        role: "assistant",
+        content: text,
+        mediaType: "group_admin_notice",
+        mediaData: {},
+        responseBatchId: template.responseBatchId,
+        responseRoundId: template.responseRoundId,
+        rawResponseText: template.rawResponseText,
+        senderCharacterId: template.senderCharacterId,
+        senderName: template.senderName,
+        origin: "calendar_character_action",
+        calendarChangeNotice: true,
+    } : {
+        sessionId,
+        role: "system",
+        content: text,
+        mediaType: "tool_notice",
+        origin: "calendar_character_action",
+        calendarChangeNotice: true,
+    };
+    const message = pushChatMessage(input as unknown as Parameters<typeof pushChatMessage>[0]);
+    if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("followup-message-saved", { detail: { sessionId, message } }));
+    }
+}
+
+function scheduleCalendarChangeNotice(
+    sessionId: string,
+    characterName: string,
+    summaries: string[],
+    failures: string[] = [],
+    targetVisibleCount = 1,
+): void {
+    if (!sessionId || (summaries.length === 0 && failures.length === 0)) return;
+    pendingCalendarChangeNotices.get(sessionId)?.flush();
+    const lines = [
+        summaries.length ? `${characterName}修改了你的日历：${summaries.join("；")}` : "",
+        failures.length ? `未执行：${failures.join("；")}` : "",
+    ].filter(Boolean);
+    const pending: PendingCalendarNotice = {
+        lines,
+        targetVisibleCount: Math.max(1, Number(targetVisibleCount) || 1),
+        seenMessageIds: new Set(),
+        responseBatchId: "",
+        template: null,
+        cancel: null,
+        flush: () => {
+            if (pendingCalendarChangeNotices.get(sessionId) !== pending) return;
+            pendingCalendarChangeNotices.delete(sessionId);
+            pending.cancel?.();
+            pushCalendarChangeNotice(sessionId, pending.lines.join("\n"), pending.template);
+        },
+        arm: (delay) => {
+            pending.cancel?.();
+            pending.cancel = bgSetTimeout(pending.flush, delay);
+        },
+    };
+    pendingCalendarChangeNotices.set(sessionId, pending);
+    // 平时由下面的 message.persisted 推进；这个长兜底只防回复一直没落库
+    pending.arm(30_000);
+}
+
+function nudgeCalendarChangeNotice(message: ChatMessage | undefined): void {
+    if (message?.role !== "assistant" || !message.sessionId || (message as { calendarChangeNotice?: boolean }).calendarChangeNotice) return;
+    const pending = pendingCalendarChangeNotices.get(message.sessionId);
+    if (!pending) return;
+    const batchId = String(message.responseBatchId || "");
+    if (pending.responseBatchId && batchId && pending.responseBatchId !== batchId) return;
+    if (!pending.responseBatchId && batchId) pending.responseBatchId = batchId;
+    if (message.id && pending.seenMessageIds.has(message.id)) return;
+    if (message.id) pending.seenMessageIds.add(message.id);
+    pending.template = message;
+    if (pending.seenMessageIds.size >= pending.targetVisibleCount) pending.arm(80);
+    else pending.arm(1100);
+}
+
+function applyCharacterCalendarActions(payload: LlmResponsePayload): LlmResponsePayload {
+    const parsed = extractCalendarActionBlocks(payload?.text);
+    if (parsed.actions.length === 0) {
+        takeCalendarWriteRequest(payload);
+        return parsed.cleaned !== String(payload?.text || "").trim() ? { ...payload, text: parsed.cleaned } : payload;
+    }
+    const request = takeCalendarWriteRequest(payload);
+    const next = { ...payload, text: parsed.cleaned || "已经帮你处理好了。" };
+    if (!request || !canCharacterModifyCalendar(request.characterId)) {
+        console.info("[Calendar] 忽略了没有角色修改权限的日历动作");
+        return next;
+    }
+    const receipts = { ...loadCalendarExtras().writeReceipts };
+    const summaries: string[] = [];
+    const failures: string[] = [];
+    parsed.actions.forEach((action, index) => {
+        const receiptKey = `${request.characterId}:${request.requestId}:${index}`;
+        if (receipts[receiptKey]) return;
+        try {
+            const summary = executeCharacterCalendarAction(action);
+            if (summary) summaries.push(summary);
+            receipts[receiptKey] = { at: Date.now(), action: String((action as { action?: unknown })?.action || ""), summary: summary || "" };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            failures.push(message);
+            console.warn("[Calendar] 角色修改用户日历失败：", message);
+        }
+    });
+    saveCalendarActionReceipts(receipts);
+    scheduleCalendarChangeNotice(request.sessionId, request.characterName, summaries, failures, parsed.targetVisibleCount);
+    return next;
+}
+
 // ── hook 织入 ──
 
 function handleLlmRequest(payload: LlmRequestPayload): LlmRequestPayload {
@@ -732,7 +1002,8 @@ function handleLlmRequest(payload: LlmRequestPayload): LlmRequestPayload {
     if (purposeScope(config).has(payload.purpose) && canPayloadReadCalendar(payload, extras)) {
         try {
             ensureForeverSeries();
-            injectMarkedSystemMessage(messages, buildUserCalendarContext(new Date()), CONTEXT_MARKER);
+            const includeWriteIds = Boolean(writableCharacterForPayload(payload, extras));
+            injectMarkedSystemMessage(messages, buildUserCalendarContext(new Date(), { includeWriteIds }), CONTEXT_MARKER);
             changed = true;
         } catch (error) {
             console.warn("[Calendar] 读取用户日历/备忘录失败", error);
@@ -740,6 +1011,12 @@ function handleLlmRequest(payload: LlmRequestPayload): LlmRequestPayload {
     }
 
     if (prepareCompletionMerge(payload, messages, extras)) changed = true;
+
+    try {
+        if (prepareCalendarWriteRequest(payload, messages, config, extras)) changed = true;
+    } catch (error) {
+        console.warn("[Calendar] 准备角色日历修改能力失败", error);
+    }
 
     const directive = payload.purpose === "chat" && payload.sessionId ? activeDirectives.get(payload.sessionId) : undefined;
     if (directive) {
@@ -751,8 +1028,9 @@ function handleLlmRequest(payload: LlmRequestPayload): LlmRequestPayload {
 }
 
 function handleLlmResponse(payload: LlmResponsePayload): LlmResponsePayload {
-    markCompletionMergeResponse(payload);
-    return payload;
+    const next = applyCharacterCalendarActions(payload);
+    markCompletionMergeResponse(next);
+    return next;
 }
 
 // ── 服务生命周期 ──
@@ -761,12 +1039,16 @@ let stopInterval: (() => void) | null = null;
 let stopInitial: (() => void) | null = null;
 let disposeRequestHook: (() => void) | null = null;
 let disposeResponseHook: (() => void) | null = null;
+let disposePersistedHook: (() => void) | null = null;
 
 export function startCalendarChatService(): void {
     if (typeof window === "undefined" || stopInterval) return;
     const bus = getChatPluginHookBus();
     disposeRequestHook = bus.registerTransform(NATIVE_CALENDAR_ID, "llm.request", handleLlmRequest as (payload: unknown) => unknown, 80, 8000);
-    disposeResponseHook = bus.registerTransform(NATIVE_CALENDAR_ID, "llm.response", handleLlmResponse as (payload: unknown) => unknown, 80, 3000);
+    disposeResponseHook = bus.registerTransform(NATIVE_CALENDAR_ID, "llm.response", handleLlmResponse as (payload: unknown) => unknown, 80, 12000);
+    disposePersistedHook = bus.registerEvent(NATIVE_CALENDAR_ID, "message.persisted", (payload: unknown) => {
+        nudgeCalendarChangeNotice((payload as { message?: ChatMessage } | null)?.message);
+    });
     setCalendarTodoListener({ event: notifyEventTodosChanged, memo: notifyMemoTodosChanged });
     stopInterval = bgSetInterval(() => { void runCalendarReminderCheck(); }, REMINDER_INTERVAL_MS);
     stopInitial = bgSetTimeout(() => { void runCalendarReminderCheck(); }, 1_200);
@@ -777,6 +1059,9 @@ export function stopCalendarChatService(): void {
     if (stopInitial) { stopInitial(); stopInitial = null; }
     if (disposeRequestHook) { disposeRequestHook(); disposeRequestHook = null; }
     if (disposeResponseHook) { disposeResponseHook(); disposeResponseHook = null; }
+    if (disposePersistedHook) { disposePersistedHook(); disposePersistedHook = null; }
+    for (const pending of pendingCalendarChangeNotices.values()) pending.cancel?.();
+    pendingCalendarChangeNotices.clear();
     setCalendarTodoListener({});
     activeDirectives.clear();
 }

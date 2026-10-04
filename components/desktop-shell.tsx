@@ -49,6 +49,7 @@ import { hydrateKvDb, kvGet, kvSet, kvRemove, kvKeysWithPrefix } from "@/lib/kv-
 import {
   migrateCalendarExtrasFromPlugin,
   migrateCalendarSettingsFromPlugin,
+  migrateCalendarWriteAccessFromPlugin,
   resyncCalendarExtrasFromPlugin,
 } from "@/lib/calendar-extras";
 import { ensureForeverSeries } from "@/lib/calendar-recurrence";
@@ -1832,6 +1833,15 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
         }
       } catch (err) {
         console.warn("[Calendar] 补搬插件数据失败:", err);
+      }
+      // 插件 4.3 的「角色修改权限」：早先按旧版插件迁移时没带上，补搬一次
+      try {
+        const writeAccess = migrateCalendarWriteAccessFromPlugin();
+        if (writeAccess.status === "done" && writeAccess.count) {
+          console.info(`[Calendar] 补搬角色日历修改权限：${writeAccess.count} 个角色`);
+        }
+      } catch (err) {
+        console.warn("[Calendar] 补搬角色修改权限失败:", err);
       }
       // 「永远」的重复日程往后补到两年后：角色读日历、临近提醒不用等打开日历才看得到
       try {

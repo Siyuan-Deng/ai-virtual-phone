@@ -586,6 +586,43 @@ function normalizeReaction(value: unknown): TodoReactionMode {
     return value === "immediate" || value === "merge" ? value : "none";
 }
 
+const REACTION_OPTIONS: Array<[TodoReactionMode, string]> = [
+    ["none", "完成待办后：不回应"],
+    ["immediate", "完成待办后：立即回应"],
+    ["merge", "完成待办后：与下次消息合并"],
+];
+const REACTION_SHORT: Record<string, string> = { none: "不回应", immediate: "立即回应", merge: "下次合并" };
+const WRITE_OPTIONS: Array<[string, string]> = [
+    ["allow", "修改权限：可修改"],
+    ["deny", "修改权限：不可修改"],
+];
+const WRITE_SHORT: Record<string, string> = { allow: "可修改", deny: "不可修改" };
+
+/** 插件的紧凑下拉：原生 select 透明铺满（点了照样弹系统选单），上面只显示短标签和一个箭头 */
+function CompactAccessSelect({ className, options, shortLabels, value, disabled, onChange }: {
+    className: string;
+    options: Array<[string, string]>;
+    shortLabels: Record<string, string>;
+    value: string;
+    disabled: boolean;
+    onChange: (value: string) => void;
+}) {
+    return (
+        <span className={`caltool-compact-select ${className}`} data-disabled={disabled ? "true" : "false"}>
+            <select
+                className="ui-select caltool-access-select"
+                disabled={disabled}
+                value={value}
+                onChange={(event) => onChange(event.target.value)}
+            >
+                {options.map(([optionValue, label]) => <option key={optionValue} value={optionValue}>{label}</option>)}
+            </select>
+            <span className="caltool-compact-select-display">{shortLabels[value] || value}</span>
+            <span className="caltool-compact-select-arrow" aria-hidden="true">⌄</span>
+        </span>
+    );
+}
+
 function AccessPanel({ characters, nav, close }: { characters: CalendarToolCharacter[]; nav: CalendarToolNav; close: () => void }) {
     const [initial] = useState(() => loadCalendarExtras());
     const sorted = [...characters].sort((a, b) => String(a.name).localeCompare(String(b.name), "zh-CN"));
@@ -596,6 +633,7 @@ function AccessPanel({ characters, nav, close }: { characters: CalendarToolChara
     const [reactions, setReactions] = useState<Record<string, TodoReactionMode>>(() => Object.fromEntries(
         Object.entries(initial.todoReactions).map(([id, mode]) => [id, normalizeReaction(mode)]),
     ));
+    const [writeAccess, setWriteAccess] = useState<Record<string, boolean>>(() => ({ ...initial.writeAccess }));
 
     const save = () => {
         const current = loadCalendarExtras();
@@ -605,15 +643,15 @@ function AccessPanel({ characters, nav, close }: { characters: CalendarToolChara
             const characterId = String((record as { characterId?: unknown } | null)?.characterId ?? "");
             return selected.has(characterId) && reactions[characterId] === "merge";
         });
-        updateCalendarExtras({ characterAccess: Array.from(selected), todoReactions: reactions, todoCompletionQueue });
-        nav.notify("角色日历权限与待办回应方式已保存");
+        updateCalendarExtras({ characterAccess: Array.from(selected), todoReactions: reactions, todoCompletionQueue, writeAccess });
+        nav.notify("角色日历权限、待办回应与修改权限已保存");
         close();
     };
 
     return (
         <ToolSheet title="日历知情角色" actionLabel="保存角色权限" onBack={close} onDismiss={close} onAction={save}>
             <p className="caltool-access-intro">
-                右侧勾选后，角色可以在聊天与剧情中读取日历并接收临近提醒；下方可选择你勾完待办后，角色在私聊中不回应、立即回应，或合并进下一次互动。
+                右侧勾选后，角色可以在聊天与剧情中读取日历并接收临近提醒。两个菜单分别控制待办完成后的回应方式，以及角色能否在私聊中修改日历；修改权限不包含任何删除操作。
             </p>
             {sorted.length === 0 ? (
                 <div className="caltool-empty">还没有可选择的角色</div>
@@ -637,19 +675,25 @@ function AccessPanel({ characters, nav, close }: { characters: CalendarToolChara
                                     </span>
                                     <span className="caltool-access-copy">
                                         <span className="caltool-access-name">{character.name || "未命名角色"}</span>
-                                        <select
-                                            className="ui-select caltool-reaction-select"
-                                            disabled={!on}
+                                        <CompactAccessSelect
+                                            className="caltool-reaction-control"
+                                            options={REACTION_OPTIONS}
+                                            shortLabels={REACTION_SHORT}
                                             value={reactions[id] ?? "none"}
-                                            onChange={(event) => {
-                                                const mode = normalizeReaction(event.target.value);
+                                            disabled={!on}
+                                            onChange={(value) => {
+                                                const mode = normalizeReaction(value);
                                                 setReactions((prev) => ({ ...prev, [id]: mode }));
                                             }}
-                                        >
-                                            <option value="none">完成待办后：不回应</option>
-                                            <option value="immediate">完成待办后：立即回应</option>
-                                            <option value="merge">完成待办后：与下次消息合并</option>
-                                        </select>
+                                        />
+                                        <CompactAccessSelect
+                                            className="caltool-write-control"
+                                            options={WRITE_OPTIONS}
+                                            shortLabels={WRITE_SHORT}
+                                            value={writeAccess[id] === true ? "allow" : "deny"}
+                                            disabled={!on}
+                                            onChange={(value) => setWriteAccess((prev) => ({ ...prev, [id]: value === "allow" }))}
+                                        />
                                     </span>
                                     <input
                                         type="checkbox"
