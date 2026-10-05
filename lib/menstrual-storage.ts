@@ -16,7 +16,10 @@ export type MenstrualConfig = {
   periodLength: number;
   currentPeriodStartDate: string | null;
   periodCareEnabled: boolean;
+  /** 会主动发经期关心的角色 */
   periodCareCharacterIds: string[];
+  /** 知道你经期状况的角色：平时聊天会带一行经期状态。和「关心」分开 */
+  periodKnowCharacterIds: string[];
   periodCareLeadDays: MenstrualPeriodCareLeadDays;
 };
 
@@ -61,6 +64,7 @@ const DEFAULT_CONFIG: MenstrualConfig = {
   currentPeriodStartDate: null,
   periodCareEnabled: false,
   periodCareCharacterIds: [],
+  periodKnowCharacterIds: [],
   periodCareLeadDays: 1,
 };
 
@@ -156,6 +160,10 @@ export function loadMenstrualConfig(): MenstrualConfig {
           : null,
       periodCareEnabled: parsed.periodCareEnabled === true,
       periodCareCharacterIds: normalizeCharacterIds(parsed.periodCareCharacterIds),
+      // 还没分开设置过：先照「关心」的名单（之前选了关心的角色本来就知道经期状态）
+      periodKnowCharacterIds: normalizeCharacterIds(
+        Array.isArray(parsed.periodKnowCharacterIds) ? parsed.periodKnowCharacterIds : parsed.periodCareCharacterIds,
+      ),
       periodCareLeadDays: normalizePeriodCareLeadDays(parsed.periodCareLeadDays),
     };
   } catch {
@@ -171,6 +179,7 @@ export function saveMenstrualConfig(config: MenstrualConfig): MenstrualConfig {
     currentPeriodStartDate: config.currentPeriodStartDate ?? null,
     periodCareEnabled: config.periodCareEnabled === true,
     periodCareCharacterIds: normalizeCharacterIds(config.periodCareCharacterIds),
+    periodKnowCharacterIds: normalizeCharacterIds(config.periodKnowCharacterIds),
     periodCareLeadDays: normalizePeriodCareLeadDays(config.periodCareLeadDays),
   });
 }

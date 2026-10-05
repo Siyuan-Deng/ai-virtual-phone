@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { ChevronLeft, Palette } from "lucide-react";
+import { ChevronLeft, Palette, Settings2 } from "lucide-react";
 import type { CalendarScheduleItem } from "@/lib/calendar-types";
 import type { MenstrualDayState } from "@/lib/menstrual-storage";
 import { formatIsoDate } from "@/lib/calendar-utils";
@@ -73,6 +73,7 @@ export function CalendarMonthPage({
   onPickDay,
   onClose,
   onOpenTheme,
+  onOpenSettings,
   onOpenAccess,
   weekStartDay,
 }: {
@@ -86,6 +87,8 @@ export function CalendarMonthPage({
   onPickDay: (iso: string) => void;
   onClose: () => void;
   onOpenTheme: () => void;
+  /** 日历设置（经期、读取范围、节假日、视图） */
+  onOpenSettings: () => void;
   onOpenAccess: () => void;
 }) {
   const mondayFirst = weekStartDay === "monday";
@@ -210,6 +213,9 @@ export function CalendarMonthPage({
           </button>
           <button type="button" className="calendar-icon-btn" onClick={onOpenTheme} aria-label="主题与自定义">
             <Palette size={17} />
+          </button>
+          <button type="button" className="calendar-icon-btn" onClick={onOpenSettings} aria-label="日历设置">
+            <Settings2 size={17} />
           </button>
         </div>
 
