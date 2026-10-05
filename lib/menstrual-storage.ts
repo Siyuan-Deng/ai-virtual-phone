@@ -528,6 +528,31 @@ export function getMenstrualPeriodCareEvent(
   return null;
 }
 
+/** 给获准角色的一句经期状态（平时聊天用，越短越好）。一条记录都没有时返回 null */
+export function describeMenstrualStatus(
+  records: MenstrualRecord[],
+  config: MenstrualConfig,
+  userName: string,
+  today = formatIsoDate(new Date()),
+): string | null {
+  if (!config.enabled) return null;
+  const start = config.currentPeriodStartDate;
+  if (start && start <= today && !isMenstrualPeriodStale(config, today)) {
+    const day = daysBetween(start, today) + 1;
+    return day <= config.periodLength ? `${userName}正在经期，第${day}天。` : `${userName}经期第${day}天，还没记录结束。`;
+  }
+  const recorded = records.find(record => record.startDate <= today && today <= record.endDate);
+  if (recorded) return `${userName}正在经期，第${daysBetween(recorded.startDate, today) + 1}天。`;
+  if (!start && records.length === 0) return null;
+  if (buildMenstrualDayMap(today, today, records, config).get(today)?.type === "predicted_period") {
+    return `${userName}不在经期，按预测这几天可能会来。`;
+  }
+  const next = getNextPredictedPeriodStart(records, config, today);
+  if (!next) return `${userName}不在经期。`;
+  const [, month, date] = next.split("-").map(Number);
+  return `${userName}不在经期，下次预计${month}月${date}日。`;
+}
+
 export function getMenstrualSummary(records: MenstrualRecord[], config: MenstrualConfig, targetDate = formatIsoDate(new Date())) {
   const today = formatIsoDate(new Date());
   const latest = records[0] ?? null;

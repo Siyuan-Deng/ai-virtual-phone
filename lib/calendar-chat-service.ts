@@ -5,6 +5,7 @@
 //   3. 勾完待办后的回应：不回应 / 立即回应 / 和下一次互动合并
 //   4. 角色改用户日历（插件 4.3）：获准的角色在私聊回复里带一个隐藏动作块，新增 / 修改日程、待办、备忘录，
 //      不能删除；聊天里在动作对应的位置插一条「X修改了你的日历：…」
+//   5. 经期状态：周期设置里「让TA关心我的经期」选中的角色，平时聊天也知道你在不在经期（只一行）
 // 规则、文案沿用插件；挂在和插件同一条 llm.request / llm.response 总线上（照手记日记回应的做法，
 // 用一个内部 id，不会出现在插件管理页）。
 //
@@ -20,6 +21,8 @@ import { getChatPluginHookBus } from "./chat-plugin-hooks";
 import type { LlmRequestPayload, LlmResponsePayload } from "./chat-plugin-types";
 import { loadChatMessages, loadChatSessions, pushChatMessage, type ChatMessage, type ChatSession } from "./chat-storage";
 import { loadCharacters } from "./character-storage";
+import { resolveUserIdentity } from "./settings-storage";
+import { describeMenstrualStatus, loadMenstrualConfig, loadMenstrualRecords } from "./menstrual-storage";
 import { requestBackgroundChatReply } from "./follow-up-service";
 import { bgSetInterval, bgSetTimeout } from "./bg-timer";
 import { loadCalendarConfig, loadOwnerCalendarPlans, type CalendarConfig } from "./calendar-storage";
@@ -46,6 +49,7 @@ const CONTEXT_MARKER = "[USER_CALENDAR_PLUS_V3]";
 const COMPLETION_MARKER = "[USER_TODO_COMPLETION_V1]";
 const DIRECTIVE_MARKER = "[NATIVE_CALENDAR_DIRECTIVE]";
 const CALENDAR_ACTION_MARKER = "[USER_CALENDAR_ACTIONS_V1]";
+const PERIOD_MARKER = "[经期状态]";
 const CALENDAR_ACTION_OPEN = "<user_calendar_actions>";
 const CALENDAR_ACTION_CLOSE = "</user_calendar_actions>";
 const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
@@ -990,6 +994,22 @@ function applyCharacterCalendarActions(payload: LlmResponsePayload): LlmResponse
     return next;
 }
 
+// ── 经期状态 ──
+
+function periodStatusForPayload(payload: LlmRequestPayload): string | null {
+    if (!SUPPORTED_PURPOSES.has(payload.purpose)) return null;
+    const config = loadMenstrualConfig();
+    if (!config.enabled || !config.periodCareEnabled) return null;
+    const selected = new Set(config.periodCareCharacterIds.map(String));
+    const ids = payloadCharacterIds(payload).map(String);
+    // 群聊里只要有一个没选的角色就不给，免得没获准的角色也看到
+    if (ids.length === 0 || !ids.every((id) => selected.has(id))) return null;
+    const appId = payload.purpose === "story" ? "story" : "chat";
+    const userName = resolveUserIdentity(ids.length === 1 ? ids[0] : undefined, appId)?.name || "用户";
+    const status = describeMenstrualStatus(loadMenstrualRecords(), config, userName);
+    return status ? `${PERIOD_MARKER} ${status}只作背景，别每轮都提。` : null;
+}
+
 // ── hook 织入 ──
 
 function handleLlmRequest(payload: LlmRequestPayload): LlmRequestPayload {
@@ -1011,6 +1031,16 @@ function handleLlmRequest(payload: LlmRequestPayload): LlmRequestPayload {
     }
 
     if (prepareCompletionMerge(payload, messages, extras)) changed = true;
+
+    try {
+        const periodStatus = periodStatusForPayload(payload);
+        if (periodStatus) {
+            injectMarkedSystemMessage(messages, periodStatus, PERIOD_MARKER);
+            changed = true;
+        }
+    } catch (error) {
+        console.warn("[Calendar] 读取经期状态失败", error);
+    }
 
     try {
         if (prepareCalendarWriteRequest(payload, messages, config, extras)) changed = true;
