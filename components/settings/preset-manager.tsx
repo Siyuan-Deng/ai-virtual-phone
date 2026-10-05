@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useContext, useCallback, useMemo } from "react";
-import { Plus, Upload, Download, Trash2, RotateCcw, ChevronLeft, ChevronDown, GripVertical, MessageSquare, AlertCircle, Maximize2, Copy, Replace, CheckSquare, Check, Filter, MoreHorizontal } from "lucide-react";
+import { Plus, Upload, Download, Trash2, RotateCcw, ChevronLeft, ChevronDown, GripVertical, MessageSquare, AlertCircle, Maximize2, Copy, Replace, CheckSquare, Check, Filter, MoreHorizontal, Pin } from "lucide-react";
 import {
     loadPresets,
     savePresets,
@@ -31,6 +31,9 @@ import { BottomSheet, ConfirmDialog, TextExpandModal } from "@/components/ui/mod
 import { SwipeActionRow, useSwipeActions } from "@/components/ui/swipe-actions";
 import { notifyMascotPageContext } from "@/lib/mascot-events";
 import { useTouchSort } from "@/lib/use-touch-sort";
+import { applyGroupOrder } from "@/lib/list-order";
+import { Toggle } from "@/components/ui/form";
+import { useLongPressReorder } from "./use-long-press-reorder";
 
 // ── Tag helpers for backward compat (tags[] > featureTag + followUpOnly) ──
 function getPromptTags(p: Prompt): string[] {
@@ -658,6 +661,9 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
         savePresets(newPresets);
     }, []);
 
+    // 长按卡片拖动排序：置顶的之间、其余的之间各自换位置
+    const reorder = useLongPressReorder((_group, orderedIds) => persist(applyGroupOrder(presets, orderedIds)));
+
     const addPreset = useCallback(() => {
         const newPreset = createPreset("新预设");
         persist([newPreset, ...presets]);
@@ -676,6 +682,7 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
             updatedAt: now,
             builtIn: undefined,
             builtInVersion: undefined,
+            pinned: undefined,
         };
         persist([copy, ...presets]);
         setEditingId(copy.id);
@@ -1114,6 +1121,45 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
         await downloadFile(blob, `${preset.name || "preset"}.json`);
     };
 
+    // 置顶的排最前；其余按拖出来的顺序
+    const pinnedPresets = presets.filter(p => p.pinned);
+    const restPresets = presets.filter(p => !p.pinned);
+    const renderPresetCard = (preset: PresetConfig, group: string, groupIds: string[]) => (
+        <div
+            key={preset.id}
+            {...reorder.itemProps(group, preset.id, groupIds)}
+            className="ui-config-card min-w-0 cursor-pointer"
+            style={{ minHeight: "84px", padding: "16px", justifyContent: "space-between" }}
+            role="button"
+            tabIndex={0}
+            aria-label={`编辑 ${preset.name || "预设"}`}
+            onClick={() => { setEditingId(preset.id); setViewMode("detail"); }}
+            onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setEditingId(preset.id);
+                    setViewMode("detail");
+                }
+            }}
+        >
+            <div className="min-w-0 flex flex-col gap-1.5">
+                <div className="min-w-0 flex items-center gap-[6px]">
+                    <span className="truncate text-[calc(14.4px*var(--app-text-scale,1))] font-bold leading-tight text-[var(--c-text-title)]">{preset.name}</span>
+                    {preset.builtIn && (
+                        <span className="ui-badge shrink-0" data-variant="success">内置</span>
+                    )}
+                    {preset.pinned ? <Pin size={13} className="ml-auto shrink-0 opacity-45" aria-label="已置顶" /> : null}
+                </div>
+                <span className="menu-desc truncate">{preset.description || `包含 ${preset.prompts?.length || 0} 个设定条目`}</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+                <span className="menu-desc ts-12">条目 {preset.prompts?.length || 0}</span>
+                <ChevronLeft size={16} style={{ transform: "rotate(180deg)", opacity: 0.4 }} />
+            </div>
+        </div>
+    );
+
     if (!isLoaded) return null; // loading state
 
     return (
@@ -1143,39 +1189,8 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                         </div>
                     ) : (
                         <div className="flex flex-col gap-3">
-                            {presets.map(preset => (
-                                <div
-                                    key={preset.id}
-                                    className="ui-config-card min-w-0 cursor-pointer"
-                                    style={{ minHeight: "84px", padding: "16px", justifyContent: "space-between" }}
-                                    role="button"
-                                    tabIndex={0}
-                                    aria-label={`编辑 ${preset.name || "预设"}`}
-                                    onClick={() => { setEditingId(preset.id); setViewMode("detail"); }}
-                                    onKeyDown={(event) => {
-                                        if (event.target !== event.currentTarget) return;
-                                        if (event.key === "Enter" || event.key === " ") {
-                                            event.preventDefault();
-                                            setEditingId(preset.id);
-                                            setViewMode("detail");
-                                        }
-                                    }}
-                                >
-                                    <div className="min-w-0 flex flex-col gap-1.5">
-                                        <div className="min-w-0 flex items-center gap-[6px]">
-                                            <span className="truncate text-[calc(14.4px*var(--app-text-scale,1))] font-bold leading-tight text-[var(--c-text-title)]">{preset.name}</span>
-                                            {preset.builtIn && (
-                                                <span className="ui-badge shrink-0" data-variant="success">内置</span>
-                                            )}
-                                        </div>
-                                        <span className="menu-desc truncate">{preset.description || `包含 ${preset.prompts?.length || 0} 个设定条目`}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-2">
-                                        <span className="menu-desc ts-12">条目 {preset.prompts?.length || 0}</span>
-                                        <ChevronLeft size={16} style={{ transform: "rotate(180deg)", opacity: 0.4 }} />
-                                    </div>
-                                </div>
-                            ))}
+                            {reorder.order("pinned", pinnedPresets).map(preset => renderPresetCard(preset, "pinned", pinnedPresets.map(p => p.id)))}
+                            {reorder.order("rest", restPresets).map(preset => renderPresetCard(preset, "rest", restPresets.map(p => p.id)))}
                         </div>
                     )}
                 </>
@@ -1238,6 +1253,14 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                                                 onChange={(e) => updatePreset(preset.id, { name: e.target.value })}
                                                 placeholder="预设名称..."
                                                 className="ui-input font-medium"
+                                            />
+                                        </div>
+
+                                        <div className="flex items-center justify-between gap-3">
+                                            <label className="menu-label ts-13 font-semibold ml-1">置顶</label>
+                                            <Toggle
+                                                checked={preset.pinned === true}
+                                                onChange={(value) => updatePreset(preset.id, { pinned: value || undefined })}
                                             />
                                         </div>
 

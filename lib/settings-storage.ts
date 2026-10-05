@@ -39,6 +39,9 @@ import {
     readRegexesCache, writeRegexesCache,
     hydrateSettingsDb,
 } from "./settings-db";
+import { orderLikeFolders, pinnedFirst, withSortIndex } from "./list-order";
+import { loadApiConfigFolders } from "./api-config-folders";
+import { loadWorldBookFolders } from "./worldbook-folders";
 import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
 import { isGenerationParameterKey } from "./generation-parameters";
 
@@ -203,7 +206,7 @@ export function loadPresets(): PresetConfig[] {
             savePresets(presets);
         }
 
-        return presets;
+        return pinnedFirst(presets);
     } catch {
         return [];
     }
@@ -269,7 +272,7 @@ function normalizePresetPromptScope(prompt: Prompt): Prompt {
 
 export function savePresets(presets: PresetConfig[]): void {
     if (typeof window === "undefined") return;
-    writePresetsCache(presets.map(stripDeprecatedPresetFields));
+    writePresetsCache(withSortIndex(presets.map(stripDeprecatedPresetFields)));
     // 统一变更通知：预设管理器直接编辑保存此前不发事件，挂载中的聊天页（流式预览
     // 标签配置等）拿不到新配置，最终清洗按新预设、预览按旧预设。监听方刷新是幂等的。
     window.dispatchEvent(new CustomEvent("settings-presets-updated"));
@@ -277,7 +280,7 @@ export function savePresets(presets: PresetConfig[]): void {
 
 export async function savePresetsAsync(presets: PresetConfig[]): Promise<void> {
     if (typeof window === "undefined") return;
-    await writePresetsCacheAsync(presets.map(stripDeprecatedPresetFields));
+    await writePresetsCacheAsync(withSortIndex(presets.map(stripDeprecatedPresetFields)));
     window.dispatchEvent(new CustomEvent("settings-presets-updated"));
 }
 
@@ -411,12 +414,12 @@ export function parsePresetFromJson(text: string, fallbackName: string = "导入
 
 export function loadWorldBooks(): WorldBookConfig[] {
     if (typeof window === "undefined") return [];
-    return [...readWorldBooksCache()];
+    return orderLikeFolders(pinnedFirst([...readWorldBooksCache()]), loadWorldBookFolders());
 }
 
 export function saveWorldBooks(books: WorldBookConfig[]): void {
     if (typeof window === "undefined") return;
-    writeWorldBooksCache(books);
+    writeWorldBooksCache(withSortIndex(books));
 }
 
 export function createWorldBook(name: string): WorldBookConfig {
@@ -636,7 +639,7 @@ export function loadApiConfigs(): ApiConfig[] {
         const raw = kvGet(API_CONFIGS_KEY);
         if (!raw) return [];
         const parsed = JSON.parse(raw) as LegacyApiConfig[];
-        return Array.isArray(parsed) ? parsed.map(normalizeApiConfig) : [];
+        return Array.isArray(parsed) ? orderLikeFolders(pinnedFirst(parsed.map(normalizeApiConfig)), loadApiConfigFolders()) : [];
     } catch {
         return [];
     }

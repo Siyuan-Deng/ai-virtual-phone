@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useContext, useCallback } from "react";
-import { Plus, BookOpen, Trash2, Upload, Download, ChevronLeft, AlertCircle, Maximize2, Replace, Copy, Folder, FolderPlus, FolderInput, Pencil, Check } from "lucide-react";
+import { Plus, BookOpen, Trash2, Upload, Download, ChevronLeft, AlertCircle, Maximize2, Replace, Copy, Folder, FolderPlus, FolderInput, Pencil, Check, Pin } from "lucide-react";
 import {
     loadWorldBooks,
     saveWorldBooks,
@@ -19,7 +19,10 @@ import {
     saveWorldBookFolders,
     type WorldBookFolder,
 } from "@/lib/worldbook-folders";
+import { applyGroupOrder } from "@/lib/list-order";
+import { Toggle } from "@/components/ui/form";
 import { SettingsContext } from "../phone-settings-app";
+import { useLongPressReorder } from "./use-long-press-reorder";
 import { BottomSheet, ConfirmDialog, ContentDialog, TextExpandModal } from "@/components/ui/modal";
 import { SwipeActionRow, useSwipeActions } from "@/components/ui/swipe-actions";
 import { notifyMascotPageContext } from "@/lib/mascot-events";
@@ -67,6 +70,16 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
     }, []);
 
     const currentFolder = currentFolderId ? folders.find(f => f.id === currentFolderId) ?? null : null;
+
+    // 长按卡片拖动排序：文件夹之间、置顶的之间、普通的之间各自换位置
+    const reorder = useLongPressReorder((group, orderedIds) => {
+        if (group === "folders") {
+            const byId = new Map(folders.map(f => [f.id, f]));
+            persistFolders(orderedIds.map(id => byId.get(id)).filter((f): f is WorldBookFolder => Boolean(f)));
+            return;
+        }
+        persist(applyGroupOrder(books, orderedIds));
+    });
 
     const wbContainerRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
@@ -281,6 +294,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
             createdAt: base.createdAt,
             updatedAt: base.updatedAt,
             entries: (source.entries || []).map((entry, index) => ({ ...entry, uid: `wb-entry-${base.createdAt}-${index}` })),
+            pinned: undefined,
         };
         persist([copy, ...books]);
         setActiveBookId(copy.id);
@@ -573,9 +587,10 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
         setViewMode("detail");
     };
 
-    const renderBookCard = (book: WorldBookConfig) => (
+    const renderBookCard = (book: WorldBookConfig, group: string, groupIds: string[]) => (
         <div
             key={book.id}
+            {...reorder.itemProps(group, book.id, groupIds)}
             className="ui-config-card min-w-0 cursor-pointer"
             style={{ aspectRatio: "3 / 2", padding: "12px", justifyContent: "space-between" }}
             role="button"
@@ -594,6 +609,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                 <div className="min-w-0 flex items-center gap-[6px]">
                     <BookOpen size={16} className="shrink-0" />
                     <span className="truncate text-[calc(14.4px*var(--app-text-scale,1))] font-bold leading-tight text-[var(--c-text-title)]">{book.name}</span>
+                    {book.pinned ? <Pin size={13} className="ml-auto shrink-0 opacity-45" aria-label="已置顶" /> : null}
                 </div>
                 <span className="menu-desc truncate">{book.description || `${book.entries?.length || 0} 个条目`}</span>
             </div>
@@ -611,9 +627,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
             {viewMode === "list" ? (
                 currentFolder ? (
                     <>
-                        <div className="flex items-center">
-                            <h2 className="m-0 mx-2 min-w-0 truncate ts-28 font-bold italic leading-none text-black">{currentFolder.name}</h2>
-                        </div>
+                        {/* 文件夹名已经在顶上标题栏里了，这里不再写一遍大字 */}
                         <div className="flex justify-center gap-2">
                             <button
                                 type="button"
@@ -642,6 +656,8 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                         </div>
                         {(() => {
                             const inside = groupWorldBooksByFolder(books, folders).inFolder(currentFolder.id);
+                            const insidePinned = inside.filter(b => b.pinned);
+                            const insideRest = inside.filter(b => !b.pinned);
                             return inside.length === 0 ? (
                                 <div className="ui-empty mt-2">
                                     <div className="ui-icon-circle">
@@ -654,7 +670,8 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-2 gap-3">
-                                    {inside.map(renderBookCard)}
+                                    {reorder.order("inside-pinned", insidePinned).map(book => renderBookCard(book, "inside-pinned", insidePinned.map(b => b.id)))}
+                                    {reorder.order("inside", insideRest).map(book => renderBookCard(book, "inside", insideRest.map(b => b.id)))}
                                 </div>
                             );
                         })()}
@@ -682,13 +699,19 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                         <div className="grid grid-cols-2 gap-3">
                             {(() => {
                                 const grouped = groupWorldBooksByFolder(books, folders);
+                                const pinnedIds = grouped.pinned.map(b => b.id);
+                                const folderIds = folders.map(f => f.id);
+                                const unfiledIds = grouped.unfiled.map(b => b.id);
                                 return (
                                     <>
-                                        {folders.map(folder => {
+                                        {/* 置顶的放最上面，在文件夹里的也会出现在这里 */}
+                                        {reorder.order("pinned", grouped.pinned).map(book => renderBookCard(book, "pinned", pinnedIds))}
+                                        {reorder.order("folders", folders).map(folder => {
                                             const inside = grouped.inFolder(folder.id);
                                             return (
                                                 <div
                                                     key={folder.id}
+                                                    {...reorder.itemProps("folders", folder.id, folderIds)}
                                                     className="ui-config-card min-w-0 cursor-pointer"
                                                     style={{ aspectRatio: "3 / 2", padding: "12px", justifyContent: "space-between" }}
                                                     role="button"
@@ -719,7 +742,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                                 </div>
                                             );
                                         })}
-                                        {grouped.unfiled.map(renderBookCard)}
+                                        {reorder.order("unfiled", grouped.unfiled).map(book => renderBookCard(book, "unfiled", unfiledIds))}
                                     </>
                                 );
                             })()}
@@ -787,6 +810,14 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                         </select>
                                     </div>
                                 )}
+
+                                <div className="flex items-center justify-between gap-3">
+                                    <label className="menu-label ts-13 font-semibold ml-1">置顶</label>
+                                    <Toggle
+                                        checked={activeBook.pinned === true}
+                                        onChange={(value) => updateBook(activeBook.id, { pinned: value || undefined })}
+                                    />
+                                </div>
 
                                 <div className="flex flex-col gap-2">
                                     <label className="menu-label ts-13 font-semibold ml-1">简介描述</label>

@@ -222,14 +222,14 @@ const BINDING_LABELS: Record<StoryBindingKind, string> = {
   regexes: "正则",
 };
 
-type Option = { id: string; name: string; folderId?: string };
+type Option = { id: string; name: string; folderId?: string; pinned?: boolean };
 
 function bindingOptions(kind: StoryBindingKind): Option[] {
   if (kind === "api") {
     return loadApiConfigs().map((config) => ({ id: config.id, name: config.name || `${config.provider} · ${config.defaultModel}` }));
   }
   if (kind === "preset") return loadPresets().map((preset) => ({ id: preset.id, name: preset.name }));
-  if (kind === "worldBooks") return loadWorldBooks().map((book) => ({ id: book.id, name: book.name, folderId: book.folderId }));
+  if (kind === "worldBooks") return loadWorldBooks().map((book) => ({ id: book.id, name: book.name, folderId: book.folderId, pinned: book.pinned }));
   return loadRegexes().map((regex) => ({ id: regex.id, name: regex.name }));
 }
 
@@ -296,7 +296,8 @@ export function StoryBindingPicker({
   const usedFolders = folders.filter((folder) => grouped.inFolder(folder.id).length > 0);
   const [openFolderId, setOpenFolderId] = useState<string | null>(null);
   const openFolder = openFolderId ? usedFolders.find((folder) => folder.id === openFolderId) : undefined;
-  const visibleOptions = openFolder ? grouped.inFolder(openFolder.id) : usedFolders.length > 0 ? grouped.unfiled : options;
+  // 置顶的放最外层最上面（在文件夹里的也会出现）
+  const visibleOptions = openFolder ? grouped.inFolder(openFolder.id) : usedFolders.length > 0 ? [...grouped.pinned, ...grouped.unfiled] : options;
 
   const setIds = (next: string[] | undefined) => {
     if (kind === "api") onChange({ ...bindings, apiConfigId: next?.[0] });

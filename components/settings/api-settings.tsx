@@ -1,12 +1,16 @@
 "use client";
 
 import { useState, useEffect, useCallback, useContext } from "react";
-import { Plus, RefreshCw, Rss, AlertCircle, FileEdit, Trash2, X, Check } from "lucide-react";
+import { Plus, RefreshCw, Rss, AlertCircle, FileEdit, Trash2, X, Check, Copy, Folder, FolderPlus, FolderInput, Pencil, ChevronRight, Pin } from "lucide-react";
 import { SettingsContext } from "../phone-settings-app";
+import { useLongPressReorder } from "./use-long-press-reorder";
+import { applyGroupOrder } from "@/lib/list-order";
+import { groupItemsByFolder } from "@/lib/item-folders";
+import { createApiConfigFolder, loadApiConfigFolders, saveApiConfigFolders, type ApiConfigFolder } from "@/lib/api-config-folders";
 import type { ApiConfig } from "@/lib/settings-types";
 import { loadApiConfigs, removeApiConfigReferences, saveApiConfigs } from "@/lib/settings-storage";
 import { generateEmbedding, isEmbeddingModelName } from "@/lib/memory-embedding";
-import { ConfirmDialog } from "@/components/ui/modal";
+import { BottomSheet, ConfirmDialog, ContentDialog } from "@/components/ui/modal";
 import { Toggle, Input } from "@/components/ui/form";
 import { Alert } from "@/components/ui/feedback";
 import { determineBaseUrl, simpleLLMCall } from "@/lib/api-helpers";
@@ -32,8 +36,15 @@ function getNativeToolProtocolLabel(config: ApiConfig): string {
 }
 
 export function ApiSettings() {
-    const { setSubpageRightAction } = useContext(SettingsContext);
+    const { setSubpageRightAction, setSubpageTitle, setOverrideBack } = useContext(SettingsContext);
     const [configs, setConfigs] = useState<ApiConfig[]>([]);
+    // 文件夹（和世界书一样）：currentFolderId 是正在看的文件夹，null = 最外层
+    const [folders, setFolders] = useState<ApiConfigFolder[]>([]);
+    const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+    const [folderNameDialog, setFolderNameDialog] = useState<{ mode: "create" } | { mode: "rename"; id: string } | null>(null);
+    const [folderNameDraft, setFolderNameDraft] = useState("");
+    const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState<string | null>(null);
+    const [moveSelection, setMoveSelection] = useState<Set<string> | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [isNewConfig, setIsNewConfig] = useState(false);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -54,6 +65,7 @@ export function ApiSettings() {
             setConfigs(DEFAULT_CONFIGS);
             saveApiConfigs(DEFAULT_CONFIGS);
         }
+        setFolders(loadApiConfigFolders());
         setIsLoaded(true);
     }, []);
 
@@ -61,6 +73,34 @@ export function ApiSettings() {
         setConfigs(newConfigs);
         saveApiConfigs(newConfigs);
     }, []);
+
+    const persistFolders = useCallback((next: ApiConfigFolder[]) => {
+        setFolders(next);
+        saveApiConfigFolders(next);
+    }, []);
+
+    const currentFolder = currentFolderId ? folders.find(f => f.id === currentFolderId) ?? null : null;
+
+    // 进了文件夹：标题栏显示文件夹名，返回先回到最外层
+    useEffect(() => {
+        if (currentFolder) {
+            setOverrideBack(() => () => setCurrentFolderId(null));
+            setSubpageTitle(currentFolder.name);
+        } else {
+            setOverrideBack(null);
+            setSubpageTitle(null);
+        }
+    }, [currentFolder, setOverrideBack, setSubpageTitle]);
+
+    // 长按卡片拖动排序：文件夹之间、置顶的之间、普通的之间各自换位置
+    const reorder = useLongPressReorder((group, orderedIds) => {
+        if (group === "folders") {
+            const byId = new Map(folders.map(f => [f.id, f]));
+            persistFolders(orderedIds.map(id => byId.get(id)).filter((f): f is ApiConfigFolder => Boolean(f)));
+            return;
+        }
+        persist(applyGroupOrder(configs, orderedIds));
+    });
 
     const addConfig = useCallback(() => {
         const newConfig: ApiConfig = {
@@ -73,24 +113,93 @@ export function ApiSettings() {
             enableImageRecognition: false,
             enableImageGeneration: false,
             preventEmptyGenerateRambling: true,
+            // 在文件夹里新建就直接放进这个文件夹
+            ...(currentFolderId ? { folderId: currentFolderId } : {}),
         };
         persist([...configs, newConfig]);
         setIsNewConfig(true);
         setEditingId(newConfig.id);
-    }, [configs, persist]);
+    }, [configs, currentFolderId, persist]);
+
+    /** 复制一份放在原来那份后面（同一个文件夹，不置顶），打开副本 */
+    const duplicateConfig = (config: ApiConfig) => {
+        const copy: ApiConfig = {
+            ...config,
+            id: `config-${Date.now()}`,
+            name: `${config.name || config.provider} 副本`,
+            pinned: undefined,
+        };
+        const index = configs.findIndex(c => c.id === config.id);
+        const next = [...configs];
+        next.splice(index < 0 ? next.length : index + 1, 0, copy);
+        persist(next);
+        setEditingId(copy.id);
+    };
+
+    // --- 文件夹 ---
+    const openFolderNameDialog = (dialog: { mode: "create" } | { mode: "rename"; id: string }) => {
+        setFolderNameDraft(dialog.mode === "rename" ? folders.find(f => f.id === dialog.id)?.name ?? "" : "");
+        setFolderNameDialog(dialog);
+    };
+
+    const submitFolderName = () => {
+        const dialog = folderNameDialog;
+        if (!dialog) return;
+        setFolderNameDialog(null);
+        if (dialog.mode === "create") {
+            const folder = createApiConfigFolder(folderNameDraft);
+            persistFolders([folder, ...folders]);
+            setCurrentFolderId(folder.id);
+            return;
+        }
+        const name = folderNameDraft.trim().slice(0, 40);
+        if (!name) return;
+        persistFolders(folders.map(f => f.id === dialog.id ? { ...f, name } : f));
+    };
+
+    const removeFolder = (folderId: string) => {
+        persistFolders(folders.filter(f => f.id !== folderId));
+        // 里面的配置回到未分类，不跟着删
+        if (configs.some(c => c.folderId === folderId)) {
+            persist(configs.map(c => c.folderId === folderId ? { ...c, folderId: undefined } : c));
+        }
+        if (currentFolderId === folderId) setCurrentFolderId(null);
+    };
+
+    const moveConfigsToFolder = (configIds: Set<string>, folderId: string) => {
+        if (configIds.size === 0) return;
+        persist(configs.map(c => configIds.has(c.id) ? { ...c, folderId } : c));
+    };
 
     useEffect(() => {
+        // 和世界书一样只放图标、不带阴影；文件夹只有一层，在文件夹里面不再显示「新建文件夹」
         setSubpageRightAction("api",
-            <button
-                onClick={addConfig}
-                className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-[20px] bg-black px-4 text-xs font-bold text-white shadow-sm transition-all hover:bg-gray-800 hover:shadow-md active:scale-95 focus:outline-none"
-            >
-                <Plus size={15} strokeWidth={1.8} />
-                <span>新增API方案</span>
-            </button>
+            <div className="flex items-center gap-2">
+                {currentFolderId ? null : (
+                    <button
+                        type="button"
+                        onClick={() => openFolderNameDialog({ mode: "create" })}
+                        aria-label="新建文件夹"
+                        title="新建文件夹"
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-black/10 bg-white text-gray-800 transition-all hover:bg-gray-50 active:scale-95 focus:outline-none"
+                    >
+                        <FolderPlus size={16} strokeWidth={1.8} />
+                    </button>
+                )}
+                <button
+                    type="button"
+                    onClick={addConfig}
+                    aria-label="新增API方案"
+                    title="新增API方案"
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-black text-white transition-all hover:bg-gray-800 active:scale-95 focus:outline-none"
+                >
+                    <Plus size={16} strokeWidth={1.8} />
+                </button>
+            </div>
         );
         return () => setSubpageRightAction("api", null);
-    }, [addConfig, setSubpageRightAction]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [addConfig, setSubpageRightAction, currentFolderId, folders]);
 
     const updateConfig = (id: string, updates: Partial<ApiConfig>) => {
         persist(configs.map(c => c.id === id ? { ...c, ...updates } : c));
@@ -211,74 +320,187 @@ export function ApiSettings() {
 
     if (!isLoaded) return null;
 
+    const renderConfigCard = (config: ApiConfig, group: string, groupIds: string[]) => (
+        <div
+            key={config.id}
+            {...reorder.itemProps(group, config.id, groupIds)}
+            className="ui-config-card min-w-0 cursor-pointer"
+            style={{ aspectRatio: "3 / 2", padding: "12px", justifyContent: "space-between" }}
+            role="button"
+            tabIndex={0}
+            aria-label={`编辑 ${config.name || config.provider}`}
+            onClick={() => setEditingId(config.id)}
+            onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setEditingId(config.id);
+                }
+            }}
+        >
+            <div className="min-w-0 flex flex-col gap-1">
+                <div className="min-w-0 flex items-center gap-[6px]">
+                    <span className="truncate text-[calc(14.4px*var(--app-text-scale,1))] font-bold leading-tight text-[var(--c-text-title)]">{config.name || config.provider}</span>
+                    {config.pinned ? <Pin size={13} className="ml-auto shrink-0 opacity-45" aria-label="已置顶" /> : null}
+                </div>
+                <span className="menu-desc truncate">{config.defaultModel || config.provider || "未设置模型"}</span>
+            </div>
+            <div className="flex gap-2 shrink-0 items-center justify-end">
+                <button
+                    type="button"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        duplicateConfig(config);
+                    }}
+                    className="ui-link-btn"
+                    aria-label="复制配置"
+                    title="复制配置"
+                >
+                    <Copy size={17} />
+                </button>
+                <button
+                    type="button"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        setEditingId(config.id);
+                    }}
+                    className="ui-link-btn"
+                >
+                    <FileEdit size={18} />
+                </button>
+                <button
+                    type="button"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        setConfirmDeleteId(config.id);
+                    }}
+                    className="ui-link-btn"
+                    data-variant="danger"
+                >
+                    <Trash2 size={18} />
+                </button>
+            </div>
+        </div>
+    );
+
+    const grouped = groupItemsByFolder(configs, folders);
+
     return (
         <div className="flex flex-col gap-6">
-            <div className="flex items-center">
-                <h2 className="m-0 mx-2 ts-28 font-bold italic leading-none text-black">API Settings</h2>
-            </div>
-
-            {configs.length === 0 ? (
-                <div className="ui-empty">
-                    <div className="ui-icon-circle">
-                        <AlertCircle size={24} />
-                    </div>
-                    <span className="menu-label font-semibold">没有 API 配置</span>
-                    <span className="menu-desc max-w-[240px]">
-                        配置 API 密钥和模型以连接到 AI 服务。
-                    </span>
-                    <button onClick={addConfig} className="ui-btn ui-btn-primary rounded-[20px] mt-2">
-                        <Plus size={16} /> 添加配置
-                    </button>
-                </div>
-            ) : (
-                <div className="grid grid-cols-2 gap-3">
-                    {configs.map(config => (
-                        <div
-                            key={config.id}
-                            className="ui-config-card min-w-0 cursor-pointer"
-                            style={{ aspectRatio: "3 / 2", padding: "12px", justifyContent: "space-between" }}
-                            role="button"
-                            tabIndex={0}
-                            aria-label={`编辑 ${config.name || config.provider}`}
-                            onClick={() => setEditingId(config.id)}
-                            onKeyDown={(event) => {
-                                if (event.target !== event.currentTarget) return;
-                                if (event.key === "Enter" || event.key === " ") {
-                                    event.preventDefault();
-                                    setEditingId(config.id);
-                                }
-                            }}
+            {currentFolder ? (
+                <>
+                    {/* 文件夹名已经在顶上标题栏里了，这里不再写一遍大字 */}
+                    <div className="flex justify-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setMoveSelection(new Set())}
+                            className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] bg-black px-4 text-xs font-bold text-white transition-all hover:bg-gray-800 active:scale-95"
                         >
-                            <div className="min-w-0 flex flex-col gap-1">
-                                <span className="truncate text-[calc(14.4px*var(--app-text-scale,1))] font-bold leading-tight text-[var(--c-text-title)]">{config.name || config.provider}</span>
-                                <span className="menu-desc truncate">{config.defaultModel || config.provider || "未设置模型"}</span>
+                            <FolderInput size={15} strokeWidth={1.8} />
+                            <span>移入配置</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => openFolderNameDialog({ mode: "rename", id: currentFolder.id })}
+                            className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] border border-black/10 bg-white px-4 text-xs font-bold text-gray-800 transition-all hover:bg-gray-50 active:scale-95"
+                        >
+                            <Pencil size={15} strokeWidth={1.8} />
+                            <span>重命名</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setConfirmDeleteFolderId(currentFolder.id)}
+                            className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] border border-black/10 bg-white px-4 text-xs font-bold text-[var(--c-danger)] transition-all hover:bg-gray-50 active:scale-95"
+                        >
+                            <Trash2 size={15} strokeWidth={1.8} />
+                            <span>删除文件夹</span>
+                        </button>
+                    </div>
+                    {(() => {
+                        const inside = grouped.inFolder(currentFolder.id);
+                        const insidePinned = inside.filter(c => c.pinned);
+                        const insideRest = inside.filter(c => !c.pinned);
+                        return inside.length === 0 ? (
+                            <div className="ui-empty mt-2">
+                                <div className="ui-icon-circle">
+                                    <Folder size={24} />
+                                </div>
+                                <span className="menu-label font-semibold">文件夹是空的</span>
+                                <span className="menu-desc text-center max-w-[240px] !mt-0">
+                                    点「移入配置」把已有的 API 配置放进来，或者在这里直接新建。
+                                </span>
                             </div>
-                            <div className="flex gap-2 shrink-0 items-center justify-end">
-                                <button
-                                    type="button"
-                                    onClick={(event) => {
-                                        event.stopPropagation();
-                                        setEditingId(config.id);
-                                    }}
-                                    className="ui-link-btn"
-                                >
-                                    <FileEdit size={18} />
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={(event) => {
-                                        event.stopPropagation();
-                                        setConfirmDeleteId(config.id);
-                                    }}
-                                    className="ui-link-btn"
-                                    data-variant="danger"
-                                >
-                                    <Trash2 size={18} />
-                                </button>
+                        ) : (
+                            <div className="grid grid-cols-2 gap-3">
+                                {reorder.order("inside-pinned", insidePinned).map(c => renderConfigCard(c, "inside-pinned", insidePinned.map(x => x.id)))}
+                                {reorder.order("inside", insideRest).map(c => renderConfigCard(c, "inside", insideRest.map(x => x.id)))}
                             </div>
+                        );
+                    })()}
+                </>
+            ) : (
+                <>
+                    <div className="flex items-center">
+                        <h2 className="m-0 mx-2 ts-28 font-bold italic leading-none text-black">API Settings</h2>
+                    </div>
+
+                    {configs.length === 0 && folders.length === 0 ? (
+                        <div className="ui-empty">
+                            <div className="ui-icon-circle">
+                                <AlertCircle size={24} />
+                            </div>
+                            <span className="menu-label font-semibold">没有 API 配置</span>
+                            <span className="menu-desc max-w-[240px]">
+                                配置 API 密钥和模型以连接到 AI 服务。
+                            </span>
+                            <button onClick={addConfig} className="ui-btn ui-btn-primary rounded-[20px] mt-2">
+                                <Plus size={16} /> 添加配置
+                            </button>
                         </div>
-                    ))}
-                </div>
+                    ) : (
+                        <div className="grid grid-cols-2 gap-3">
+                            {/* 置顶的放最上面，在文件夹里的也会出现在这里 */}
+                            {reorder.order("pinned", grouped.pinned).map(c => renderConfigCard(c, "pinned", grouped.pinned.map(x => x.id)))}
+                            {reorder.order("folders", folders).map(folder => {
+                                const inside = grouped.inFolder(folder.id);
+                                return (
+                                    <div
+                                        key={folder.id}
+                                        {...reorder.itemProps("folders", folder.id, folders.map(f => f.id))}
+                                        className="ui-config-card min-w-0 cursor-pointer"
+                                        style={{ aspectRatio: "3 / 2", padding: "12px", justifyContent: "space-between" }}
+                                        role="button"
+                                        tabIndex={0}
+                                        aria-label={`打开文件夹 ${folder.name}`}
+                                        onClick={() => setCurrentFolderId(folder.id)}
+                                        onKeyDown={(event) => {
+                                            if (event.target !== event.currentTarget) return;
+                                            if (event.key === "Enter" || event.key === " ") {
+                                                event.preventDefault();
+                                                setCurrentFolderId(folder.id);
+                                            }
+                                        }}
+                                    >
+                                        <div className="min-w-0 flex flex-col gap-1.5">
+                                            <div className="min-w-0 flex items-center gap-[6px]">
+                                                <Folder size={16} className="shrink-0" />
+                                                <span className="truncate text-[calc(14.4px*var(--app-text-scale,1))] font-bold leading-tight text-[var(--c-text-title)]">{folder.name}</span>
+                                            </div>
+                                            <span className="menu-desc truncate">
+                                                {inside.length > 0 ? inside.map(c => c.name || c.provider).join("、") : "空文件夹"}
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className="menu-desc ts-12">配置 {inside.length}</span>
+                                            <ChevronRight size={16} className="opacity-40" />
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            {reorder.order("unfiled", grouped.unfiled).map(c => renderConfigCard(c, "unfiled", grouped.unfiled.map(x => x.id)))}
+                        </div>
+                    )}
+                </>
             )}
 
             {editingId && (
@@ -304,6 +526,25 @@ export function ApiSettings() {
                                                 onChange={(e) => updateConfig(config.id, { name: e.target.value })}
                                                 placeholder="例如: 我的 OpenAI"
                                             />
+                                        </div>
+                                        {folders.length > 0 && (
+                                            <div className="flex flex-col gap-1">
+                                                <label className="menu-desc ml-1">所在文件夹</label>
+                                                <select
+                                                    value={config.folderId && folders.some(f => f.id === config.folderId) ? config.folderId : ""}
+                                                    onChange={(e) => updateConfig(config.id, { folderId: e.target.value || undefined })}
+                                                    className="ui-select"
+                                                >
+                                                    <option value="">未分类</option>
+                                                    {folders.map(folder => (
+                                                        <option key={folder.id} value={folder.id}>{folder.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        )}
+                                        <div className="ui-toggle-row">
+                                            <span className="menu-label font-medium">置顶</span>
+                                            <Toggle checked={config.pinned === true} onChange={(v) => updateConfig(config.id, { pinned: v || undefined })} />
                                         </div>
                                         <div className="flex flex-col gap-1">
                                             <label className="menu-desc ml-1">服务商 (Provider)</label>
@@ -452,6 +693,97 @@ export function ApiSettings() {
                     </div>
                 </div>
             )}
+
+            {folderNameDialog && (
+                <ContentDialog
+                    title={folderNameDialog.mode === "create" ? "新建文件夹" : "重命名文件夹"}
+                    confirmLabel={folderNameDialog.mode === "create" ? "新建" : "保存"}
+                    cancelLabel="取消"
+                    onConfirm={submitFolderName}
+                    onCancel={() => setFolderNameDialog(null)}
+                >
+                    <input
+                        type="text"
+                        value={folderNameDraft}
+                        maxLength={40}
+                        autoFocus
+                        placeholder="文件夹名称"
+                        onChange={(e) => setFolderNameDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                                e.preventDefault();
+                                submitFolderName();
+                            }
+                        }}
+                        className="ui-input w-full"
+                    />
+                </ContentDialog>
+            )}
+
+            {confirmDeleteFolderId && (
+                <ConfirmDialog
+                    title="删除文件夹？"
+                    message="只删文件夹，里面的 API 配置不会删除，会回到未分类。"
+                    icon={AlertCircle}
+                    variant="danger"
+                    confirmLabel="删除文件夹"
+                    cancelLabel="取消"
+                    onConfirm={() => {
+                        removeFolder(confirmDeleteFolderId);
+                        setConfirmDeleteFolderId(null);
+                    }}
+                    onCancel={() => setConfirmDeleteFolderId(null)}
+                />
+            )}
+
+            {moveSelection && currentFolder && (() => {
+                const candidates = configs.filter(c => c.folderId !== currentFolder.id);
+                const folderName = (config: ApiConfig) => folders.find(f => f.id === config.folderId)?.name ?? "未分类";
+                return (
+                    <BottomSheet title={`移入「${currentFolder.name}」`} onClose={() => setMoveSelection(null)}>
+                        <div className="flex flex-col gap-2">
+                            {candidates.length === 0 ? (
+                                <div className="menu-desc text-center py-6">没有别的配置可以移进来了</div>
+                            ) : (
+                                <div className="flex max-h-[50vh] flex-col gap-1 overflow-y-auto">
+                                    {candidates.map(config => {
+                                        const checked = moveSelection.has(config.id);
+                                        return (
+                                            <button
+                                                key={config.id}
+                                                type="button"
+                                                className="binding-sheet-option"
+                                                data-selected={checked}
+                                                aria-pressed={checked}
+                                                onClick={() => setMoveSelection(prev => {
+                                                    const next = new Set(prev ?? []);
+                                                    if (next.has(config.id)) next.delete(config.id); else next.add(config.id);
+                                                    return next;
+                                                })}
+                                            >
+                                                <span className="binding-sheet-check">{checked && <Check size={15} />}</span>
+                                                <span className="binding-sheet-option-text">{config.name || config.provider}</span>
+                                                <span className="binding-sheet-option-meta">{folderName(config)}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                            <button
+                                type="button"
+                                className="ui-btn ui-btn-primary w-full"
+                                disabled={moveSelection.size === 0}
+                                onClick={() => {
+                                    moveConfigsToFolder(moveSelection, currentFolder.id);
+                                    setMoveSelection(null);
+                                }}
+                            >
+                                <FolderInput size={16} /> 移入{moveSelection.size > 0 ? `（${moveSelection.size}）` : ""}
+                            </button>
+                        </div>
+                    </BottomSheet>
+                );
+            })()}
 
             {confirmDeleteId && (
                 <ConfirmDialog

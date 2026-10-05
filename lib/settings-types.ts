@@ -4,6 +4,10 @@ export type SettingItemMeta = {
     description?: string;
     createdAt: number;
     updatedAt: number;
+    /** 置顶：排在所有地方的最前面（世界书在文件夹里的也会出现在最外层） */
+    pinned?: boolean;
+    /** 设置页里拖出来的位置；IndexedDB 读回来是按 id 排的，靠它还原顺序（lib/list-order） */
+    sortIndex?: number;
 };
 
 // --- WorldBook ---
@@ -155,6 +159,10 @@ export type ApiConfig = {
     enableImageRecognition: boolean;
     enableImageGeneration: boolean;
     preventEmptyGenerateRambling?: boolean;
+    /** 置顶：排在所有地方的最前面，在文件夹里的也会出现在最外层 */
+    pinned?: boolean;
+    /** 所在文件夹（lib/api-config-folders）；没有或文件夹已删就是未分类 */
+    folderId?: string;
 };
 
 // --- VoiceApiConfig (migrated from voice-settings.tsx) ---

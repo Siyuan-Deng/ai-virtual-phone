@@ -866,6 +866,22 @@
   gap: 12px;
 }
 
+/* 设置页卡片长按拖动排序（components/settings/use-long-press-reorder）：
+   长按不弹系统菜单、不选中文字；拖起来的那张浮在上面、带投影 */
+[data-reorder-id] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+[data-reorder-id][data-dragging="true"] {
+  position: relative;
+  z-index: 30;
+  pointer-events: none;
+  box-shadow: 0 14px 32px rgba(0,0,0,0.16);
+  will-change: transform;
+}
+
 .ui-group-card {
   background: var(--c-card);
   backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));

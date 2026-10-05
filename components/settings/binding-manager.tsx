@@ -689,6 +689,8 @@ export function BindingManager() {
         return (
             <>
                 {unsetRow}
+                {/* 置顶的放最上面（在文件夹里的也会出现在这里） */}
+                {grouped.pinned.map(bookRow)}
                 {folders.map(folder => {
                     const count = grouped.inFolder(folder.id).filter(book => selectedIds.includes(book.id)).length;
                     return (

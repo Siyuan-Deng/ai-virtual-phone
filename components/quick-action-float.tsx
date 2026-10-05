@@ -631,7 +631,7 @@ export function QuickActionFloat() {
                                                         </button>
                                                     );
                                                 })}
-                                                {(folders.length > 0 ? grouped.unfiled : worldBooks).map(bookChip)}
+                                                {(folders.length > 0 ? [...grouped.pinned, ...grouped.unfiled] : worldBooks).map(bookChip)}
                                             </>
                                         );
                                     })()}
