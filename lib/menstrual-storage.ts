@@ -297,6 +297,32 @@ export function cancelFinishCurrentPeriod(dateText = formatIsoDate(new Date())):
   return { config: nextConfig, records: nextRecords, restored: true };
 }
 
+/** 改一条经期记录的起止日期；和别的记录、和正在进行的这次重叠都不行 */
+export function updateMenstrualRecord(
+  recordId: string,
+  startDate: string,
+  endDate: string,
+): { records: MenstrualRecord[]; error?: string } {
+  const records = loadMenstrualRecords();
+  if (!records.some(record => record.id === recordId)) return { records, error: "这条记录已经不在了" };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return { records, error: "请选好开始和结束日期" };
+  }
+  if (endDate < startDate) return { records, error: "结束日期不能早于开始日期" };
+  const overlap = records.find(record => record.id !== recordId && startDate <= record.endDate && endDate >= record.startDate);
+  if (overlap) return { records, error: `和 ${overlap.startDate} 至 ${overlap.endDate} 那条记录重叠了` };
+  const activeStart = loadMenstrualConfig().currentPeriodStartDate;
+  // 正在进行的这次从 activeStart 一直算到现在，结束在它之后的都会撞上
+  if (activeStart && endDate >= activeStart) {
+    return { records, error: "和正在进行的这次经期重叠了" };
+  }
+  const now = new Date().toISOString();
+  const next = saveMenstrualRecords(records.map(record => (
+    record.id === recordId ? { ...record, startDate, endDate, updatedAt: now } : record
+  )));
+  return { records: next };
+}
+
 export function deleteMenstrualRecord(recordId: string): MenstrualRecord[] {
   const records = loadMenstrualRecords();
   return saveMenstrualRecords(records.filter(entry => entry.id !== recordId));
@@ -539,18 +565,18 @@ export function describeMenstrualStatus(
   const start = config.currentPeriodStartDate;
   if (start && start <= today && !isMenstrualPeriodStale(config, today)) {
     const day = daysBetween(start, today) + 1;
-    return day <= config.periodLength ? `${userName}正在经期，第${day}天。` : `${userName}经期第${day}天，还没记录结束。`;
+    return day <= config.periodLength ? `${userName} 正在经期，第${day}天。` : `${userName} 经期第${day}天，还没记录结束。`;
   }
   const recorded = records.find(record => record.startDate <= today && today <= record.endDate);
-  if (recorded) return `${userName}正在经期，第${daysBetween(recorded.startDate, today) + 1}天。`;
+  if (recorded) return `${userName} 正在经期，第${daysBetween(recorded.startDate, today) + 1}天。`;
   if (!start && records.length === 0) return null;
   if (buildMenstrualDayMap(today, today, records, config).get(today)?.type === "predicted_period") {
-    return `${userName}不在经期，按预测这几天可能会来。`;
+    return `${userName} 不在经期，按预测这几天可能会来。`;
   }
   const next = getNextPredictedPeriodStart(records, config, today);
-  if (!next) return `${userName}不在经期。`;
+  if (!next) return `${userName} 不在经期。`;
   const [, month, date] = next.split("-").map(Number);
-  return `${userName}不在经期，下次预计${month}月${date}日。`;
+  return `${userName} 不在经期，下次预计${month}月${date}日。`;
 }
 
 export function getMenstrualSummary(records: MenstrualRecord[], config: MenstrualConfig, targetDate = formatIsoDate(new Date())) {

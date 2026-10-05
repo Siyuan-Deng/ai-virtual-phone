@@ -1007,7 +1007,7 @@ function periodStatusForPayload(payload: LlmRequestPayload): string | null {
     const appId = payload.purpose === "story" ? "story" : "chat";
     const userName = resolveUserIdentity(ids.length === 1 ? ids[0] : undefined, appId)?.name || "用户";
     const status = describeMenstrualStatus(loadMenstrualRecords(), config, userName);
-    return status ? `${PERIOD_MARKER} ${status}只作背景，别每轮都提。` : null;
+    return status ? `${PERIOD_MARKER} ${status}` : null;
 }
 
 // ── hook 织入 ──

@@ -1410,38 +1410,76 @@
   color: var(--c-calendar-sel-fg);
 }
 
-.calendar-period-care-avatars {
+.calendar-period-care-picker-head {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
 }
 
-.calendar-period-care-avatar {
-  border: none;
+.calendar-period-care-picker-actions {
+  display: flex;
+  gap: 12px;
+  padding-right: 4px;
+}
+
+.calendar-period-care-picker-actions button {
+  border: 0;
   background: none;
+  padding: 0;
+  color: var(--c-calendar-sub);
+  font: inherit;
+  font-size: calc(11.5px * var(--app-text-scale, 1));
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* 只列名字，不垫底色，和面板融在一起；角色多了在框里滑 */
+.calendar-period-care-list {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  padding: 6px;
-  border-radius: 12px;
-  font-size: calc(10.5px * var(--app-text-scale, 1));
-  color: var(--c-calendar-sub);
-  max-width: 64px;
+  max-height: 228px;
+  overflow-y: auto;
 }
 
-.calendar-period-care-avatar span {
-  white-space: nowrap;
+.calendar-period-care-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 4px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--c-calendar-ink);
+  font-size: calc(13px * var(--app-text-scale, 1));
+}
+
+.calendar-period-care-row + .calendar-period-care-row {
+  border-top: 1px solid var(--c-calendar-hair);
+}
+
+.calendar-period-care-row-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
+  white-space: nowrap;
 }
 
-.calendar-period-care-avatar[data-active="true"] {
-  background: var(--c-calendar-surface-2);
-  color: var(--c-calendar-ink);
-  font-weight: 600;
+.calendar-period-care-row-check {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--c-calendar-faint);
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+
+.calendar-period-care-row[data-active="true"] .calendar-period-care-row-check {
+  background: var(--c-calendar-ev-rose-fg);
+  box-shadow: none;
 }
 
 .calendar-menstrual-empty {
@@ -1480,11 +1518,6 @@
   gap: 1px;
 }
 
-.calendar-menstrual-modal-item strong {
-  font-size: calc(12.5px * var(--app-text-scale, 1));
-  font-weight: 700;
-}
-
 .calendar-menstrual-modal-item span {
   font-size: calc(10px * var(--app-text-scale, 1));
   color: var(--c-calendar-sub);
@@ -1504,6 +1537,55 @@
 .calendar-menstrual-modal-delete:hover {
   color: var(--c-danger);
   background: var(--c-calendar-surface-2);
+}
+
+.calendar-menstrual-modal-icon {
+  border: none;
+  background: none;
+  color: var(--c-calendar-faint);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 8px;
+  display: inline-flex;
+  flex: none;
+}
+
+.calendar-menstrual-modal-icon:hover {
+  color: var(--c-calendar-ink);
+  background: var(--c-calendar-surface-2);
+}
+
+.calendar-menstrual-modal-icon[data-variant="primary"] {
+  color: var(--c-calendar-ev-rose-fg);
+}
+
+/* 改一条记录的起止日期 */
+.calendar-menstrual-modal-item > .calendar-menstrual-record-edit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+}
+
+.calendar-menstrual-record-edit label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.calendar-menstrual-record-edit input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--c-calendar-sheet);
+  color: var(--c-calendar-ink);
+  font: inherit;
+  font-size: calc(12px * var(--app-text-scale, 1));
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── 动效降级 ── */

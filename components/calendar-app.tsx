@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Check, ChevronLeft, ChevronRight, HeartPulse, Plus, Trash2, Wand2, X } from "lucide-react";
+import { Bot, Check, ChevronLeft, ChevronRight, HeartPulse, Pencil, Plus, Trash2, Wand2, X } from "lucide-react";
 import { Avatar } from "./ui/primitives";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
@@ -42,6 +42,7 @@ import {
   loadMenstrualRecords,
   saveMenstrualConfig,
   startCurrentPeriod,
+  updateMenstrualRecord,
   validateMenstrualSettings,
   type MenstrualRecord,
 } from "@/lib/menstrual-storage";
@@ -623,7 +624,22 @@ export function PhoneCalendarApp({
     setMenstrualRecords(loadMenstrualRecords());
   };
 
+  // 周期设置里正在改的那条经期记录
+  const [editingRecord, setEditingRecord] = useState<{ id: string; startDate: string; endDate: string } | null>(null);
+  const saveRecordEdit = () => {
+    if (!editingRecord) return;
+    const result = updateMenstrualRecord(editingRecord.id, editingRecord.startDate, editingRecord.endDate);
+    if (result.error) {
+      onNotice?.(result.error);
+      return;
+    }
+    setMenstrualRecords(result.records);
+    setEditingRecord(null);
+    onNotice?.("经期记录已更新");
+  };
+
   const openMenstrualSettings = () => {
+    setEditingRecord(null);
     setMenstrualDraft({
       cycleLength: String(menstrualConfig.cycleLength),
       periodLength: String(menstrualConfig.periodLength),
@@ -633,6 +649,9 @@ export function PhoneCalendarApp({
     });
     setShowMenstrualSettings(true);
   };
+
+  const periodCareSelectedCount = periodCareCharacterOptions
+    .filter(option => menstrualDraft.periodCareCharacterIds.includes(option.characterId)).length;
 
   const togglePeriodCareCharacter = (characterId: string) => {
     setMenstrualDraft(prev => {
@@ -1120,21 +1139,35 @@ export function PhoneCalendarApp({
                     </div>
 
                     <div className="calendar-menstrual-care-section">
-                      <label className="menu-desc ml-1">选择角色</label>
+                      <div className="calendar-period-care-picker-head">
+                        <label className="menu-desc ml-1">选择角色 · 已选 {periodCareSelectedCount} 位</label>
+                        {periodCareCharacterOptions.length > 0 ? (
+                          <span className="calendar-period-care-picker-actions">
+                            <button
+                              type="button"
+                              onClick={() => setMenstrualDraft(prev => ({ ...prev, periodCareCharacterIds: periodCareCharacterOptions.map(option => option.characterId) }))}
+                            >全选</button>
+                            <button type="button" onClick={() => setMenstrualDraft(prev => ({ ...prev, periodCareCharacterIds: [] }))}>清空</button>
+                          </span>
+                        ) : null}
+                      </div>
                       {periodCareCharacterOptions.length > 0 ? (
-                        <div className="calendar-period-care-avatars">
+                        <div className="calendar-period-care-list">
                           {periodCareCharacterOptions.map(option => {
                             const selected = menstrualDraft.periodCareCharacterIds.includes(option.characterId);
                             return (
                               <button
                                 key={option.characterId}
                                 type="button"
-                                className="calendar-period-care-avatar"
+                                className="calendar-period-care-row"
                                 data-active={selected ? "true" : undefined}
+                                aria-pressed={selected}
                                 onClick={() => togglePeriodCareCharacter(option.characterId)}
                               >
-                                <Avatar src={option.avatar || undefined} name={option.name} size="md" />
-                                <span>{option.name}</span>
+                                <span className="calendar-period-care-row-name">{option.name}</span>
+                                <span className="calendar-period-care-row-check" aria-hidden="true">
+                                  {selected ? <Check size={12} strokeWidth={3} /> : null}
+                                </span>
                               </button>
                             );
                           })}
@@ -1149,14 +1182,48 @@ export function PhoneCalendarApp({
 
               {menstrualRecords.length > 0 ? (
                 <div className="calendar-menstrual-modal-history">
-                  <label className="menu-desc ml-1">最近完成的经期</label>
+                  <label className="menu-desc ml-1">经期记录</label>
                   <div className="calendar-menstrual-modal-list">
-                    {menstrualRecords.slice(0, 4).map(record => (
+                    {menstrualRecords.slice(0, 4).map(record => (editingRecord?.id === record.id ? (
+                      <div key={record.id} className="calendar-menstrual-modal-item">
+                        <div className="calendar-menstrual-record-edit">
+                          <label>
+                            <span>开始</span>
+                            <input
+                              type="date"
+                              value={editingRecord.startDate}
+                              onChange={e => setEditingRecord(prev => (prev ? { ...prev, startDate: e.target.value } : prev))}
+                            />
+                          </label>
+                          <label>
+                            <span>结束</span>
+                            <input
+                              type="date"
+                              value={editingRecord.endDate}
+                              onChange={e => setEditingRecord(prev => (prev ? { ...prev, endDate: e.target.value } : prev))}
+                            />
+                          </label>
+                        </div>
+                        <button type="button" className="calendar-menstrual-modal-icon" onClick={() => setEditingRecord(null)} aria-label="取消编辑">
+                          <X size={14} />
+                        </button>
+                        <button type="button" className="calendar-menstrual-modal-icon" data-variant="primary" onClick={saveRecordEdit} aria-label="保存记录">
+                          <Check size={14} />
+                        </button>
+                      </div>
+                    ) : (
                       <div key={record.id} className="calendar-menstrual-modal-item">
                         <div>
-                          <strong>{formatSimpleDate(record.startDate)} - {formatSimpleDate(record.endDate)}</strong>
                           <span>{record.startDate} 至 {record.endDate}</span>
                         </div>
+                        <button
+                          type="button"
+                          className="calendar-menstrual-modal-icon"
+                          onClick={() => setEditingRecord({ id: record.id, startDate: record.startDate, endDate: record.endDate })}
+                          aria-label="编辑记录"
+                        >
+                          <Pencil size={14} />
+                        </button>
                         <button
                           type="button"
                           className="calendar-menstrual-modal-delete"
@@ -1170,7 +1237,7 @@ export function PhoneCalendarApp({
                           <Trash2 size={14} />
                         </button>
                       </div>
-                    ))}
+                    )))}
                   </div>
                 </div>
               ) : (
