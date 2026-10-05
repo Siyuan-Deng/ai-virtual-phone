@@ -2513,7 +2513,21 @@
   position: absolute;
   inset: 0;
   z-index: 100;
-  background: var(--c-page-body-bg);
+  /* 不垫卡片：整页直接用卡片的底色（标题栏跟着变），输入框才不会和灰底糊成一片。
+     只改这两处底色，不动 --c-page-body-bg：关着的开关轨道用的就是它 */
+  --c-header-bg: var(--c-panel);
+  background: var(--c-panel);
+}
+
+.calendar-settings-layer .page-body {
+  background: var(--c-panel);
+}
+
+.calendar-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px var(--ui-padding) 40px;
 }
 
 /* ── 编辑弹窗里插件加的那几栏（重复日程 / 备注 / 待办清单），尺寸照插件 .ucal-field ── */
