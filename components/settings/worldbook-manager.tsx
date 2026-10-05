@@ -13,10 +13,13 @@ import {
 import { loadCharacters } from "@/lib/character-storage";
 import type { WorldBookConfig, WorldBookEntry } from "@/lib/settings-types";
 import {
+    buildWorldBookRootEntries,
     createWorldBookFolder,
     groupWorldBooksByFolder,
     loadWorldBookFolders,
+    loadWorldBookRootOrder,
     saveWorldBookFolders,
+    saveWorldBookRootOrder,
     type WorldBookFolder,
 } from "@/lib/worldbook-folders";
 import { applyGroupOrder } from "@/lib/list-order";
@@ -43,6 +46,8 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
     const [folderNameDraft, setFolderNameDraft] = useState("");
     const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState<string | null>(null);
     const [moveSelection, setMoveSelection] = useState<Set<string> | null>(null);
+    /** 最外层文件夹和世界书混排的顺序（长按拖出来的） */
+    const [rootOrder, setRootOrder] = useState<string[]>([]);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -56,6 +61,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
             setActiveBookId(loaded[0]?.id || "");
         }
         setFolders(loadWorldBookFolders());
+        setRootOrder(loadWorldBookRootOrder());
         setIsLoaded(true);
     }, []);
 
@@ -71,11 +77,15 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
 
     const currentFolder = currentFolderId ? folders.find(f => f.id === currentFolderId) ?? null : null;
 
-    // 长按卡片拖动排序：文件夹之间、置顶的之间、普通的之间各自换位置
+    // 长按卡片拖动排序：最外层的文件夹和世界书混在一起排；置顶的之间、文件夹里面各自排
     const reorder = useLongPressReorder((group, orderedIds) => {
-        if (group === "folders") {
+        if (group === "root") {
             const byId = new Map(folders.map(f => [f.id, f]));
-            persistFolders(orderedIds.map(id => byId.get(id)).filter((f): f is WorldBookFolder => Boolean(f)));
+            const orderedFolders = orderedIds.map(id => byId.get(id)).filter((f): f is WorldBookFolder => Boolean(f));
+            if (orderedFolders.length === folders.length) persistFolders(orderedFolders);
+            persist(applyGroupOrder(books, orderedIds.filter(id => !byId.has(id))));
+            setRootOrder(orderedIds);
+            saveWorldBookRootOrder(orderedIds);
             return;
         }
         persist(applyGroupOrder(books, orderedIds));
@@ -700,18 +710,14 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                             {(() => {
                                 const grouped = groupWorldBooksByFolder(books, folders);
                                 const pinnedIds = grouped.pinned.map(b => b.id);
-                                const folderIds = folders.map(f => f.id);
-                                const unfiledIds = grouped.unfiled.map(b => b.id);
-                                return (
-                                    <>
-                                        {/* 置顶的放最上面，在文件夹里的也会出现在这里 */}
-                                        {reorder.order("pinned", grouped.pinned).map(book => renderBookCard(book, "pinned", pinnedIds))}
-                                        {reorder.order("folders", folders).map(folder => {
-                                            const inside = grouped.inFolder(folder.id);
-                                            return (
+                                const rootEntries = buildWorldBookRootEntries(books, folders, rootOrder);
+                                const rootIds = rootEntries.map(entry => entry.id);
+                                const renderFolderCard = (folder: WorldBookFolder) => {
+                                    const inside = grouped.inFolder(folder.id);
+                                    return (
                                                 <div
                                                     key={folder.id}
-                                                    {...reorder.itemProps("folders", folder.id, folderIds)}
+                                                    {...reorder.itemProps("root", folder.id, rootIds)}
                                                     className="ui-config-card min-w-0 cursor-pointer"
                                                     style={{ aspectRatio: "3 / 2", padding: "12px", justifyContent: "space-between" }}
                                                     role="button"
@@ -740,9 +746,16 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                                         <ChevronLeft size={16} className="opacity-40" style={{ transform: "rotate(180deg)" }} />
                                                     </div>
                                                 </div>
-                                            );
-                                        })}
-                                        {reorder.order("unfiled", grouped.unfiled).map(book => renderBookCard(book, "unfiled", unfiledIds))}
+                                    );
+                                };
+                                return (
+                                    <>
+                                        {/* 置顶的放最上面，在文件夹里的也会出现在这里 */}
+                                        {reorder.order("pinned", grouped.pinned).map(book => renderBookCard(book, "pinned", pinnedIds))}
+                                        {/* 文件夹和世界书混在一起，按拖出来的顺序 */}
+                                        {reorder.order("root", rootEntries).map(entry => (
+                                            entry.folder ? renderFolderCard(entry.folder) : entry.item ? renderBookCard(entry.item, "root", rootIds) : null
+                                        ))}
                                     </>
                                 );
                             })()}
@@ -811,14 +824,6 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                     </div>
                                 )}
 
-                                <div className="flex items-center justify-between gap-3">
-                                    <label className="menu-label ts-13 font-semibold ml-1">置顶</label>
-                                    <Toggle
-                                        checked={activeBook.pinned === true}
-                                        onChange={(value) => updateBook(activeBook.id, { pinned: value || undefined })}
-                                    />
-                                </div>
-
                                 <div className="flex flex-col gap-2">
                                     <label className="menu-label ts-13 font-semibold ml-1">简介描述</label>
                                     <textarea
@@ -827,6 +832,14 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                         placeholder="简介描述..."
                                         rows={2}
                                         className="ui-textarea resize-none"
+                                    />
+                                </div>
+
+                                <div className="flex items-center justify-between gap-3">
+                                    <label className="menu-label ts-13 font-semibold ml-1">置顶</label>
+                                    <Toggle
+                                        checked={activeBook.pinned === true}
+                                        onChange={(value) => updateBook(activeBook.id, { pinned: value || undefined })}
                                     />
                                 </div>
                             </div>

@@ -1256,14 +1256,6 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                                             />
                                         </div>
 
-                                        <div className="flex items-center justify-between gap-3">
-                                            <label className="menu-label ts-13 font-semibold ml-1">置顶</label>
-                                            <Toggle
-                                                checked={preset.pinned === true}
-                                                onChange={(value) => updatePreset(preset.id, { pinned: value || undefined })}
-                                            />
-                                        </div>
-
                                         <div className="flex flex-col gap-2">
                                             <label className="menu-label ts-13 font-semibold ml-1">简介描述</label>
                                             <textarea
@@ -1493,6 +1485,14 @@ export function PresetManager({ isActive = true }: { isActive?: boolean } = {}) 
                                                     </div>
                                                 </div>
                                             )}
+                                        </div>
+
+                                        <div className="flex items-center justify-between gap-3">
+                                            <label className="menu-label ts-13 font-semibold ml-1">置顶</label>
+                                            <Toggle
+                                                checked={preset.pinned === true}
+                                                onChange={(value) => updatePreset(preset.id, { pinned: value || undefined })}
+                                            />
                                         </div>
                                 </div>
 

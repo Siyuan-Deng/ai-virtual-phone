@@ -8,7 +8,7 @@ import { Check, ChevronLeft, ChevronRight, Folder, Save, Trash2, X } from "lucid
 import { Avatar } from "@/components/ui/primitives";
 import type { Character } from "@/lib/character-types";
 import { loadApiConfigs, loadPresets, loadRegexes, loadWorldBooks } from "@/lib/settings-storage";
-import { groupWorldBooksByFolder, loadWorldBookFolders } from "@/lib/worldbook-folders";
+import { buildWorldBookRootEntries, groupWorldBooksByFolder, loadWorldBookFolders, loadWorldBookRootOrder } from "@/lib/worldbook-folders";
 import type {
   StoryExtraBindings,
   StoryExtraConfig,
@@ -296,8 +296,47 @@ export function StoryBindingPicker({
   const usedFolders = folders.filter((folder) => grouped.inFolder(folder.id).length > 0);
   const [openFolderId, setOpenFolderId] = useState<string | null>(null);
   const openFolder = openFolderId ? usedFolders.find((folder) => folder.id === openFolderId) : undefined;
-  // 置顶的放最外层最上面（在文件夹里的也会出现）
-  const visibleOptions = openFolder ? grouped.inFolder(openFolder.id) : usedFolders.length > 0 ? [...grouped.pinned, ...grouped.unfiled] : options;
+  // 最外层跟世界书设置页一样：置顶的在最上面（在文件夹里的也会出现），然后文件夹和世界书按拖出来的顺序混排
+  const rootEntries = useMemo(() => {
+    if (usedFolders.length === 0) return null;
+    const used = new Set(usedFolders.map((folder) => folder.id));
+    return buildWorldBookRootEntries(options, folders, loadWorldBookRootOrder())
+      .filter((entry) => entry.item || (entry.folder && used.has(entry.folder.id)));
+  }, [options, folders, usedFolders]);
+
+  const optionRow = (option: Option) => {
+    const on = Boolean(selected?.includes(option.id));
+    return (
+      <button
+        key={option.id}
+        type="button"
+        className="story-option-row"
+        data-active={on ? "true" : undefined}
+        onClick={() => {
+          if (!multi) {
+            setIds([option.id]);
+            onClose();
+            return;
+          }
+          const current = selected ?? [];
+          setIds(on ? current.filter((id) => id !== option.id) : [...current, option.id]);
+        }}
+      >
+        <span>{option.name}</span>
+        {on ? <Check size={15} /> : null}
+      </button>
+    );
+  };
+
+  const folderRow = (folder: { id: string; name: string }) => {
+    const count = grouped.inFolder(folder.id).filter((option) => selected?.includes(option.id)).length;
+    return (
+      <button key={folder.id} type="button" className="story-option-row story-option-folder" onClick={() => setOpenFolderId(folder.id)}>
+        <span className="story-option-folder-name"><Folder size={15} />{folder.name}</span>
+        <span className="story-option-folder-meta">{count > 0 ? `已选 ${count}` : null}<ChevronRight size={15} /></span>
+      </button>
+    );
+  };
 
   const setIds = (next: string[] | undefined) => {
     if (kind === "api") onChange({ ...bindings, apiConfigId: next?.[0] });
@@ -326,41 +365,16 @@ export function StoryBindingPicker({
                 <span>跟随剧情</span>
                 {selected === undefined ? <Check size={15} /> : null}
               </button>
-              {usedFolders.map((folder) => {
-                const count = grouped.inFolder(folder.id).filter((option) => selected?.includes(option.id)).length;
-                return (
-                  <button key={folder.id} type="button" className="story-option-row story-option-folder" onClick={() => setOpenFolderId(folder.id)}>
-                    <span className="story-option-folder-name"><Folder size={15} />{folder.name}</span>
-                    <span className="story-option-folder-meta">{count > 0 ? `已选 ${count}` : null}<ChevronRight size={15} /></span>
-                  </button>
-                );
-              })}
+              {rootEntries ? (
+                <>
+                  {grouped.pinned.map(optionRow)}
+                  {rootEntries.map((entry) => (entry.item ? optionRow(entry.item) : entry.folder ? folderRow(entry.folder) : null))}
+                </>
+              ) : null}
             </>
           )}
           {options.length === 0 ? <div className="story-sheet-empty">还没有可选的{label}</div> : null}
-          {visibleOptions.map((option) => {
-            const on = Boolean(selected?.includes(option.id));
-            return (
-              <button
-                key={option.id}
-                type="button"
-                className="story-option-row"
-                data-active={on ? "true" : undefined}
-                onClick={() => {
-                  if (!multi) {
-                    setIds([option.id]);
-                    onClose();
-                    return;
-                  }
-                  const current = selected ?? [];
-                  setIds(on ? current.filter((id) => id !== option.id) : [...current, option.id]);
-                }}
-              >
-                <span>{option.name}</span>
-                {on ? <Check size={15} /> : null}
-              </button>
-            );
-          })}
+          {openFolder ? grouped.inFolder(openFolder.id).map(optionRow) : rootEntries ? null : options.map(optionRow)}
           {multi ? (
             <div className="story-drawer-note">勾了几个就只用这几个；一个都不勾就是不用{label}。</div>
           ) : null}

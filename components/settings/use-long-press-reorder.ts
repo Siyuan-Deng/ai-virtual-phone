@@ -3,7 +3,8 @@
 // 设置页卡片的「长按拖动排序」（API 配置、世界书、预设共用）：
 // 按住约 0.4 秒卡片浮起来跟着手指走，经过别的卡片就和它换位置，松手才保存。
 // 只在同一组里换（置顶的、文件夹、普通卡片各是一组）。按下后手指先动了就当是在滚动列表，不进拖动。
-// 拖的是卡片本身（不复制一份，主题样式不会丢）；靠近列表上下边缘时自动滚动。
+// 拖的是卡片本身（不复制一份，主题样式不会丢）；别的卡片滑过去让位；
+// 靠近列表上下边缘（上边缘算在顶部标题栏下面）时自动滚动。
 
 import {
     useCallback,
@@ -21,6 +22,7 @@ const MOVE_TOLERANCE_PX = 8;
 const EDGE_PX = 56;
 const MAX_SCROLL_SPEED = 14;
 const LIFT_SCALE = 1.03;
+const SHIFT_MS = 180;
 
 type Session = {
     group: string;
@@ -60,9 +62,16 @@ function swallowClick(event: MouseEvent) {
     event.stopPropagation();
 }
 
+function groupElements(group: string): HTMLElement[] {
+    return Array.from(document.querySelectorAll<HTMLElement>("[data-reorder-group]"))
+        .filter((el) => el.dataset.reorderGroup === group);
+}
+
 export function useLongPressReorder(onCommit: (group: string, orderedIds: string[]) => void) {
     const sessionRef = useRef<Session | null>(null);
     const [preview, setPreview] = useState<Preview | null>(null);
+    /** 换位置前各卡片在哪（画面上的位置），换完以后从那里滑到新位置 */
+    const shiftFromRef = useRef<Map<HTMLElement, DOMRect> | null>(null);
     const commitRef = useRef(onCommit);
     commitRef.current = onCommit;
 
@@ -90,6 +99,9 @@ export function useLongPressReorder(onCommit: (group: string, orderedIds: string
         const next = moveId(s.order, s.id, targetId);
         if (next === s.order) return;
         s.order = next;
+        shiftFromRef.current = new Map(
+            groupElements(s.group).filter((el) => el !== s.el).map((el) => [el, el.getBoundingClientRect()]),
+        );
         setPreview({ group: s.group, order: next, draggingId: s.id });
     }, []);
 
@@ -103,6 +115,11 @@ export function useLongPressReorder(onCommit: (group: string, orderedIds: string
         if (!s.active) return;
         document.removeEventListener("touchmove", blockTouchScroll);
         for (const prop of ["transform", "transition", "pointer-events", "z-index", "position"]) s.el.style.removeProperty(prop);
+        shiftFromRef.current = null;
+        for (const el of groupElements(s.group)) {
+            el.style.removeProperty("transform");
+            el.style.removeProperty("transition");
+        }
         // 松手后紧跟着的那次 click 别把卡片点开
         window.addEventListener("click", swallowClick, true);
         window.setTimeout(() => window.removeEventListener("click", swallowClick, true), 350);
@@ -115,9 +132,11 @@ export function useLongPressReorder(onCommit: (group: string, orderedIds: string
         if (!s?.active) return;
         const scroller = s.scroller;
         if (scroller) {
-            const rect = scroller === document.scrollingElement
+            const box = scroller === document.scrollingElement
                 ? { top: 0, bottom: window.innerHeight }
                 : scroller.getBoundingClientRect();
+            // 设置页的标题栏是浮在列表上面的，列表靠 padding-top 让出位置：上边缘从标题栏底下算
+            const rect = { top: box.top + (parseFloat(getComputedStyle(scroller).paddingTop) || 0), bottom: box.bottom };
             let speed = 0;
             if (s.y < rect.top + EDGE_PX) speed = -MAX_SCROLL_SPEED * Math.min(1, (rect.top + EDGE_PX - s.y) / EDGE_PX);
             else if (s.y > rect.bottom - EDGE_PX) speed = MAX_SCROLL_SPEED * Math.min(1, (s.y - (rect.bottom - EDGE_PX)) / EDGE_PX);
@@ -203,8 +222,30 @@ export function useLongPressReorder(onCommit: (group: string, orderedIds: string
         };
     }, [activate, finish, hitTest, placeCard]);
 
-    // 别的卡片让位以后布局变了，被拖的卡片要重新对准手指
+    // 换完位置：别的卡片从原来的位置滑过去（FLIP），被拖的卡片重新对准手指
     useLayoutEffect(() => {
+        const from = shiftFromRef.current;
+        shiftFromRef.current = null;
+        if (from) {
+            for (const [el, first] of from) {
+                if (!el.isConnected) continue;
+                el.style.transition = "none";
+                el.style.removeProperty("transform");
+                const last = el.getBoundingClientRect();
+                const dx = first.left - last.left;
+                const dy = first.top - last.top;
+                if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+                    el.style.removeProperty("transition");
+                    continue;
+                }
+                el.style.transform = `translate(${dx}px, ${dy}px)`;
+                void el.offsetWidth;
+                requestAnimationFrame(() => {
+                    el.style.transition = `transform ${SHIFT_MS}ms ease`;
+                    el.style.removeProperty("transform");
+                });
+            }
+        }
         placeCard();
     }, [preview, placeCard]);
 

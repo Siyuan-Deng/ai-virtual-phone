@@ -61,7 +61,7 @@ import {
     ensureSettingsStorageHydrated,
 } from "@/lib/settings-storage";
 import { hydrateKvDb } from "@/lib/kv-db";
-import { groupWorldBooksByFolder, loadWorldBookFolders, type WorldBookFolder } from "@/lib/worldbook-folders";
+import { buildWorldBookRootEntries, groupWorldBooksByFolder, loadWorldBookFolders, loadWorldBookRootOrder, type WorldBookFolder } from "@/lib/worldbook-folders";
 import type { UserIdentity } from "@/components/settings/user-identity";
 import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
@@ -686,12 +686,17 @@ export function BindingManager() {
                 </>
             );
         }
+        const usedFolderIds = new Set(folders.map(folder => folder.id));
+        // 最外层跟世界书设置页一样：置顶的在最上面，然后文件夹和世界书按拖出来的顺序混排
+        const rootEntries = buildWorldBookRootEntries(worldBooks, worldBookFolders, loadWorldBookRootOrder())
+            .filter(entry => entry.item || (entry.folder && usedFolderIds.has(entry.folder.id)));
         return (
             <>
                 {unsetRow}
-                {/* 置顶的放最上面（在文件夹里的也会出现在这里） */}
                 {grouped.pinned.map(bookRow)}
-                {folders.map(folder => {
+                {rootEntries.map(entry => {
+                    if (entry.item) return bookRow(entry.item);
+                    const folder = entry.folder!;
                     const count = grouped.inFolder(folder.id).filter(book => selectedIds.includes(book.id)).length;
                     return (
                         <button
@@ -710,7 +715,6 @@ export function BindingManager() {
                         </button>
                     );
                 })}
-                {grouped.unfiled.map(bookRow)}
             </>
         );
     };

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
 import { BookOpen, Check, ChevronDown, ChevronLeft, Code2, Folder, SlidersHorizontal, UserRound, X } from "lucide-react";
-import { groupWorldBooksByFolder, loadWorldBookFolders, type WorldBookFolder } from "@/lib/worldbook-folders";
+import { buildWorldBookRootEntries, groupWorldBooksByFolder, loadWorldBookFolders, loadWorldBookRootOrder, type WorldBookFolder } from "@/lib/worldbook-folders";
 import { CHAT_APP_SETTINGS_UPDATED_EVENT, loadChatAppSettings } from "@/lib/chat-storage";
 import {
     getFloatingDockState,
@@ -616,7 +616,15 @@ export function QuickActionFloat() {
                                         }
                                         return (
                                             <>
-                                                {folders.map(folder => {
+                                                {/* 跟世界书设置页一样：置顶的在最前，然后文件夹和世界书按拖出来的顺序混排 */}
+                                                {folders.length > 0 ? grouped.pinned.map(bookChip) : null}
+                                                {(folders.length > 0
+                                                    ? buildWorldBookRootEntries(worldBooks, worldBookFolders, loadWorldBookRootOrder())
+                                                    : worldBooks.map(book => ({ id: book.id, item: book, folder: undefined }))
+                                                ).map(entry => {
+                                                    if (entry.item) return bookChip(entry.item);
+                                                    const folder = entry.folder;
+                                                    if (!folder || !folders.some(used => used.id === folder.id)) return null;
                                                     const count = grouped.inFolder(folder.id).filter(book => selectedWorldBookIds.includes(book.id)).length;
                                                     return (
                                                         <button
@@ -631,7 +639,6 @@ export function QuickActionFloat() {
                                                         </button>
                                                     );
                                                 })}
-                                                {(folders.length > 0 ? [...grouped.pinned, ...grouped.unfiled] : worldBooks).map(bookChip)}
                                             </>
                                         );
                                     })()}

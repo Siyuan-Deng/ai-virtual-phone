@@ -46,12 +46,17 @@ export function moveId(ids: string[], fromId: string, toId: string): string[] {
     return next;
 }
 
-/** 没有文件夹层级的平铺列表（各处的选择框）照设置页的样子排：置顶的、各文件夹里的（按文件夹顺序）、其余的 */
-export function orderLikeFolders<T extends OrderedItem & { folderId?: string }>(items: T[], folders: { id: string }[]): T[] {
-    if (folders.length === 0) return items;
-    const known = new Set(folders.map((folder) => folder.id));
-    const pinned = items.filter((item) => item.pinned === true);
-    const inFolders = folders.flatMap((folder) => items.filter((item) => item.pinned !== true && item.folderId === folder.id));
-    const rest = items.filter((item) => item.pinned !== true && !(item.folderId && known.has(item.folderId)));
-    return [...pinned, ...inFolders, ...rest];
+
+/** 存过的顺序 + 现在实际有的项：存过的按存的排；新冒出来的插在它默认位置后面那个已知项前面（没有就放最后） */
+export function mergeOrder(saved: string[], current: string[]): string[] {
+    const currentSet = new Set(current);
+    const result = saved.filter((id, index) => currentSet.has(id) && saved.indexOf(id) === index);
+    const placed = new Set(result);
+    current.forEach((id, index) => {
+        if (placed.has(id)) return;
+        const anchor = current.slice(index + 1).find((next) => placed.has(next));
+        result.splice(anchor ? result.indexOf(anchor) : result.length, 0, id);
+        placed.add(id);
+    });
+    return result;
 }

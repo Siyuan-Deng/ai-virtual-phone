@@ -5,8 +5,15 @@ import { Plus, RefreshCw, Rss, AlertCircle, FileEdit, Trash2, X, Check, Copy, Fo
 import { SettingsContext } from "../phone-settings-app";
 import { useLongPressReorder } from "./use-long-press-reorder";
 import { applyGroupOrder } from "@/lib/list-order";
-import { groupItemsByFolder } from "@/lib/item-folders";
-import { createApiConfigFolder, loadApiConfigFolders, saveApiConfigFolders, type ApiConfigFolder } from "@/lib/api-config-folders";
+import { buildRootEntries, groupItemsByFolder } from "@/lib/item-folders";
+import {
+    createApiConfigFolder,
+    loadApiConfigFolders,
+    loadApiConfigRootOrder,
+    saveApiConfigFolders,
+    saveApiConfigRootOrder,
+    type ApiConfigFolder,
+} from "@/lib/api-config-folders";
 import type { ApiConfig } from "@/lib/settings-types";
 import { loadApiConfigs, removeApiConfigReferences, saveApiConfigs } from "@/lib/settings-storage";
 import { generateEmbedding, isEmbeddingModelName } from "@/lib/memory-embedding";
@@ -45,6 +52,8 @@ export function ApiSettings() {
     const [folderNameDraft, setFolderNameDraft] = useState("");
     const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState<string | null>(null);
     const [moveSelection, setMoveSelection] = useState<Set<string> | null>(null);
+    /** 最外层文件夹和配置混排的顺序（长按拖出来的） */
+    const [rootOrder, setRootOrder] = useState<string[]>([]);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [isNewConfig, setIsNewConfig] = useState(false);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -66,6 +75,7 @@ export function ApiSettings() {
             saveApiConfigs(DEFAULT_CONFIGS);
         }
         setFolders(loadApiConfigFolders());
+        setRootOrder(loadApiConfigRootOrder());
         setIsLoaded(true);
     }, []);
 
@@ -92,11 +102,15 @@ export function ApiSettings() {
         }
     }, [currentFolder, setOverrideBack, setSubpageTitle]);
 
-    // 长按卡片拖动排序：文件夹之间、置顶的之间、普通的之间各自换位置
+    // 长按卡片拖动排序：最外层的文件夹和配置混在一起排；置顶的之间、文件夹里面各自排
     const reorder = useLongPressReorder((group, orderedIds) => {
-        if (group === "folders") {
+        if (group === "root") {
             const byId = new Map(folders.map(f => [f.id, f]));
-            persistFolders(orderedIds.map(id => byId.get(id)).filter((f): f is ApiConfigFolder => Boolean(f)));
+            const orderedFolders = orderedIds.map(id => byId.get(id)).filter((f): f is ApiConfigFolder => Boolean(f));
+            if (orderedFolders.length === folders.length) persistFolders(orderedFolders);
+            persist(applyGroupOrder(configs, orderedIds.filter(id => !byId.has(id))));
+            setRootOrder(orderedIds);
+            saveApiConfigRootOrder(orderedIds);
             return;
         }
         persist(applyGroupOrder(configs, orderedIds));
@@ -384,6 +398,8 @@ export function ApiSettings() {
     );
 
     const grouped = groupItemsByFolder(configs, folders);
+    const rootEntries = buildRootEntries(configs, folders, rootOrder);
+    const rootIds = rootEntries.map(entry => entry.id);
 
     return (
         <div className="flex flex-col gap-6">
@@ -461,12 +477,16 @@ export function ApiSettings() {
                         <div className="grid grid-cols-2 gap-3">
                             {/* 置顶的放最上面，在文件夹里的也会出现在这里 */}
                             {reorder.order("pinned", grouped.pinned).map(c => renderConfigCard(c, "pinned", grouped.pinned.map(x => x.id)))}
-                            {reorder.order("folders", folders).map(folder => {
+                            {/* 文件夹和配置混在一起，按拖出来的顺序 */}
+                            {reorder.order("root", rootEntries).map(entry => {
+                                if (entry.item) return renderConfigCard(entry.item, "root", rootIds);
+                                const folder = entry.folder;
+                                if (!folder) return null;
                                 const inside = grouped.inFolder(folder.id);
                                 return (
                                     <div
                                         key={folder.id}
-                                        {...reorder.itemProps("folders", folder.id, folders.map(f => f.id))}
+                                        {...reorder.itemProps("root", folder.id, rootIds)}
                                         className="ui-config-card min-w-0 cursor-pointer"
                                         style={{ aspectRatio: "3 / 2", padding: "12px", justifyContent: "space-between" }}
                                         role="button"
@@ -497,7 +517,6 @@ export function ApiSettings() {
                                     </div>
                                 );
                             })}
-                            {reorder.order("unfiled", grouped.unfiled).map(c => renderConfigCard(c, "unfiled", grouped.unfiled.map(x => x.id)))}
                         </div>
                     )}
                 </>
@@ -542,10 +561,6 @@ export function ApiSettings() {
                                                 </select>
                                             </div>
                                         )}
-                                        <div className="ui-toggle-row">
-                                            <span className="menu-label font-medium">置顶</span>
-                                            <Toggle checked={config.pinned === true} onChange={(v) => updateConfig(config.id, { pinned: v || undefined })} />
-                                        </div>
                                         <div className="flex flex-col gap-1">
                                             <label className="menu-desc ml-1">服务商 (Provider)</label>
                                             <select
@@ -653,6 +668,11 @@ export function ApiSettings() {
                                                 <span className="break-all leading-[1.5]">{testResult[config.id].message}</span>
                                             </Alert>
                                         )}
+
+                                        <div className="ui-toggle-row mt-2">
+                                            <span className="menu-label font-medium">置顶</span>
+                                            <Toggle checked={config.pinned === true} onChange={(v) => updateConfig(config.id, { pinned: v || undefined })} />
+                                        </div>
 
                                         <div
                                             className="ui-toggle-row mt-2 overflow-visible"

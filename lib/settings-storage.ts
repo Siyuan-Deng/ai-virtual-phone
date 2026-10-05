@@ -39,9 +39,10 @@ import {
     readRegexesCache, writeRegexesCache,
     hydrateSettingsDb,
 } from "./settings-db";
-import { orderLikeFolders, pinnedFirst, withSortIndex } from "./list-order";
-import { loadApiConfigFolders } from "./api-config-folders";
-import { loadWorldBookFolders } from "./worldbook-folders";
+import { pinnedFirst, withSortIndex } from "./list-order";
+import { orderLikeFolders } from "./item-folders";
+import { loadApiConfigFolders, loadApiConfigRootOrder } from "./api-config-folders";
+import { loadWorldBookFolders, loadWorldBookRootOrder } from "./worldbook-folders";
 import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
 import { isGenerationParameterKey } from "./generation-parameters";
 
@@ -414,7 +415,7 @@ export function parsePresetFromJson(text: string, fallbackName: string = "导入
 
 export function loadWorldBooks(): WorldBookConfig[] {
     if (typeof window === "undefined") return [];
-    return orderLikeFolders(pinnedFirst([...readWorldBooksCache()]), loadWorldBookFolders());
+    return orderLikeFolders(pinnedFirst([...readWorldBooksCache()]), loadWorldBookFolders(), loadWorldBookRootOrder());
 }
 
 export function saveWorldBooks(books: WorldBookConfig[]): void {
@@ -639,7 +640,9 @@ export function loadApiConfigs(): ApiConfig[] {
         const raw = kvGet(API_CONFIGS_KEY);
         if (!raw) return [];
         const parsed = JSON.parse(raw) as LegacyApiConfig[];
-        return Array.isArray(parsed) ? orderLikeFolders(pinnedFirst(parsed.map(normalizeApiConfig)), loadApiConfigFolders()) : [];
+        return Array.isArray(parsed)
+            ? orderLikeFolders(pinnedFirst(parsed.map(normalizeApiConfig)), loadApiConfigFolders(), loadApiConfigRootOrder())
+            : [];
     } catch {
         return [];
     }
