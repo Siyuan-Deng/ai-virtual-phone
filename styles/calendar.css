@@ -1414,16 +1414,23 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 选择角色：名字 + 两列勾选（知道 / 关心），列名点一下整列全选或全不选 */
+/* 角色名单：从关心模块里单独拿出来的一块，同样的底。
+   名字 + 两列勾选（知情 / 关心），列名点一下整列全选或全不选 */
+.calendar-period-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px 6px;
+  border-radius: 14px;
+  background: var(--c-calendar-surface);
+}
+
 .calendar-period-care-picker-head {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 4px;
   padding-right: 4px;
-}
-
-.calendar-period-care-picker-head > .menu-desc {
-  flex: 1;
 }
 
 .calendar-period-care-column {
@@ -1493,6 +1500,13 @@
 .calendar-period-care-check[data-active="true"] > span {
   background: var(--c-calendar-ev-rose-fg);
   box-shadow: none;
+}
+
+/* 「让TA关心我的经期」关着时，关心那一列变淡、点不了 */
+.calendar-period-care-column:disabled,
+.calendar-period-care-check:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .calendar-menstrual-empty {

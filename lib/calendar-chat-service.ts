@@ -5,7 +5,7 @@
 //   3. 勾完待办后的回应：不回应 / 立即回应 / 和下一次互动合并
 //   4. 角色改用户日历（插件 4.3）：获准的角色在私聊回复里带一个隐藏动作块，新增 / 修改日程、待办、备忘录，
 //      不能删除；聊天里在动作对应的位置插一条「X修改了你的日历：…」
-//   5. 经期状态：经期设置里勾了「知道」的角色，平时聊天也知道你在不在经期（只一行）
+//   5. 经期状态：经期设置里勾了「知情」的角色，平时聊天也知道你在不在经期（只一行）
 // 规则、文案沿用插件；挂在和插件同一条 llm.request / llm.response 总线上（照手记日记回应的做法，
 // 用一个内部 id，不会出现在插件管理页）。
 //
@@ -999,7 +999,8 @@ function applyCharacterCalendarActions(payload: LlmResponsePayload): LlmResponse
 function periodStatusForPayload(payload: LlmRequestPayload): string | null {
     if (!SUPPORTED_PURPOSES.has(payload.purpose)) return null;
     const config = loadMenstrualConfig();
-    if (!config.enabled || !config.periodCareEnabled) return null;
+    // 知情和「让TA关心我的经期」那个开关无关，只看名单
+    if (!config.enabled) return null;
     const selected = new Set(config.periodKnowCharacterIds.map(String));
     const ids = payloadCharacterIds(payload).map(String);
     // 群聊里只要有一个没选的角色就不给，免得没获准的角色也看到

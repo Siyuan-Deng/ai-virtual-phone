@@ -130,7 +130,6 @@ export function MenstrualSettingsSection({
           </span>
           <span className="calendar-menstrual-care-toggle-copy">
             <strong>让TA关心我的经期</strong>
-            <span>只显示已有聊天会话的角色</span>
           </span>
           <span className="calendar-menstrual-pill-switch" aria-hidden="true">
             <span className="calendar-menstrual-pill-switch-thumb" />
@@ -144,55 +143,59 @@ export function MenstrualSettingsSection({
               {numberInput("periodCareLeadDays", 1, 3, "ui-input calendar-period-care-lead-input")}
               <span>天</span>
             </label>
-
-            <div className="calendar-menstrual-care-section">
-              <div className="calendar-period-care-picker-head">
-                <span className="menu-desc ml-1">选择角色</span>
-                {options.length > 0 ? (
-                  <>
-                    <button type="button" className="calendar-period-care-column" onClick={() => toggleColumn("periodKnowCharacterIds")}>知道</button>
-                    <button type="button" className="calendar-period-care-column" onClick={() => toggleColumn("periodCareCharacterIds")}>关心</button>
-                  </>
-                ) : null}
-              </div>
-              {options.length > 0 ? (
-                <div className="calendar-period-care-list">
-                  {options.map(option => {
-                    const knows = config.periodKnowCharacterIds.includes(option.characterId);
-                    const cares = config.periodCareCharacterIds.includes(option.characterId);
-                    return (
-                      <div key={option.characterId} className="calendar-period-care-row">
-                        <span className="calendar-period-care-row-name">{option.name}</span>
-                        <button
-                          type="button"
-                          className="calendar-period-care-check"
-                          data-active={knows ? "true" : undefined}
-                          aria-pressed={knows}
-                          aria-label={`${option.name}知道我的经期状况`}
-                          onClick={() => toggleCharacter("periodKnowCharacterIds", option.characterId)}
-                        >
-                          <span>{knows ? <Check size={12} strokeWidth={3} /> : null}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="calendar-period-care-check"
-                          data-active={cares ? "true" : undefined}
-                          aria-pressed={cares}
-                          aria-label={`${option.name}主动关心我的经期`}
-                          onClick={() => toggleCharacter("periodCareCharacterIds", option.characterId)}
-                        >
-                          <span>{cares ? <Check size={12} strokeWidth={3} /> : null}</span>
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="calendar-menstrual-empty">已有聊天会话的角色会显示在这里。</div>
-              )}
-            </div>
           </div>
         ) : null}
+      </div>
+
+      {/* 角色名单单独一块：知情（平时聊天带一行经期状态）不受上面开关影响；关心要开关开着才有用 */}
+      <div className="calendar-period-roster">
+        {options.length > 0 ? (
+          <>
+            <div className="calendar-period-care-picker-head">
+              <button type="button" className="calendar-period-care-column" onClick={() => toggleColumn("periodKnowCharacterIds")}>知情</button>
+              <button
+                type="button"
+                className="calendar-period-care-column"
+                disabled={!config.periodCareEnabled}
+                onClick={() => toggleColumn("periodCareCharacterIds")}
+              >关心</button>
+            </div>
+            <div className="calendar-period-care-list">
+              {options.map(option => {
+                const knows = config.periodKnowCharacterIds.includes(option.characterId);
+                const cares = config.periodCareCharacterIds.includes(option.characterId);
+                return (
+                  <div key={option.characterId} className="calendar-period-care-row">
+                    <span className="calendar-period-care-row-name">{option.name}</span>
+                    <button
+                      type="button"
+                      className="calendar-period-care-check"
+                      data-active={knows ? "true" : undefined}
+                      aria-pressed={knows}
+                      aria-label={`${option.name}知情`}
+                      onClick={() => toggleCharacter("periodKnowCharacterIds", option.characterId)}
+                    >
+                      <span>{knows ? <Check size={12} strokeWidth={3} /> : null}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="calendar-period-care-check"
+                      data-active={cares ? "true" : undefined}
+                      aria-pressed={cares}
+                      aria-label={`${option.name}关心`}
+                      disabled={!config.periodCareEnabled}
+                      onClick={() => toggleCharacter("periodCareCharacterIds", option.characterId)}
+                    >
+                      <span>{cares ? <Check size={12} strokeWidth={3} /> : null}</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <div className="calendar-menstrual-empty">已有聊天会话的角色会显示在这里。</div>
+        )}
       </div>
 
       {records.length > 0 ? (
