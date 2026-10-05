@@ -37,6 +37,7 @@ import {
   finishCurrentPeriod,
   deleteMenstrualRecord,
   getMenstrualSummary,
+  isMenstrualPeriodStale,
   loadMenstrualConfig,
   loadMenstrualRecords,
   saveMenstrualConfig,
@@ -670,19 +671,23 @@ export function PhoneCalendarApp({
     onNotice?.("周期设置已保存");
   };
 
+  // 上一次忘了点「经期走了」、已经过去很久：这一天可以直接点「经期来了」（上一次按设定天数自动结束），
+  // 也不能再在这一天点「经期走了」——那会记下一次长达好几周的经期
+  const stalePeriodSelected = isMenstrualPeriodStale(menstrualConfig, selectedDate);
   const canCancelSelectedStart = menstrualSummary.currentPeriodStartDate === selectedDate && !menstrualSummary.todayFinished;
-  const canStartSelected = !menstrualSummary.todayStarted && !menstrualSummary.isPeriodActive;
+  const canStartSelected = !menstrualSummary.todayStarted && (!menstrualSummary.isPeriodActive || stalePeriodSelected);
   const canCancelSelectedFinish = menstrualSummary.todayFinished;
   const canFinishSelected =
     menstrualSummary.isPeriodActive &&
     !!menstrualSummary.currentPeriodStartDate &&
     selectedDate >= menstrualSummary.currentPeriodStartDate &&
-    !menstrualSummary.todayFinished;
+    !menstrualSummary.todayFinished &&
+    !stalePeriodSelected;
 
   const cycleStateForSelected = cycleMap?.get(selectedDate) ?? null;
   const cycleSummaryLine = cycleStateForSelected
     ? `周期 · ${cycleStateForSelected.label || cycleStateForSelected.shortLabel}`
-    : menstrualSummary.isPeriodActive && menstrualSummary.currentPeriodStartDate
+    : menstrualSummary.isPeriodActive && menstrualSummary.currentPeriodStartDate && !stalePeriodSelected
       ? `本次经期从 ${formatSimpleDate(menstrualSummary.currentPeriodStartDate)} 开始`
       : menstrualSummary.latest
         ? null

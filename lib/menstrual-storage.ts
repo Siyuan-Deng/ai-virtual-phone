@@ -26,6 +26,8 @@ export type MenstrualRecord = {
   endDate: string;
   createdAt: string;
   updatedAt: string;
+  /** 没点「经期走了」、下一次点「经期来了」时自动补的结束；值是那一次的开始日期，撤销那次「来了」时用来还原 */
+  autoClosedBy?: string;
 };
 
 export type MenstrualDayType = "period" | "predicted_period" | "fertile" | "ovulation";
@@ -117,6 +119,16 @@ function getCycleKeyForActualStart(records: MenstrualRecord[], config: Menstrual
   return Math.abs(daysBetween(closest, actualStartDate)) <= 10 ? closest : actualStartDate;
 }
 
+/** 上一次一直没点「经期走了」时，日历过了设定的经期天数就不再画成经期，按钮却还当它在进行中，
+ *  下个月的「经期来了」就点不了。离上次开始满这么多天，就当上次已经按设定天数结束：
+ *  经期最长 10 天、周期最短 21 天，这个区间里不会是同一次经期。 */
+const STALE_PERIOD_AFTER_DAYS = 15;
+
+/** 这一天看来，进行中的那次经期是不是早该结束了（忘了点「经期走了」） */
+export function isMenstrualPeriodStale(config: MenstrualConfig, dateText: string): boolean {
+  return !!config.currentPeriodStartDate && dateText >= addDays(config.currentPeriodStartDate, STALE_PERIOD_AFTER_DAYS);
+}
+
 function formatEndedDistance(daysAfterEnd: number): string {
   return daysAfterEnd <= 0 ? "今天" : `${daysAfterEnd}天前`;
 }
@@ -197,6 +209,21 @@ export function validateMenstrualSettings(input: {
 
 export function startCurrentPeriod(dateText = formatIsoDate(new Date())): MenstrualConfig {
   const current = loadMenstrualConfig();
+  if (current.currentPeriodStartDate && isMenstrualPeriodStale(current, dateText)) {
+    // 上一次忘了点「经期走了」：按设定的经期天数补一条记录（和日历上画出来的一样），再开始这一次
+    const now = new Date().toISOString();
+    saveMenstrualRecords([
+      {
+        id: `menstrual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        startDate: current.currentPeriodStartDate,
+        endDate: addDays(current.currentPeriodStartDate, Math.max(current.periodLength - 1, 0)),
+        createdAt: now,
+        updatedAt: now,
+        autoClosedBy: dateText,
+      },
+      ...loadMenstrualRecords(),
+    ]);
+  }
   return saveMenstrualConfig({
     ...current,
     enabled: true,
@@ -207,7 +234,14 @@ export function startCurrentPeriod(dateText = formatIsoDate(new Date())): Menstr
 export function cancelCurrentPeriodStart(dateText = formatIsoDate(new Date())): MenstrualConfig {
   const current = loadMenstrualConfig();
   if (current.currentPeriodStartDate !== dateText) return current;
-  const hasHistory = loadMenstrualRecords().length > 0;
+  const records = loadMenstrualRecords();
+  // 这次「经期来了」顺手结束了上一次：撤销时把上一次还原成进行中
+  const autoClosed = records.find(record => record.autoClosedBy === dateText);
+  if (autoClosed) {
+    saveMenstrualRecords(records.filter(record => record.id !== autoClosed.id));
+    return saveMenstrualConfig({ ...current, enabled: true, currentPeriodStartDate: autoClosed.startDate });
+  }
+  const hasHistory = records.length > 0;
   return saveMenstrualConfig({
     ...current,
     enabled: hasHistory ? current.enabled : false,
