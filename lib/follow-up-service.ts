@@ -206,7 +206,9 @@ export function scheduleFollowUp(sessionId: string, count: number, stateValues?:
 
 export async function requestBackgroundChatReply(
     sessionId: string,
-    opts?: { skipEmptyGenerateGuard?: boolean },
+    /** noFollowUp：这条是一次性的（比如日历提醒），回完不接焦虑追问。
+     *  追问没回会一直接着追（单个会话最多 10 次，还会挂到服务端兜底），一次提醒发给很多角色时会滚成几百次调用 */
+    opts?: { skipEmptyGenerateGuard?: boolean; noFollowUp?: boolean },
 ): Promise<{ ok: boolean; skipped?: string }> {
     if (backgroundReplyFiringSet.has(sessionId)) return { ok: false, skipped: "already_running" };
     const session = loadChatSessions().find(s => s.id === sessionId);
@@ -233,7 +235,7 @@ export async function requestBackgroundChatReply(
             undefined,
             latestMessages,
         );
-        if (hasVisible) scheduleFollowUp(session.id, 0, stateValues);
+        if (hasVisible && !opts?.noFollowUp) scheduleFollowUp(session.id, 0, stateValues);
         window.dispatchEvent(new CustomEvent("followup-fired", { detail: { sessionId: session.id } }));
         return { ok: true };
     } catch (error: any) {

@@ -118,10 +118,10 @@ function purposeScope(config: CalendarConfig): Set<string> {
     return SUPPORTED_PURPOSES;
 }
 
-/** 从没在「日历知情角色」里保存过时视为全部允许（插件的规则） */
+/** 只认「日历知情角色」里勾了的。从没保存过就是谁都没勾：插件原来当成全部允许，
+ *  结果所有角色（连 NPC）都能看日历，临近提醒也一件事每个角色各发一条 */
 function allowedCharacterIds(extras: CalendarExtras): Set<string> {
-    if (extras.characterAccess === null) return new Set(loadCharacters().map((character) => String(character.id)));
-    return new Set(extras.characterAccess.map(String));
+    return new Set((extras.characterAccess ?? []).map(String));
 }
 
 function payloadCharacterIds(payload: LlmRequestPayload): string[] {
@@ -139,9 +139,8 @@ function payloadCharacterIds(payload: LlmRequestPayload): string[] {
 function canPayloadReadCalendar(payload: LlmRequestPayload, extras: CalendarExtras): boolean {
     const allowed = allowedCharacterIds(extras);
     const ids = payloadCharacterIds(payload).map(String);
-    if (ids.length > 0) return ids.every((id) => allowed.has(id));
-    // 明确保存过权限之后，认不出是谁的请求宁可不给，免得把日历泄露给没授权的角色
-    return extras.characterAccess === null;
+    // 认不出是谁的请求宁可不给，免得把日历泄露给没授权的角色
+    return ids.length > 0 && ids.every((id) => allowed.has(id));
 }
 
 // ── 角色看到的日历内容 ──
@@ -575,8 +574,9 @@ const activeDirectives = new Map<string, string>();
 async function requestDirectedReply(sessionId: string, directive: string): Promise<{ ok: boolean; skipped?: string }> {
     activeDirectives.set(sessionId, directive);
     try {
-        // 这一次不追加「空生成续写」提示：它会让模型「只续写一句、不要开启新事件」，正好把指令压掉
-        return await requestBackgroundChatReply(sessionId, { skipEmptyGenerateGuard: true });
+        // 这一次不追加「空生成续写」提示：它会让模型「只续写一句、不要开启新事件」，正好把指令压掉；
+        // 也不接焦虑追问：提醒 / 待办回应是一次性的
+        return await requestBackgroundChatReply(sessionId, { skipEmptyGenerateGuard: true, noFollowUp: true });
     } finally {
         // 后台回复没跑起来（比如这个会话正在生成）也立刻收回，指令不会漏进别的请求
         activeDirectives.delete(sessionId);
@@ -722,10 +722,11 @@ export async function runCalendarReminderCheck(): Promise<void> {
             }
             if (result.ok) {
                 for (const key of keys) sent[key] = { at: markedAt, status: "sent" };
-            } else if (result.skipped) {
+            } else if (result.skipped && result.skipped !== "cancelled") {
                 // 没跑起来（比如这个会话正在生成别的回复）：撤掉标记，下一分钟再试
                 for (const key of keys) delete sent[key];
             } else {
+                // 报错，或者已经生成了但被取消：都已经调过一次接口，算一次失败，隔 5 分钟再试，最多 3 次
                 for (const key of keys) sent[key] = { at: Date.now(), status: "failed", attempts: previousAttempts + 1 };
             }
             persistSent();

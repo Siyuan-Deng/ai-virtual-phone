@@ -626,10 +626,8 @@ function CompactAccessSelect({ className, options, shortLabels, value, disabled,
 function AccessPanel({ characters, nav, close }: { characters: CalendarToolCharacter[]; nav: CalendarToolNav; close: () => void }) {
     const [initial] = useState(() => loadCalendarExtras());
     const sorted = [...characters].sort((a, b) => String(a.name).localeCompare(String(b.name), "zh-CN"));
-    // 插件的规则：从没配置过时视为全部允许
-    const [selected, setSelected] = useState<Set<string>>(() => new Set(
-        initial.characterAccess === null ? sorted.map((character) => String(character.id)) : initial.characterAccess,
-    ));
+    // 从没保存过就是谁都没勾（插件原来当成全部允许，所有角色都会看日历、都会发提醒）
+    const [selected, setSelected] = useState<Set<string>>(() => new Set(initial.characterAccess ?? []));
     const [reactions, setReactions] = useState<Record<string, TodoReactionMode>>(() => Object.fromEntries(
         Object.entries(initial.todoReactions).map(([id, mode]) => [id, normalizeReaction(mode)]),
     ));

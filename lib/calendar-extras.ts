@@ -86,7 +86,7 @@ export type CalendarExtras = {
     /** 系列 id → 重复规则 */
     series: Record<string, CalendarRecurrenceSeries>;
     memos: CalendarMemoPage[];
-    /** 允许读日历并接收提醒的角色 id；null = 还没配置过（视为全部允许） */
+    /** 允许读日历并接收提醒的角色 id；null = 还没配置过（视为谁都不允许） */
     characterAccess: string[] | null;
     /** 角色 id → 待办完成后的回应方式 */
     todoReactions: Record<string, string>;
