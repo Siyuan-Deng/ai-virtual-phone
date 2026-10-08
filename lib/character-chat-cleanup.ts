@@ -26,6 +26,7 @@ export function removeCharacterFromGroupSession(session: ChatSession, characterI
     const groupAdminIds = session.groupAdminIds?.filter(id => id !== characterId);
     const groupMutes = omitRecordKey(session.groupMutes, characterId);
     const groupVideoBackgrounds = omitRecordKey(session.groupVideoBackgrounds, characterId);
+    const avatarOverrides = omitRecordKey(session.avatarOverrides, characterId);
     const groupOwnerId = session.groupOwnerId === characterId
         ? (session.isSpectator ? participantIds[0] : "self")
         : session.groupOwnerId;
@@ -34,6 +35,7 @@ export function removeCharacterFromGroupSession(session: ChatSession, characterI
         || groupAdminIds?.length !== session.groupAdminIds?.length
         || groupMutes !== session.groupMutes
         || groupVideoBackgrounds !== session.groupVideoBackgrounds
+        || avatarOverrides !== session.avatarOverrides
         || groupOwnerId !== session.groupOwnerId;
 
     if (!changed) return session;
@@ -43,6 +45,7 @@ export function removeCharacterFromGroupSession(session: ChatSession, characterI
         groupAdminIds,
         groupMutes,
         groupVideoBackgrounds,
+        avatarOverrides,
         groupOwnerId,
     };
 }

@@ -5,6 +5,7 @@
 // 只在同一组里换（置顶的、文件夹、普通卡片各是一组）。按下后手指先动了就当是在滚动列表，不进拖动。
 // 拖的是卡片本身（不复制一份，主题样式不会丢）；别的卡片滑过去让位；
 // 靠近列表上下边缘（上边缘算在顶部标题栏下面）时自动滚动。
+// 判断手指压在哪张卡上用的是卡片排好后的位置，不看让位动画画到哪了——不然刚让开的卡还没滑走，手指一抖又换回去。
 
 import {
     useCallback,
@@ -67,11 +68,22 @@ function groupElements(group: string): HTMLElement[] {
         .filter((el) => el.dataset.reorderGroup === group);
 }
 
+/** 列表里看得见的那一段：上边缘从浮在上面的标题栏底下算（列表靠 padding-top 让出标题栏） */
+function visibleBox(scroller: HTMLElement | null): { top: number; bottom: number } {
+    if (!scroller || scroller === document.scrollingElement) return { top: 0, bottom: window.innerHeight };
+    const box = scroller.getBoundingClientRect();
+    return { top: box.top + (parseFloat(getComputedStyle(scroller).paddingTop) || 0), bottom: box.bottom };
+}
+
+type LayoutRect = { left: number; right: number; top: number; bottom: number; scrollTop: number };
+
 export function useLongPressReorder(onCommit: (group: string, orderedIds: string[]) => void) {
     const sessionRef = useRef<Session | null>(null);
     const [preview, setPreview] = useState<Preview | null>(null);
     /** 换位置前各卡片在哪（画面上的位置），换完以后从那里滑到新位置 */
     const shiftFromRef = useRef<Map<HTMLElement, DOMRect> | null>(null);
+    /** 换完位置后各卡片排好的位置（不含让位动画），连同当时列表滚到哪 */
+    const layoutRef = useRef<Map<HTMLElement, LayoutRect>>(new Map());
     const commitRef = useRef(onCommit);
     commitRef.current = onCommit;
 
@@ -92,9 +104,19 @@ export function useLongPressReorder(onCommit: (group: string, orderedIds: string
     const hitTest = useCallback(() => {
         const s = sessionRef.current;
         if (!s?.active) return;
-        const target = document.elementFromPoint(s.x, s.y)?.closest<HTMLElement>("[data-reorder-id]");
-        if (!target || target.dataset.reorderGroup !== s.group) return;
-        const targetId = target.dataset.reorderId;
+        const visible = visibleBox(s.scroller);
+        if (s.y < visible.top || s.y > visible.bottom) return;
+        const scrollTop = s.scroller?.scrollTop ?? 0;
+        const target = groupElements(s.group).find((el) => {
+            if (el === s.el) return false;
+            const stored = layoutRef.current.get(el);
+            const shift = stored ? scrollTop - stored.scrollTop : 0;
+            const rect = stored
+                ? { left: stored.left, right: stored.right, top: stored.top - shift, bottom: stored.bottom - shift }
+                : el.getBoundingClientRect();
+            return s.x >= rect.left && s.x <= rect.right && s.y >= rect.top && s.y <= rect.bottom;
+        });
+        const targetId = target?.dataset.reorderId;
         if (!targetId || targetId === s.id) return;
         const next = moveId(s.order, s.id, targetId);
         if (next === s.order) return;
@@ -116,6 +138,7 @@ export function useLongPressReorder(onCommit: (group: string, orderedIds: string
         document.removeEventListener("touchmove", blockTouchScroll);
         for (const prop of ["transform", "transition", "pointer-events", "z-index", "position"]) s.el.style.removeProperty(prop);
         shiftFromRef.current = null;
+        layoutRef.current.clear();
         for (const el of groupElements(s.group)) {
             el.style.removeProperty("transform");
             el.style.removeProperty("transition");
@@ -132,11 +155,8 @@ export function useLongPressReorder(onCommit: (group: string, orderedIds: string
         if (!s?.active) return;
         const scroller = s.scroller;
         if (scroller) {
-            const box = scroller === document.scrollingElement
-                ? { top: 0, bottom: window.innerHeight }
-                : scroller.getBoundingClientRect();
             // 设置页的标题栏是浮在列表上面的，列表靠 padding-top 让出位置：上边缘从标题栏底下算
-            const rect = { top: box.top + (parseFloat(getComputedStyle(scroller).paddingTop) || 0), bottom: box.bottom };
+            const rect = visibleBox(scroller);
             let speed = 0;
             if (s.y < rect.top + EDGE_PX) speed = -MAX_SCROLL_SPEED * Math.min(1, (rect.top + EDGE_PX - s.y) / EDGE_PX);
             else if (s.y > rect.bottom - EDGE_PX) speed = MAX_SCROLL_SPEED * Math.min(1, (s.y - (rect.bottom - EDGE_PX)) / EDGE_PX);
@@ -227,11 +247,13 @@ export function useLongPressReorder(onCommit: (group: string, orderedIds: string
         const from = shiftFromRef.current;
         shiftFromRef.current = null;
         if (from) {
+            const scrollTop = sessionRef.current?.scroller?.scrollTop ?? 0;
             for (const [el, first] of from) {
                 if (!el.isConnected) continue;
                 el.style.transition = "none";
                 el.style.removeProperty("transform");
                 const last = el.getBoundingClientRect();
+                layoutRef.current.set(el, { left: last.left, right: last.right, top: last.top, bottom: last.bottom, scrollTop });
                 const dx = first.left - last.left;
                 const dy = first.top - last.top;
                 if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {

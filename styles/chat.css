@@ -7899,3 +7899,66 @@
   color: var(--c-danger, #fa5151);
   background: rgba(250, 81, 81, 0.08);
 }
+
+/* 聊天里点头像换头像：圆形选取框（框外压暗），图片可拖动缩放 */
+.chat-avatar-crop-dialog {
+  max-width: min(340px, calc(100vw - 32px));
+}
+
+/* 内容很短，不用滚动；不然按钮的阴影会被裁成一圈方框 */
+.chat-avatar-crop-dialog .modal-body {
+  overflow: visible;
+}
+
+.chat-avatar-crop-stage {
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--c-input);
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.chat-avatar-crop-stage img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  max-width: none;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+.chat-avatar-crop-mask {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.45);
+  outline: 2px solid rgba(255, 255, 255, 0.9);
+  outline-offset: -1px;
+  pointer-events: none;
+}
+
+.chat-avatar-crop-zoom {
+  width: 100%;
+  accent-color: var(--c-text-title);
+}
+
+.chat-avatar-crop-current {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--c-input);
+  color: var(--c-text);
+}
+
+.chat-avatar-crop-current img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}

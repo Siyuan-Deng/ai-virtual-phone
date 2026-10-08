@@ -8,7 +8,10 @@ import { Check, ChevronLeft, ChevronRight, Folder, Save, Trash2, X } from "lucid
 import { Avatar } from "@/components/ui/primitives";
 import type { Character } from "@/lib/character-types";
 import { loadApiConfigs, loadPresets, loadRegexes, loadWorldBooks } from "@/lib/settings-storage";
-import { buildWorldBookRootEntries, groupWorldBooksByFolder, loadWorldBookFolders, loadWorldBookRootOrder } from "@/lib/worldbook-folders";
+import { inheritedCharacterAppApiLabel, loadCharacterAppApiId, saveCharacterAppApiId } from "@/lib/app-api-binding";
+import { loadWorldBookFolders, loadWorldBookRootOrder } from "@/lib/worldbook-folders";
+import { loadApiConfigFolders, loadApiConfigRootOrder } from "@/lib/api-config-folders";
+import { buildPickerEntries } from "@/lib/item-folders";
 import type {
   StoryExtraBindings,
   StoryExtraConfig,
@@ -226,7 +229,12 @@ type Option = { id: string; name: string; folderId?: string; pinned?: boolean };
 
 function bindingOptions(kind: StoryBindingKind): Option[] {
   if (kind === "api") {
-    return loadApiConfigs().map((config) => ({ id: config.id, name: config.name || `${config.provider} · ${config.defaultModel}` }));
+    return loadApiConfigs().map((config) => ({
+      id: config.id,
+      name: config.name || `${config.provider} · ${config.defaultModel}`,
+      folderId: config.folderId,
+      pinned: config.pinned,
+    }));
   }
   if (kind === "preset") return loadPresets().map((preset) => ({ id: preset.id, name: preset.name }));
   if (kind === "worldBooks") return loadWorldBooks().map((book) => ({ id: book.id, name: book.name, folderId: book.folderId, pinned: book.pinned }));
@@ -280,29 +288,32 @@ export function StoryBindingPicker({
   bindings,
   onChange,
   onClose,
+  title,
+  followLabel = "跟随剧情",
 }: {
   kind: StoryBindingKind;
   bindings: StoryExtraBindings;
   onChange: (next: StoryExtraBindings) => void;
   onClose: () => void;
+  /** 默认「番外xx」；剧情正篇自己的绑定用别的标题 */
+  title?: string;
+  /** 不单独绑、跟着上一级走的那一行 */
+  followLabel?: string;
 }) {
   const options = useMemo(() => bindingOptions(kind), [kind]);
   const multi = kind === "worldBooks" || kind === "regexes";
   const selected = selectedBindingIds(kind, bindings);
   const label = BINDING_LABELS[kind];
-  // 世界书有文件夹时分层：外面是文件夹和未分类的，点文件夹进去勾；不同文件夹里的可以同时勾
-  const folders = useMemo(() => (kind === "worldBooks" ? loadWorldBookFolders() : []), [kind]);
-  const grouped = groupWorldBooksByFolder(options, folders);
-  const usedFolders = folders.filter((folder) => grouped.inFolder(folder.id).length > 0);
+  // 世界书、API 有文件夹时分层：外面是置顶的、文件夹和未分类的，点文件夹进去选；不同文件夹里的世界书可以同时勾
+  const folders = useMemo(() => (kind === "worldBooks" ? loadWorldBookFolders() : kind === "api" ? loadApiConfigFolders() : []), [kind]);
   const [openFolderId, setOpenFolderId] = useState<string | null>(null);
-  const openFolder = openFolderId ? usedFolders.find((folder) => folder.id === openFolderId) : undefined;
-  // 最外层跟世界书设置页一样：置顶的在最上面（在文件夹里的也会出现），然后文件夹和世界书按拖出来的顺序混排
+  // 最外层跟设置页一样：置顶的在最上面（在文件夹里的也会出现），然后文件夹和其余的按拖出来的顺序混排
   const rootEntries = useMemo(() => {
-    if (usedFolders.length === 0) return null;
-    const used = new Set(usedFolders.map((folder) => folder.id));
-    return buildWorldBookRootEntries(options, folders, loadWorldBookRootOrder())
-      .filter((entry) => entry.item || (entry.folder && used.has(entry.folder.id)));
-  }, [options, folders, usedFolders]);
+    if (folders.length === 0) return null;
+    return buildPickerEntries(options, folders, kind === "api" ? loadApiConfigRootOrder() : loadWorldBookRootOrder());
+  }, [options, folders, kind]);
+  const inFolder = (folderId: string) => options.filter((option) => option.folderId === folderId);
+  const openFolder = rootEntries && openFolderId ? folders.find((folder) => folder.id === openFolderId) : undefined;
 
   const optionRow = (option: Option) => {
     const on = Boolean(selected?.includes(option.id));
@@ -329,7 +340,7 @@ export function StoryBindingPicker({
   };
 
   const folderRow = (folder: { id: string; name: string }) => {
-    const count = grouped.inFolder(folder.id).filter((option) => selected?.includes(option.id)).length;
+    const count = inFolder(folder.id).filter((option) => selected?.includes(option.id)).length;
     return (
       <button key={folder.id} type="button" className="story-option-row story-option-folder" onClick={() => setOpenFolderId(folder.id)}>
         <span className="story-option-folder-name"><Folder size={15} />{folder.name}</span>
@@ -347,7 +358,7 @@ export function StoryBindingPicker({
 
   return (
     <div className="story-drawer-sheet">
-      <SheetHead title={`番外${label}`} onClose={onClose} />
+      <SheetHead title={title ?? `番外${label}`} onClose={onClose} />
       <div className="story-sheet-body">
         <div className="story-sheet-scroll">
           {openFolder ? (
@@ -362,24 +373,63 @@ export function StoryBindingPicker({
                 data-active={selected === undefined ? "true" : undefined}
                 onClick={() => { setIds(undefined); if (!multi) onClose(); }}
               >
-                <span>跟随剧情</span>
+                <span>{followLabel}</span>
                 {selected === undefined ? <Check size={15} /> : null}
               </button>
-              {rootEntries ? (
-                <>
-                  {grouped.pinned.map(optionRow)}
-                  {rootEntries.map((entry) => (entry.item ? optionRow(entry.item) : entry.folder ? folderRow(entry.folder) : null))}
-                </>
-              ) : null}
+              {rootEntries ? rootEntries.map((entry) => (entry.item ? optionRow(entry.item) : entry.folder ? folderRow(entry.folder) : null)) : null}
             </>
           )}
           {options.length === 0 ? <div className="story-sheet-empty">还没有可选的{label}</div> : null}
-          {openFolder ? grouped.inFolder(openFolder.id).map(optionRow) : rootEntries ? null : options.map(optionRow)}
+          {openFolder ? inFolder(openFolder.id).map(optionRow) : rootEntries ? null : options.map(optionRow)}
           {multi ? (
             <div className="story-drawer-note">勾了几个就只用这几个；一个都不勾就是不用{label}。</div>
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── 剧情正篇自己的 API：就是设置 → 绑定 → 这个角色 → 剧情 里的那一项，两边改的是同一份 ──
+
+/** 这个角色剧情单独绑的 API（没单独绑就是 undefined） */
+export function loadStoryApiOverride(characterId: string): string | undefined {
+  return loadCharacterAppApiId(characterId, "story");
+}
+
+export function saveStoryApiOverride(characterId: string, apiConfigId: string | undefined): void {
+  saveCharacterAppApiId(characterId, "story", apiConfigId);
+}
+
+/** 不单独绑时实际用的那个（全局 → 角色默认 → 剧情应用默认），显示成「继承：xx」 */
+export function storyApiFollowLabel(characterId: string): string {
+  return inheritedCharacterAppApiLabel(characterId, "story");
+}
+
+export function StoryMainBindingsSection({
+  characterId,
+  revision,
+  onOpen,
+}: {
+  characterId: string;
+  /** 绑定改过就变，让这里重新读 */
+  revision: number;
+  onOpen: () => void;
+}) {
+  const value = useMemo(() => {
+    const own = loadStoryApiOverride(characterId);
+    const name = own ? bindingOptions("api").find((option) => option.id === own)?.name : undefined;
+    return name ? { text: name, follow: false } : { text: storyApiFollowLabel(characterId), follow: true };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [characterId, revision]);
+  return (
+    <div className="story-drawer-section">
+      <div className="story-drawer-eyebrow">剧情绑定</div>
+      <button type="button" className="story-bind-row" onClick={onOpen}>
+        <span>{BINDING_LABELS.api}</span>
+        <span data-follow={value.follow ? "true" : undefined}>{value.text}</span>
+        <span aria-hidden="true">›</span>
+      </button>
     </div>
   );
 }
