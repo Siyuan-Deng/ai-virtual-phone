@@ -573,6 +573,12 @@
         .story-composer:focus-within textarea {
           background: var(--c-story-input-inner-focus, rgba(248, 250, 252, 0.94));
         }
+        /* 空着时提示文字只占一行，太长就省略（左边按钮多了输入框会变窄） */
+        .story-composer textarea:placeholder-shown {
+          overflow: hidden;
+          white-space: nowrap;
+          text-overflow: ellipsis;
+        }
         .story-composer textarea::placeholder {
           /* 占位提示：字号更小、颜色更浅 */
           font-size: calc(12px*var(--app-text-scale,1));
@@ -1448,6 +1454,149 @@
           letter-spacing: 0.1em;
         }
 
+        /* === 系统指令：输入栏左边的「指令」开关，打开后输入框发的是系统指令 === */
+        .story-command-toggle {
+          flex: 0 0 auto;
+          height: 36px;
+          padding: 0 12px;
+          border: none;
+          border-radius: 0;
+          background: var(--c-story-input-inner, rgba(248, 250, 252, 0.78));
+          color: var(--c-story-sub, #64748b);
+          font: inherit;
+          font-size: calc(12px*var(--app-text-scale,1));
+          letter-spacing: 0.1em;
+        }
+        .story-command-toggle[data-on="true"] {
+          background: var(--c-story-heading, #1e293b);
+          color: var(--c-story-on-heading, var(--c-story-drawer-top, #ffffff));
+        }
+        .story-composer[data-command="true"] {
+          flex-wrap: wrap;
+        }
+        .story-composer[data-command="true"] textarea {
+          box-shadow: inset 0 0 0 1px var(--c-story-heading, #1e293b);
+        }
+        /* 指令模式时输入框上面一排快捷指令，横着滑 */
+        .story-command-strip {
+          flex: 0 0 100%;
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          padding-bottom: 2px;
+        }
+        .story-command-strip-title {
+          font-size: calc(10.5px*var(--app-text-scale,1));
+          letter-spacing: 0.14em;
+          font-weight: 600;
+          color: var(--c-story-sub, #94a3b8);
+        }
+        .story-command-chips {
+          display: flex;
+          gap: 6px;
+          overflow-x: auto;
+          scrollbar-width: none;
+        }
+        .story-command-chips::-webkit-scrollbar {
+          display: none;
+        }
+        .story-command-chips button {
+          flex: 0 0 auto;
+          max-width: 22em;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          padding: 5px 10px;
+          border: none;
+          border-radius: 0;
+          background: var(--c-story-panel, rgba(255, 255, 255, 0.6));
+          box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+          color: var(--c-story-text, #3a3b3c);
+          font: inherit;
+          font-size: calc(11px*var(--app-text-scale,1));
+        }
+        .story-command-empty {
+          font-size: calc(11px*var(--app-text-scale,1));
+          color: var(--c-story-sub, #94a3b8);
+        }
+        /* 侧栏：快捷指令增删 */
+        .story-command-manage {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          padding: 12px 0 4px;
+        }
+        .story-command-manage-label {
+          font-size: calc(13px*var(--app-text-scale,1));
+          color: var(--c-story-sub, rgba(95, 82, 61, 0.72));
+        }
+        .story-command-list {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .story-command-item {
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          padding: 8px 10px 8px 12px;
+          background: var(--c-story-panel, rgba(255, 255, 255, 0.6));
+          box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+          font-size: calc(13px*var(--app-text-scale,1));
+          line-height: 1.6;
+          color: var(--c-story-text, #4b4335);
+        }
+        .story-command-item span {
+          flex: 1;
+          min-width: 0;
+          white-space: pre-wrap;
+          word-break: break-word;
+        }
+        .story-command-item button {
+          flex: 0 0 auto;
+          display: flex;
+          padding: 3px;
+          border: none;
+          background: none;
+          color: var(--c-story-sub, #94a3b8);
+        }
+        .story-command-add {
+          display: flex;
+          align-items: stretch;
+          gap: 8px;
+        }
+        .story-command-add textarea {
+          flex: 1;
+          min-width: 0;
+          box-sizing: border-box;
+          padding: 8px 12px;
+          border: none;
+          border-radius: 0;
+          outline: none;
+          resize: none;
+          box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.06);
+          background: var(--c-story-css-box-bg, rgba(255, 251, 246, 0.88));
+          color: var(--c-story-text, #4b4335);
+          font: inherit;
+          font-size: calc(13px*var(--app-text-scale,1));
+          line-height: 1.6;
+        }
+        .story-command-add button {
+          flex: 0 0 auto;
+          padding: 0 14px;
+          border: none;
+          border-radius: 0;
+          background: var(--c-story-heading, #1e293b);
+          color: var(--c-story-on-heading, var(--c-story-drawer-top, #ffffff));
+          font: inherit;
+          font-size: calc(12px*var(--app-text-scale,1));
+          letter-spacing: 0.1em;
+        }
+        .story-command-add button:disabled {
+          opacity: 0.4;
+        }
+
         /* === 番外模板面板：从标题栏下沿铺到底 === */
         .story-template-sheet {
           position: absolute;
@@ -1526,6 +1675,43 @@
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 12px;
+        }
+        /* 文风 / 字数 / 场景数 一行三格，文风最宽 */
+        .story-template-triple {
+          grid-template-columns: 1.3fr 1fr 0.8fr;
+        }
+        /* 梗概 / if线设定 共用一个框：上面切换，右边清空当前这一页 */
+        .story-template-tabs {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          margin-bottom: 6px;
+        }
+        .story-template-tabs button {
+          border: none;
+          border-bottom: 2px solid transparent;
+          background: none;
+          padding: 0 0 4px;
+          font: inherit;
+          font-size: calc(11.5px*var(--app-text-scale,1));
+          letter-spacing: 0.12em;
+          font-weight: 600;
+          color: var(--c-story-sub, #94a3b8);
+        }
+        .story-template-tabs button[data-active="true"] {
+          color: var(--c-story-heading, #1e293b);
+          border-bottom-color: var(--c-story-heading, #1e293b);
+        }
+        .story-template-tabs .story-template-clear {
+          margin-left: auto;
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          font-weight: 400;
+          letter-spacing: 0.04em;
+        }
+        .story-template-tabs .story-template-clear:disabled {
+          opacity: 0.4;
         }
         /* 番外方案：标签、下拉和按钮同一行 */
         .story-template-preset .story-template-label {

@@ -14,8 +14,10 @@ export const STORY_EXTRA_PERSONS = PERSONS;
 
 export const DEFAULT_STORY_EXTRA_TEMPLATE: StoryExtraTemplate = {
     content: "",
+    ifLine: "",
     style: "",
     words: "",
+    scenes: "",
     userPerson: "第二人称",
     charPerson: "第三人称",
     extra: "",
@@ -38,8 +40,10 @@ export function normalizeStoryExtraTemplate(value: unknown): StoryExtraTemplate 
     const raw = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
     return {
         content: text(raw.content),
+        ifLine: text(raw.ifLine, 4000),
         style: text(raw.style, 200),
         words: text(raw.words, 40),
+        scenes: text(raw.scenes, 20),
         // 旧版只有一个 person（指 user 的人称）
         userPerson: person(raw.userPerson) ?? person(raw.person) ?? DEFAULT_STORY_EXTRA_TEMPLATE.userPerson,
         charPerson: person(raw.charPerson) ?? DEFAULT_STORY_EXTRA_TEMPLATE.charPerson,
@@ -80,13 +84,19 @@ function cleanWords(value: string): string {
     return value.trim().replace(/字(以上)?$/, "").trim();
 }
 
+/** 场景数：「3」「3个」「三个」都行，统一去掉「个」 */
+export function cleanStoryExtraScenes(value: string): string {
+    return value.trim().replace(/个(场景)?$/, "").trim();
+}
+
 /** 模板拼成发出去的那句指令，格式照用户给的范例：
- *  （$系统指令：现在暂停当前剧情，为我生成一个番外小剧场。不需要记忆区，标题自拟。大概内容为……。
- *   内容要4000字以上，文风……，以第二人称称呼{user}，以第三人称称呼{char}。其它要求）
+ *  （$系统指令：现在暂停当前剧情，为我生成一个番外小剧场。不需要记忆区，标题自拟。大概内容为……。这是一条if线：……。
+ *   内容要4000字以上，文风……，以第二人称称呼{user}，以第三人称称呼{char}。我需要3个不同的场景。其它要求）
  *  哪项没填就省掉那一句。剧情历史不走宏替换，所以名字在这里直接代入。 */
 export function buildStoryExtraInstruction(template: StoryExtraTemplate, names: { user: string; char: string }): string {
     let body = "现在暂停当前剧情，为我生成一个番外小剧场。不需要记忆区，标题自拟。";
     if (template.content.trim()) body += asSentence(`大概内容为${template.content.trim()}`);
+    if (template.ifLine.trim()) body += asSentence(`这是一条if线：${template.ifLine.trim()}`);
     const clauses: string[] = [];
     const words = cleanWords(template.words);
     if (words) clauses.push(`内容要${words}字以上`);
@@ -94,6 +104,8 @@ export function buildStoryExtraInstruction(template: StoryExtraTemplate, names: 
     clauses.push(`以${template.userPerson}称呼${names.user}`);
     clauses.push(`以${template.charPerson}称呼${names.char}`);
     body += `${clauses.join("，")}。`;
+    const scenes = cleanStoryExtraScenes(template.scenes);
+    if (scenes) body += `我需要${scenes}个不同的场景。`;
     if (template.extra.trim()) body += asSentence(template.extra);
     return `（$系统指令：${body}）`;
 }

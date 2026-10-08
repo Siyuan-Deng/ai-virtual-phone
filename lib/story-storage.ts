@@ -12,10 +12,15 @@ export type StoryExtraPerson = "第一人称" | "第二人称" | "第三人称";
 
 /** 番外模板里的几项。用模板发出去的那条用户消息会带着它，标记「从这里开始新的一篇」 */
 export type StoryExtraTemplate = {
+  /** 梗概 */
   content: string;
+  /** if线设定：和正篇不一样的前提（如果……） */
+  ifLine: string;
   style: string;
   /** 字数，原样保存用户填的（「4000」「四千」都行） */
   words: string;
+  /** 要几个不同的场景，原样保存用户填的；空着就不提 */
+  scenes: string;
   /** 用什么人称写 user / char，分开选 */
   userPerson: StoryExtraPerson;
   charPerson: StoryExtraPerson;
@@ -80,6 +85,8 @@ export type StoryMessage = {
   createdAt: string;
   /** 番外：用模板发出的指令，带着当时填的模板 */
   extraOrder?: StoryExtraOrder;
+  /** 系统指令：作为 system 发给模型，不算用户说的话 */
+  instruction?: boolean;
 };
 
 export type StoryProjectionEntry = {

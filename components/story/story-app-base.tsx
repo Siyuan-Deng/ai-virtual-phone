@@ -72,7 +72,9 @@ import {
   StoryExtraBindingsSection,
   StoryExtraOrderCard,
   StoryExtraPresetBar,
+  StoryCommandSettingsSection,
   StoryExtraTemplateSheet,
+  StoryInstructionCard,
   StoryMainBindingsSection,
   StoryNowCard,
   StoryRecentSection,
@@ -83,6 +85,12 @@ import {
   type StoryBindingKind,
 } from "@/components/story/story-extra-ui";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
+import {
+  loadStoryCommandButtonVisible,
+  loadStoryQuickCommands,
+  saveStoryCommandButtonVisible,
+  saveStoryQuickCommands,
+} from "@/lib/story-commands";
 import { STORY_CSS_EXAMPLE } from "@/lib/css-examples";
 import { applyEditOutputRegex } from "@/lib/llm-prompt-assembler";
 import { MacroEngine } from "@/lib/macro-engine";
@@ -178,6 +186,8 @@ type StoryDrawerSheet = { type: "characters" } | { type: "binding"; kind: StoryB
 
 function resizeStoryComposerTextarea(el: HTMLTextAreaElement) {
   el.style.height = "auto";
+  // 空着时不跟着占位提示换行长高（左边多了按钮，提示文字一长就会折成两行）
+  if (!el.value) return;
   el.style.height = Math.min(el.scrollHeight, 120) + "px";
 }
 
@@ -239,6 +249,9 @@ const StoryComposer = memo(function StoryComposer({
   onSend,
   onStop,
   onOpenTemplate,
+  showCommandButton,
+  quickCommands,
+  onSendInstruction,
 }: {
   characterName: string;
   isGenerating: boolean;
@@ -247,8 +260,15 @@ const StoryComposer = memo(function StoryComposer({
   onStop: () => void;
   /** 番外窗口：左边多一个「模板」 */
   onOpenTemplate?: () => void;
+  /** 左边的「指令」按钮；侧栏里关掉就完全不显示，也不留位置 */
+  showCommandButton: boolean;
+  quickCommands: string[];
+  /** 指令模式下发出去的是一条系统指令（system） */
+  onSendInstruction: (text: string) => void;
 }) {
   const [draft, setDraft] = useState("");
+  const [commandMode, setCommandMode] = useState(false);
+  const inCommand = commandMode && showCommandButton;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const lastAppendIdRef = useRef<number | null>(null);
 
@@ -276,13 +296,54 @@ const StoryComposer = memo(function StoryComposer({
       const textarea = textareaRef.current;
       if (textarea) resizeStoryComposerTextarea(textarea);
     });
+    if (inCommand) {
+      // 发完回到普通输入，下一句照常是你说的话
+      setCommandMode(false);
+      onSendInstruction(text);
+      return;
+    }
     onSend(text);
   };
 
+  const pickQuickCommand = (command: string) => {
+    setDraft(command);
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      resizeStoryComposerTextarea(textarea);
+      textarea.focus();
+    });
+  };
+
   return (
-    <div className="story-composer">
+    <div className="story-composer" data-command={inCommand ? "true" : undefined}>
+      {inCommand ? (
+        <div className="story-command-strip">
+          <span className="story-command-strip-title">系统指令</span>
+          {quickCommands.length > 0 ? (
+            <div className="story-command-chips">
+              {quickCommands.map((command) => (
+                <button key={command} type="button" onClick={() => pickQuickCommand(command)}>{command}</button>
+              ))}
+            </div>
+          ) : (
+            <span className="story-command-empty">快捷指令在右上角菜单里添加</span>
+          )}
+        </div>
+      ) : null}
       {onOpenTemplate ? (
         <button type="button" className="story-template-btn" onClick={onOpenTemplate}>模板</button>
+      ) : null}
+      {showCommandButton ? (
+        <button
+          type="button"
+          className="story-command-toggle"
+          data-on={inCommand ? "true" : undefined}
+          aria-pressed={inCommand}
+          onClick={() => setCommandMode((value) => !value)}
+        >
+          指令
+        </button>
       ) : null}
       <textarea
         ref={textareaRef}
@@ -299,7 +360,7 @@ const StoryComposer = memo(function StoryComposer({
             submit();
           }
         }}
-        placeholder={onOpenTemplate ? "继续写番外，或说想怎么改……" : `以你和“${characterName}”为主角继续这一段剧情……`}
+        placeholder={inCommand ? "输入系统指令" : onOpenTemplate ? "继续写番外，或说想怎么改……" : `以你和“${characterName}”为主角继续这一段剧情……`}
       />
       <button
         className={`story-send-btn${isGenerating ? " is-generating" : ""}`}
@@ -331,6 +392,9 @@ export function StoryApp({ onClose }: StoryAppProps) {
   // 正篇还是番外；换角色时回到正篇
   const [mode, setMode] = useState<"main" | "extra">("main");
   const [templateTop, setTemplateTop] = useState<number | null>(null);
+  // 系统指令：快捷指令和「指令」按钮显不显示，所有角色共用
+  const [quickCommands, setQuickCommands] = useState<string[]>([]);
+  const [commandButtonVisible, setCommandButtonVisible] = useState(true);
   // 顶部阅读卡的引言：点一下就地编辑
   const [editingQuote, setEditingQuote] = useState(false);
   const quoteCancelRef = useRef(false);
@@ -431,6 +495,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
         setContextExcludedTagsDraft(sessionDisplay.contextExcludedTags ?? "think,thinking");
         setStorageVersion((value) => value + 1);
       }
+      setQuickCommands(loadStoryQuickCommands());
+      setCommandButtonVisible(loadStoryCommandButtonVisible());
       setReady(true);
     });
   }, []);
@@ -726,7 +792,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
     setTemplateTop(shell && header ? header.getBoundingClientRect().bottom - shell.getBoundingClientRect().top : 96);
   }
 
-  async function handleSend(userTextInput: string, extraOrder?: StoryExtraOrder) {
+  /** asInstruction：系统指令，存成 system 消息，发给模型时也是 system */
+  async function handleSend(userTextInput: string, extraOrder?: StoryExtraOrder, asInstruction = false) {
     const userText = userTextInput.trim();
     if (!activeSessionId || !userText || isGenerating) return;
     const sessionId = activeSessionId;
@@ -736,10 +803,11 @@ export function StoryApp({ onClose }: StoryAppProps) {
 
     const userMessage = pushStoryMessage({
       sessionId,
-      role: "user",
+      role: asInstruction ? "system" : "user",
       rawContent: userText,
       renderedContent: userText,
       ...(extraOrder ? { extraOrder } : {}),
+      ...(asInstruction ? { instruction: true } : {}),
     });
     setMessages((prev) => [...prev, userMessage]);
     setStorageVersion((value) => value + 1);
@@ -1125,6 +1193,16 @@ export function StoryApp({ onClose }: StoryAppProps) {
           />
         )}
 
+        <StoryCommandSettingsSection
+          buttonVisible={commandButtonVisible}
+          onButtonVisibleChange={(visible) => {
+            saveStoryCommandButtonVisible(visible);
+            setCommandButtonVisible(visible);
+          }}
+          commands={quickCommands}
+          onCommandsChange={(commands) => setQuickCommands(saveStoryQuickCommands(commands))}
+        />
+
         <div className="story-drawer-section">
           <div className="story-drawer-eyebrow">显示选项</div>
           <div style={{ padding: "10px 0", borderBottom: "1px solid var(--c-story-drawer-border, rgba(124, 104, 68, 0.08))" }}>
@@ -1361,6 +1439,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
                       : undefined;
                   // 番外模板发出的指令折叠成一张卡；编辑时照常显示原文
                   const extraOrder = message.extraOrder && editingMessageId !== message.id ? message.extraOrder : null;
+                  // 系统指令也折叠成一张卡；编辑时照常显示原文
+                  const instructionCard = message.instruction === true && editingMessageId !== message.id;
                   return (
                     <article
                       key={message.id}
@@ -1395,6 +1475,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
                             userName={storyUserName}
                             charName={currentCharacter.name}
                           />
+                        ) : instructionCard ? (
+                          <StoryInstructionCard content={message.rawContent} />
                         ) : (
                         <div className="story-bubble">
                           {editingMessageId === message.id ? (
@@ -1476,6 +1558,9 @@ export function StoryApp({ onClose }: StoryAppProps) {
         onSend={(text) => { void handleSend(text); }}
         onStop={handleStopGeneration}
         onOpenTemplate={isExtra ? openTemplate : undefined}
+        showCommandButton={commandButtonVisible}
+        quickCommands={quickCommands}
+        onSendInstruction={(text) => { void handleSend(text, undefined, true); }}
       />
 
       {isExtra && extraConfig && templateTop != null ? (

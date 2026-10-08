@@ -4,7 +4,7 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronLeft, ChevronRight, Folder, Save, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Eraser, Folder, Save, Trash2, X } from "lucide-react";
 import { Avatar } from "@/components/ui/primitives";
 import type { Character } from "@/lib/character-types";
 import { loadApiConfigs, loadPresets, loadRegexes, loadWorldBooks } from "@/lib/settings-storage";
@@ -22,6 +22,7 @@ import type {
 } from "@/lib/story-storage";
 import {
   STORY_EXTRA_PERSONS,
+  cleanStoryExtraScenes,
   deleteStoryExtraPreset,
   loadStoryExtraPresets,
   normalizeStoryExtraTemplate,
@@ -434,9 +435,9 @@ export function StoryMainBindingsSection({
   );
 }
 
-// ── 番外方案：模板（含大概内容和开关）+ 绑定成套保存、切换 ──
+// ── 番外方案：模板（含梗概和开关）+ 绑定成套保存、切换 ──
 
-/** 方案里大概内容空着：切过去时保留现在写的那段，比较时也不管这一项 */
+/** 方案里梗概空着：切过去时保留现在写的那段，比较时也不管这一项 */
 function matchesPreset(preset: StoryExtraConfig, current: StoryExtraConfig): boolean {
   const comparable = preset.template.content.trim()
     ? current
@@ -459,7 +460,7 @@ export function StoryExtraPresetBar({
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  // 方案和现在都写了大概内容：先问一句再替换
+  // 方案和现在都写了梗概：先问一句再替换
   const [pendingReplace, setPendingReplace] = useState<StoryExtraPreset | null>(null);
   // 下拉框只在现在的设置和某套方案一致时显示它；改过就回到占位，方便重新选回去
   const selectedId = presets.find((preset) => matchesPreset(preset.config, config))?.id ?? "";
@@ -473,9 +474,9 @@ export function StoryExtraPresetBar({
   const dialogHost = pendingReplace ? rootRef.current?.closest(".story-app-shell") : null;
   const dialog = pendingReplace ? (
     <div className="story-confirm-overlay" onClick={() => setPendingReplace(null)}>
-      <div className="story-confirm" role="alertdialog" aria-label="替换大概内容" onClick={(event) => event.stopPropagation()}>
-        <div className="story-confirm-title">替换大概内容？</div>
-        <div className="story-confirm-text">「{pendingReplace.name}」里存了大概内容，切换后会替换你现在写的这段。</div>
+      <div className="story-confirm" role="alertdialog" aria-label="替换梗概" onClick={(event) => event.stopPropagation()}>
+        <div className="story-confirm-title">替换梗概？</div>
+        <div className="story-confirm-text">「{pendingReplace.name}」里存了梗概，切换后会替换你现在写的这段。</div>
         <div className="story-confirm-actions">
           <button type="button" onClick={() => setPendingReplace(null)}>取消</button>
           <button
@@ -617,6 +618,9 @@ export function StoryExtraOrderCard({
   // 指令被手动编辑过就不再拿模板字段概括它（早先的消息没记原文，当作没改过）
   const edited = order.instruction !== undefined && rawContent !== order.instruction;
   const words = template.words.trim().replace(/字(以上)?$/, "").trim();
+  const scenes = cleanStoryExtraScenes(template.scenes);
+  // 折叠时显示梗概；只写了 if线 就显示 if线
+  const summary = template.content.trim() || template.ifLine.trim();
   return (
     <div className="story-extra-order">
       <button type="button" className="story-extra-order-head" onClick={() => setOpen((value) => !value)}>
@@ -624,11 +628,13 @@ export function StoryExtraOrderCard({
         <span>{open ? "收起" : "展开"}</span>
       </button>
       <div className={`story-extra-order-text${open ? " is-open" : ""}`}>
-        {open || edited || !template.content.trim() ? rawContent : template.content}
+        {open || edited || !summary ? rawContent : summary}
       </div>
       {edited ? null : (
         <div className="story-extra-chips">
+          {template.ifLine.trim() ? <span>if线</span> : null}
           {words ? <span>{words} 字以上</span> : null}
+          {scenes ? <span>{scenes} 个场景</span> : null}
           {template.style.trim() ? <span>{template.style.trim()}</span> : null}
           <span>{order.userName || userName} · {template.userPerson}</span>
           {/* 早先的指令只定了 user 的人称 */}
@@ -636,6 +642,83 @@ export function StoryExtraOrderCard({
           {template.includePrevious ? <span>带上之前的番外</span> : null}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── 系统指令 ──
+
+/** 发出去的系统指令：和番外指令卡一个样子，默认折叠 */
+export function StoryInstructionCard({ content }: { content: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="story-extra-order">
+      <button type="button" className="story-extra-order-head" onClick={() => setOpen((value) => !value)}>
+        <span>系统指令</span>
+        <span>{open ? "收起" : "展开"}</span>
+      </button>
+      <div className={`story-extra-order-text${open ? " is-open" : ""}`}>{content}</div>
+    </div>
+  );
+}
+
+/** 侧栏里管系统指令：输入栏显不显示「指令」按钮，快捷指令的增删 */
+export function StoryCommandSettingsSection({
+  buttonVisible,
+  onButtonVisibleChange,
+  commands,
+  onCommandsChange,
+}: {
+  buttonVisible: boolean;
+  onButtonVisibleChange: (visible: boolean) => void;
+  commands: string[];
+  onCommandsChange: (commands: string[]) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const add = () => {
+    const text = draft.trim();
+    if (!text) return;
+    onCommandsChange([...commands, text]);
+    setDraft("");
+  };
+  return (
+    <div className="story-drawer-section">
+      <div className="story-drawer-eyebrow">系统指令</div>
+      <button
+        type="button"
+        className="story-template-toggle"
+        role="switch"
+        aria-checked={buttonVisible}
+        data-on={buttonVisible ? "true" : undefined}
+        onClick={() => onButtonVisibleChange(!buttonVisible)}
+      >
+        <span>输入栏显示「指令」按钮</span>
+        <i aria-hidden="true" />
+      </button>
+      <div className="story-command-manage">
+        <span className="story-command-manage-label">快捷指令</span>
+        {commands.length > 0 ? (
+          <div className="story-command-list">
+            {commands.map((command) => (
+              <div key={command} className="story-command-item">
+                <span>{command}</span>
+                <button type="button" aria-label="删除这条快捷指令" onClick={() => onCommandsChange(commands.filter((item) => item !== command))}>
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div className="story-command-add">
+          <textarea
+            rows={2}
+            value={draft}
+            placeholder="输入快捷指令"
+            onChange={(event) => setDraft(event.target.value)}
+          />
+          <button type="button" disabled={!draft.trim()} onClick={add}>保存</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -676,6 +759,8 @@ export function StoryExtraTemplateSheet({
   useEffect(() => () => onSaveRef.current(draftRef.current), []);
 
   const set = (patch: Partial<StoryExtraTemplate>) => setDraft((prev) => ({ ...prev, ...patch }));
+  // 梗概和 if线设定共用一个框，上面切换；清空只清当前这一页
+  const [textTab, setTextTab] = useState<"content" | "ifLine">("content");
   const personRows = [
     { name: userName, value: draft.userPerson, pick: (value: StoryExtraPerson) => set({ userPerson: value }) },
     { name: charName, value: draft.charPerson, pick: (value: StoryExtraPerson) => set({ charPerson: value }) },
@@ -696,11 +781,27 @@ export function StoryExtraTemplateSheet({
             onBindingsChange(next.bindings);
           }}
         />
-        <label className="story-template-field">
-          <span className="story-template-label">大概内容</span>
-          <textarea rows={5} value={draft.content} placeholder="这篇番外大概写什么" onChange={(event) => set({ content: event.target.value })} />
-        </label>
-        <div className="story-template-pair">
+        <div className="story-template-field">
+          <div className="story-template-tabs" role="tablist" aria-label="梗概和 if线设定">
+            <button type="button" role="tab" aria-selected={textTab === "content"} data-active={textTab === "content" ? "true" : undefined} onClick={() => setTextTab("content")}>梗概</button>
+            <button type="button" role="tab" aria-selected={textTab === "ifLine"} data-active={textTab === "ifLine" ? "true" : undefined} onClick={() => setTextTab("ifLine")}>if线设定</button>
+            <button
+              type="button"
+              className="story-template-clear"
+              disabled={!draft[textTab]}
+              onClick={() => set({ [textTab]: "" })}
+              aria-label={textTab === "content" ? "清空梗概" : "清空 if线设定"}
+            >
+              <Eraser size={13} />清空
+            </button>
+          </div>
+          {textTab === "content" ? (
+            <textarea rows={5} value={draft.content} placeholder="这篇番外大概写什么" aria-label="梗概" onChange={(event) => set({ content: event.target.value })} />
+          ) : (
+            <textarea rows={5} value={draft.ifLine} placeholder="可选：如果……会怎样（比如：如果那年他没有出国）" aria-label="if线设定" onChange={(event) => set({ ifLine: event.target.value })} />
+          )}
+        </div>
+        <div className="story-template-pair story-template-triple">
           <label className="story-template-field">
             <span className="story-template-label">文风</span>
             <input value={draft.style} placeholder="比如轻松风趣冷幽默" onChange={(event) => set({ style: event.target.value })} />
@@ -708,6 +809,10 @@ export function StoryExtraTemplateSheet({
           <label className="story-template-field">
             <span className="story-template-label">字数（以上）</span>
             <input value={draft.words} inputMode="numeric" placeholder="比如 4000" onChange={(event) => set({ words: event.target.value })} />
+          </label>
+          <label className="story-template-field">
+            <span className="story-template-label">场景数</span>
+            <input value={draft.scenes} inputMode="numeric" placeholder="比如 3" onChange={(event) => set({ scenes: event.target.value })} />
           </label>
         </div>
         <div className="story-template-persons">
@@ -743,7 +848,7 @@ export function StoryExtraTemplateSheet({
       <button
         type="button"
         className="story-template-send"
-        disabled={sending || !draft.content.trim()}
+        disabled={sending || (!draft.content.trim() && !draft.ifLine.trim())}
         onClick={() => onSend(draft)}
       >
         发送番外指令
