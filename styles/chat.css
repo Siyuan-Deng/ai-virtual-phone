@@ -7905,6 +7905,11 @@
   max-width: min(340px, calc(100vw - 32px));
 }
 
+/* 内容很短，不用滚动；不然按钮的阴影会被裁成一圈方框 */
+.chat-avatar-crop-dialog .modal-body {
+  overflow: visible;
+}
+
 .chat-avatar-crop-stage {
   position: relative;
   overflow: hidden;
