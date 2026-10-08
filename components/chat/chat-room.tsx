@@ -88,6 +88,9 @@ import { extractTextToolDirectiveText } from "@/lib/text-tool-protocol";
 import { emitChatPluginEvent, getChatPluginHookBus, runChatPluginTransform } from "@/lib/chat-plugin-hooks";
 import { CHAT_PLUGIN_TOAST_EVENT, getChatPluginRuntime } from "@/lib/chat-plugin-runtime";
 import { ChatPluginSlot } from "@/components/chat/chat-plugin-slot";
+import { AvatarCropDialog } from "@/components/chat/avatar-crop-dialog";
+import { useChatAvatarOverrides } from "@/components/chat/use-chat-avatar-overrides";
+import { saveChatImageToIndexedDB } from "@/lib/chat-asset-storage";
 
 // ── Call system message detection ──────────────────────────
 // Call messages are stored with user/assistant role for correct prompt alternation,
@@ -1127,6 +1130,23 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [callInitiator, setCallInitiator] = useState<"user" | "character">("user");
     const [callInitiatorName, setCallInitiatorName] = useState<string>("");
     const [userIdentity, setUserIdentity] = useState<UserIdentity | null>(null);
+    // 只在这个聊天里用的头像（点消息旁边的头像换）："self" 是用户，其余是角色 id
+    const [avatarOverrides, setAvatarOverrides] = useState<Record<string, string> | undefined>(session.avatarOverrides);
+    const avatarUrls = useChatAvatarOverrides(avatarOverrides);
+    const [avatarEditKey, setAvatarEditKey] = useState<string | null>(null);
+    const avatarTapTimerRef = useRef<number | null>(null);
+    useEffect(() => {
+        setAvatarOverrides(session.avatarOverrides);
+        setAvatarEditKey(null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [session.id]);
+    const charAvatarUrl = (target: Character | null | undefined): string | null => (target ? avatarUrls[target.id] || target.avatar || null : null);
+    const userAvatarUrl = avatarUrls.self || userIdentity?.avatarUrl || null;
+    // 通话界面也用这个聊天里的头像
+    const displayCharacter = useMemo(
+        () => (character && avatarUrls[character.id] ? { ...character, avatar: avatarUrls[character.id] } : character),
+        [character, avatarUrls],
+    );
     const [enterToSendEnabled, setEnterToSendEnabled] = useState(() => loadChatAppSettings().enterToSendEnabled === true);
 
     // Rich media input modals
@@ -1559,6 +1579,35 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         return () => window.removeEventListener(CHAT_BG_COMPLETE, handler);
     }, [session.id, syncMessagesFromStorage]);
 
+
+    const saveAvatarOverride = (key: string, ref: string | undefined) => {
+        const next = { ...(session.avatarOverrides || {}) };
+        if (ref) next[key] = ref;
+        else delete next[key];
+        const value = Object.keys(next).length > 0 ? next : undefined;
+        const sessions = loadChatSessions();
+        const index = sessions.findIndex(s => s.id === session.id);
+        if (index !== -1) {
+            sessions[index] = { ...sessions[index], avatarOverrides: value };
+            saveChatSessions(sessions);
+        }
+        Object.assign(session, { avatarOverrides: value });
+        setAvatarOverrides(value);
+    };
+
+    /** 点一下角色头像换头像；双击还是拍一拍，所以先等一下看有没有第二下 */
+    const handleCharAvatarTap = (characterId: string) => {
+        if (isMultiSelectMode) return;
+        if (avatarTapTimerRef.current !== null) {
+            window.clearTimeout(avatarTapTimerRef.current);
+            avatarTapTimerRef.current = null;
+            return;
+        }
+        avatarTapTimerRef.current = window.setTimeout(() => {
+            avatarTapTimerRef.current = null;
+            setAvatarEditKey(characterId);
+        }, 300);
+    };
 
     // Group chat: map of characterId → Character for quick lookup
     const groupCharMap = useMemo(() => {
@@ -5494,7 +5543,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                 <div className="chat-offline-entry" data-role="user" style={offlineDisplay.userContent.trim() ? undefined : { display: "none" }}>
                                     {/* 头像占位：默认 display:none（见 chat.css），供自定义 CSS 显示 */}
                                     <div className="chat-offline-avatar" aria-hidden="true">
-                                        {userIdentity?.avatarUrl ? <img src={userIdentity.avatarUrl} alt="" /> : <User size={18} color="var(--c-text)" />}
+                                        {userAvatarUrl ? <img src={userAvatarUrl} alt="" /> : <User size={18} color="var(--c-text)" />}
                                     </div>
                                     <div className="chat-offline-label">你</div>
                                     <div
@@ -5524,7 +5573,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                 <div className="chat-offline-entry" data-role="assistant">
                                     {/* 头像占位：默认 display:none（见 chat.css），供自定义 CSS 显示 */}
                                     <div className="chat-offline-avatar" aria-hidden="true">
-                                        {character?.avatar ? <img src={character.avatar} alt="" /> : <ChatFallbackAvatar />}
+                                        {charAvatarUrl(character) ? <img src={charAvatarUrl(character)!} alt="" /> : <ChatFallbackAvatar />}
                                     </div>
                                     <div className="chat-offline-label-row">
                                         <div className="chat-offline-label">{session.isGroup ? (session.groupName || "群聊") : (character?.name || "对方")}</div>
@@ -5609,7 +5658,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                 <div className="chat-offline-entry" data-role="user" style={pendingOfflineUserText ? undefined : { display: "none" }}>
                                     {/* 头像占位：默认 display:none（见 chat.css），供自定义 CSS 显示 */}
                                     <div className="chat-offline-avatar" aria-hidden="true">
-                                        {userIdentity?.avatarUrl ? <img src={userIdentity.avatarUrl} alt="" /> : <User size={18} color="var(--c-text)" />}
+                                        {userAvatarUrl ? <img src={userAvatarUrl} alt="" /> : <User size={18} color="var(--c-text)" />}
                                     </div>
                                     <div className="chat-offline-label">你</div>
                                     <div className="chat-offline-text">
@@ -5625,7 +5674,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                        正文用轻量 pre-wrap 渲染（避免每帧 markdown/双语解析），落库时原地换成正式排版 */
                                     <div className="chat-offline-entry" data-role="assistant">
                                         <div className="chat-offline-avatar" aria-hidden="true">
-                                            {character?.avatar ? <img src={character.avatar} alt="" /> : <ChatFallbackAvatar />}
+                                            {charAvatarUrl(character) ? <img src={charAvatarUrl(character)!} alt="" /> : <ChatFallbackAvatar />}
                                         </div>
                                         <div className="chat-offline-label-row">
                                             <div className="chat-offline-label">{session.isGroup ? (session.groupName || "群聊") : (character?.name || "对方")}</div>
@@ -5965,14 +6014,20 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                             : character;
                                                         return (
                                                             <>
-                                                    <div onDoubleClick={() => {
+                                                    <div onClick={() => {
+                                                        if (senderChar) handleCharAvatarTap(senderChar.id);
+                                                    }} onDoubleClick={() => {
+                                                        if (avatarTapTimerRef.current !== null) {
+                                                            window.clearTimeout(avatarTapTimerRef.current);
+                                                            avatarTapTimerRef.current = null;
+                                                        }
                                                         const targetChar = session.isGroup && msg.senderCharacterId
                                                             ? groupCharMap.get(msg.senderCharacterId) || character
                                                             : character;
                                                         if (targetChar) sendRichMessage("poke", { pokeTarget: targetChar.name });
                                                     }} className="w-[40px] h-[40px] rounded-[20px] bg-[var(--c-input)] overflow-hidden cursor-pointer">
-                                                        {senderChar?.avatar ? (
-                                                            <img src={senderChar.avatar} className="w-full h-full object-cover" alt="" />
+                                                        {charAvatarUrl(senderChar) ? (
+                                                            <img src={charAvatarUrl(senderChar)!} className="w-full h-full object-cover" alt="" />
                                                         ) : (
                                                             <ChatFallbackAvatar />
                                                         )}
@@ -6051,9 +6106,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                             </button>
                                         )}
                                         {msg.role === "user" && !isEmptyBubble && (
-                                            <div className="chat-msg-avatar w-[40px] h-[40px] rounded-[20px] bg-[var(--c-page-body-bg)] shrink-0 flex items-center justify-center overflow-hidden">
-                                                {userIdentity?.avatarUrl ? (
-                                                    <img src={userIdentity.avatarUrl} alt="Me" className="w-full h-full object-cover rounded-[20px]" />
+                                            <div
+                                                className="chat-msg-avatar w-[40px] h-[40px] rounded-[20px] bg-[var(--c-page-body-bg)] shrink-0 flex items-center justify-center overflow-hidden cursor-pointer"
+                                                onClick={() => { if (!isMultiSelectMode) setAvatarEditKey("self"); }}
+                                            >
+                                                {userAvatarUrl ? (
+                                                    <img src={userAvatarUrl} alt="Me" className="w-full h-full object-cover rounded-[20px]" />
                                                 ) : (
                                                     <User size={20} color="var(--c-text)" />
                                                 )}
@@ -6135,7 +6193,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                         <div key={`stream-${part.characterId}-${i}-${j}`} className="chat-msg-wrapper" data-role="assistant">
                                             <div className="chat-msg-avatar flex flex-col items-center gap-1 shrink-0">
                                                 <div className="w-[40px] h-[40px] rounded-[20px] bg-[var(--c-input)] overflow-hidden">
-                                                    {senderChar?.avatar ? <img src={senderChar.avatar} className="w-full h-full object-cover" alt="" /> : <ChatFallbackAvatar />}
+                                                    {charAvatarUrl(senderChar) ? <img src={charAvatarUrl(senderChar)!} className="w-full h-full object-cover" alt="" /> : <ChatFallbackAvatar />}
                                                 </div>
                                             </div>
                                             <div className="chat-msg-content-wrap flex flex-col min-w-0 max-w-[70%]">
@@ -6157,7 +6215,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                     <div key={`stream-seg-${j}`} className="chat-msg-wrapper" data-role="assistant">
                                         <div className="chat-msg-avatar flex flex-col items-center gap-1 shrink-0">
                                             <div className="w-[40px] h-[40px] rounded-[20px] bg-[var(--c-input)] overflow-hidden">
-                                                {character?.avatar ? <img src={character.avatar} className="w-full h-full object-cover" alt="" /> : <ChatFallbackAvatar />}
+                                                {charAvatarUrl(character) ? <img src={charAvatarUrl(character)!} className="w-full h-full object-cover" alt="" /> : <ChatFallbackAvatar />}
                                             </div>
                                         </div>
                                         <div className="chat-msg-content-wrap flex flex-col min-w-0 max-w-[70%]">
@@ -6727,13 +6785,39 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 </div>
             )}
 
+            {avatarEditKey && (() => {
+                const isSelf = avatarEditKey === "self";
+                const target = isSelf ? null : (character?.id === avatarEditKey ? character : groupCharMap.get(avatarEditKey) || null);
+                if (!isSelf && !target) return null;
+                const name = isSelf
+                    ? (userIdentity?.name || "我")
+                    : (!session.isGroup && session.alias) || target!.name;
+                return (
+                    <AvatarCropDialog
+                        title={`${name}的头像`}
+                        currentUrl={isSelf ? userAvatarUrl : charAvatarUrl(target)}
+                        canReset={Boolean(avatarOverrides?.[avatarEditKey])}
+                        onSave={async (blob) => {
+                            const id = await saveChatImageToIndexedDB(blob);
+                            saveAvatarOverride(avatarEditKey, id);
+                            setAvatarEditKey(null);
+                        }}
+                        onReset={() => {
+                            saveAvatarOverride(avatarEditKey, undefined);
+                            setAvatarEditKey(null);
+                        }}
+                        onClose={() => setAvatarEditKey(null)}
+                    />
+                );
+            })()}
+
             {/* 单聊语音/视频通话：内联挂载（而非提前 return），使缩小为悬浮窗时通话组件
                 不被卸载，计时/字幕等状态得以保留；组件内部依据 minimized 决定渲染
                 全屏界面还是左侧悬浮窗 */}
-            {showVoiceCall && character && (
+            {showVoiceCall && displayCharacter && (
                 <VoiceCallScreen
                     session={session}
-                    character={character}
+                    character={displayCharacter}
                     initiator={callInitiator}
                     minimized={callMinimized}
                     onMinimize={() => setCallMinimized(true)}
@@ -6741,10 +6825,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     onEnd={() => returnFromCall(() => setShowVoiceCall(false))}
                 />
             )}
-            {showVideoCall && character && (
+            {showVideoCall && displayCharacter && (
                 <VideoCallScreen
                     session={session}
-                    character={character}
+                    character={displayCharacter}
                     initiator={callInitiator}
                     minimized={callMinimized}
                     onMinimize={() => setCallMinimized(true)}

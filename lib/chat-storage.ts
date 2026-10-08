@@ -44,6 +44,11 @@ export type ChatSession = {
     backgroundImage?: string; // Add support for custom background
     autoReplied?: boolean; // Whether the initial greeting auto-reply has been triggered
     alias?: string;
+    /**
+     * 只在这个聊天里用的头像（和备注一样只管这个聊天）："self" 是用户，其余是角色 id。
+     * 值是聊天图片库的 id（chat-asset-storage），没有就用档案 / 身份里的头像。
+     */
+    avatarOverrides?: Record<string, string>;
     videoBackground?: string;
     voiceBackground?: string;
     isBlacklisted?: boolean;

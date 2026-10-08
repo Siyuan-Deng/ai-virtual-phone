@@ -23,6 +23,7 @@ import {
 } from "@/lib/chat-session-merge";
 import { kvSet } from "@/lib/kv-db";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
+import { useChatAvatarOverrides } from "./use-chat-avatar-overrides";
 import {
     getMascotLastPreview,
     getMascotChatSnapshot,
@@ -750,6 +751,9 @@ function ContactPicker({ onClose, onSelect }: { onClose: () => void; onSelect: (
 function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, onSelect: () => void, isPinned?: boolean }) {
     const chars = loadCharacters();
     const character = chars.find(c => c.id === session.contactId);
+    // 在聊天里换过的头像（只管这个聊天）优先
+    const avatarUrls = useChatAvatarOverrides(session.avatarOverrides);
+    const characterAvatar = avatarUrls[session.contactId] || character?.avatar || "";
     const lastVisibleMessage = getLastVisibleSessionMessage(session.id);
     const lastOfflineTurn = getLastChatOfflineTurn(session.id);
     // 线下记录比线上消息新时（含只在线下聊过的会话），列表展示线下摘要
@@ -764,11 +768,11 @@ function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, on
     const userIdentity = isGroup ? resolveUserIdentity(undefined, "group_chat") : null;
     const groupAvatarItems = isGroup
         ? [
-            ...(userIdentity ? [{ id: "self", name: userIdentity.name || "我", avatar: userIdentity.avatarUrl || "" }] : []),
+            ...(userIdentity ? [{ id: "self", name: userIdentity.name || "我", avatar: avatarUrls.self || userIdentity.avatarUrl || "" }] : []),
             ...((session.participantIds || [])
                 .map(id => chars.find(c => c.id === id))
                 .filter(Boolean) as Character[])
-                .map(c => ({ id: c.id, name: c.name, avatar: c.avatar || "" })),
+                .map(c => ({ id: c.id, name: c.name, avatar: avatarUrls[c.id] || c.avatar || "" })),
         ].slice(0, 4)
         : [];
 
@@ -794,8 +798,8 @@ function SessionItem({ session, onSelect, isPinned }: { session: ChatSession, on
                 </div>
             ) : (
                 <div className="minimal-avatar-wrapper">
-                    {character?.avatar ? (
-                        <img src={character.avatar} className="w-full h-full object-cover pointer-events-none rounded-full" alt="" />
+                    {characterAvatar ? (
+                        <img src={characterAvatar} className="w-full h-full object-cover pointer-events-none rounded-full" alt="" />
                     ) : (
                         <ChatFallbackAvatar className="pointer-events-none rounded-full" />
                     )}
