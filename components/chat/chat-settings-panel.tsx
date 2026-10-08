@@ -38,7 +38,7 @@ import { triggerDeleteFriendReaction } from "@/lib/friend-request-engine";
 import { loadCharacters } from "@/lib/character-storage";
 import { isAgentComputerConfigured } from "@/lib/agent-computer";
 import { CharacterComputerPage } from "./character-computer-page";
-import { resolveUserIdentity, loadBindingConfig, loadPresets, resolveBinding } from "@/lib/settings-storage";
+import { resolveUserIdentity, loadApiConfigs, loadBindingConfig, loadPresets, resolveBinding } from "@/lib/settings-storage";
 import { getStatusRegionConfig, saveStatusRegionConfig, presetSupportsStatusRegion, isCustomStatusRegionActive, STATUS_REGION_SCHEME_TARGET, STATUS_REGION_UPDATED_EVENT, type StatusRegionConfig } from "@/lib/chat-status-region";
 import { downloadFile } from "@/lib/download-utils";
 import { getSchemes, saveScheme, deleteScheme, type CSSScheme } from "@/lib/css-scheme-storage";
@@ -51,6 +51,8 @@ import { ConfirmDialog } from "@/components/ui/modal";
 import { CHAT_SESSION_CSS_EXAMPLE } from "@/lib/css-examples";
 import { Toggle, Input } from "@/components/ui/form";
 import { PageShell } from "@/components/ui/page-shell";
+import { AppApiPickerDialog } from "@/components/settings/app-api-picker-dialog";
+import { inheritedCharacterAppApiLabel, loadCharacterAppApiId } from "@/lib/app-api-binding";
 
 // 自定义状态栏预填模板：微博主页（契约=「状态栏」章节整段正文，含【逻辑】【格式】与包裹要求）
 // 预览用的默认示例数据：契约没有自带示例时兜底，字段与下面的微博模板对应
@@ -298,6 +300,16 @@ export function ChatSettingsPanel({
     const [videoBackground, setVideoBackground] = useState<string>(session.videoBackground || "");
     const [voiceBackground, setVoiceBackground] = useState<string>(session.voiceBackground || "");
     const [isPinned, setIsPinned] = useState(session.isPinned || false);
+    // 这个角色聊天单独用的 API：和设置 → 绑定 → 角色 → 聊天里的是同一项
+    const [showChatApiPicker, setShowChatApiPicker] = useState(false);
+    const [chatApiRevision, setChatApiRevision] = useState(0);
+    const chatApiLabel = useMemo(() => {
+        if (session.isGroup) return "";
+        const own = loadCharacterAppApiId(session.contactId, "chat");
+        const api = own ? loadApiConfigs().find(config => config.id === own) : undefined;
+        return api ? (api.name || api.provider) : inheritedCharacterAppApiLabel(session.contactId, "chat");
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [session.isGroup, session.contactId, chatApiRevision]);
     // 自定义状态栏（状态区）
     const [statusRegion, setStatusRegion] = useState<StatusRegionConfig>(() => getStatusRegionConfig(session.id));
     const [showStatusRegionDialog, setShowStatusRegionDialog] = useState(false);
@@ -994,6 +1006,16 @@ export function ChatSettingsPanel({
                             <Toggle checked={isPinned} onChange={c => { setIsPinned(c); updateSession({ isPinned: c }); }} />
                         </div>
                     </div>
+                    {!session.isGroup && (
+                        <button className="menu-item" onClick={() => setShowChatApiPicker(true)}>
+                            <ChatInfoIcon icon={Code} color={BINDING_ACCENTS.api} />
+                            <div className="menu-label-group"><span className="menu-label">聊天 API</span></div>
+                            <div className="menu-right">
+                                <span className="menu-desc mr-1">{chatApiLabel}</span>
+                                <ChevronRight size={16} />
+                            </div>
+                        </button>
+                    )}
                     <div className="menu-item">
                         <ChatInfoIcon icon={ImageIcon} color={BINDING_ACCENTS.api} />
                         <div className="menu-label-group">
@@ -1581,6 +1603,17 @@ export function ChatSettingsPanel({
             )}
 
             {/* Sub-page: TA 的电脑 */}
+            {showChatApiPicker && (
+                <AppApiPickerDialog
+                    characterId={session.contactId}
+                    appId="chat"
+                    title="选择聊天 API"
+                    onClose={() => {
+                        setShowChatApiPicker(false);
+                        setChatApiRevision(value => value + 1);
+                    }}
+                />
+            )}
             {showComputer && (
                 <CharacterComputerPage
                     characterId={session.contactId}

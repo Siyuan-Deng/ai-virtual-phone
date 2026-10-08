@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
-import { BookOpen, Check, ChevronDown, ChevronLeft, Code2, Folder, SlidersHorizontal, UserRound, X } from "lucide-react";
-import { buildWorldBookRootEntries, groupWorldBooksByFolder, loadWorldBookFolders, loadWorldBookRootOrder, type WorldBookFolder } from "@/lib/worldbook-folders";
+import { BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Code2, Folder, SlidersHorizontal, UserRound, X } from "lucide-react";
+import { loadWorldBookFolders, loadWorldBookRootOrder, type WorldBookFolder } from "@/lib/worldbook-folders";
+import { loadApiConfigFolders, loadApiConfigRootOrder, type ApiConfigFolder } from "@/lib/api-config-folders";
+import { buildPickerEntries } from "@/lib/item-folders";
 import { CHAT_APP_SETTINGS_UPDATED_EVENT, loadChatAppSettings } from "@/lib/chat-storage";
 import {
     getFloatingDockState,
@@ -67,6 +69,8 @@ export function QuickActionFloat() {
     const [worldBookFolders, setWorldBookFolders] = useState<WorldBookFolder[]>([]);
     // 世界书按文件夹分层时，点进了哪个文件夹（null = 最外层）
     const [wbOpenFolderId, setWbOpenFolderId] = useState<string | null>(null);
+    const [apiConfigFolders, setApiConfigFolders] = useState<ApiConfigFolder[]>([]);
+    const [apiOpenFolderId, setApiOpenFolderId] = useState<string | null>(null);
     const [characters, setCharacters] = useState<Character[]>([]);
     const [floatingPosition, setFloatingPosition] = useState<FloatingPosition | null>(null);
     const [popoverPosition, setPopoverPosition] = useState<PopoverPosition | null>(null);
@@ -90,6 +94,8 @@ export function QuickActionFloat() {
         const nextCharacters = loadCharacters();
         setConfig(loadBindingConfig());
         setApiConfigs(loadApiConfigs());
+        setApiConfigFolders(loadApiConfigFolders());
+        setApiOpenFolderId(null);
         setWorldBooks(loadWorldBooks());
         setWorldBookFolders(loadWorldBookFolders());
         setWbOpenFolderId(null);
@@ -524,31 +530,71 @@ export function QuickActionFloat() {
                                 {currentSlot.apiConfigId ? <small>{itemName(apiConfigs, currentSlot.apiConfigId)}</small> : <small>{scope === "global" ? "未设置" : "继承"}</small>}
                             </div>
                             <div className="quick-action-option-list">
-                                <button
-                                    type="button"
-                                    className="quick-action-option"
-                                    data-selected={!currentSlot.apiConfigId}
-                                    disabled={characterDisabled}
-                                    onClick={() => updateApiConfig(undefined)}
-                                >
-                                    <span>{inheritApiLabel}</span>
-                                    {!currentSlot.apiConfigId ? <Check size={15} /> : null}
-                                </button>
-                                {apiConfigs.length === 0 ? (
-                                    <div className="quick-action-empty">暂无 API 配置</div>
-                                ) : apiConfigs.map(api => (
-                                    <button
-                                        type="button"
-                                        key={api.id}
-                                        className="quick-action-option"
-                                        data-selected={currentSlot.apiConfigId === api.id}
-                                        disabled={characterDisabled}
-                                        onClick={() => updateApiConfig(api.id)}
-                                    >
-                                        <span>{api.name || api.defaultModel || api.provider}</span>
-                                        {currentSlot.apiConfigId === api.id ? <Check size={15} /> : null}
-                                    </button>
-                                ))}
+                                {(() => {
+                                    // 有文件夹就分层，和 API 设置页一样：置顶的在最前，然后文件夹和配置按拖出来的顺序混排，点文件夹进去选
+                                    const entries = buildPickerEntries(apiConfigs, apiConfigFolders, loadApiConfigRootOrder());
+                                    const openFolder = entries && apiOpenFolderId ? apiConfigFolders.find(folder => folder.id === apiOpenFolderId) : undefined;
+                                    const apiRow = (api: ApiConfig) => (
+                                        <button
+                                            type="button"
+                                            key={api.id}
+                                            className="quick-action-option"
+                                            data-selected={currentSlot.apiConfigId === api.id}
+                                            disabled={characterDisabled}
+                                            onClick={() => updateApiConfig(api.id)}
+                                        >
+                                            <span>{api.name || api.defaultModel || api.provider}</span>
+                                            {currentSlot.apiConfigId === api.id ? <Check size={15} /> : null}
+                                        </button>
+                                    );
+                                    if (openFolder) {
+                                        return (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    className="quick-action-option quick-action-folder-chip"
+                                                    onClick={() => setApiOpenFolderId(null)}
+                                                >
+                                                    <span className="inline-flex items-center gap-1.5"><ChevronLeft size={15} />{openFolder.name}</span>
+                                                </button>
+                                                {apiConfigs.filter(api => api.folderId === openFolder.id).map(apiRow)}
+                                            </>
+                                        );
+                                    }
+                                    return (
+                                        <>
+                                            <button
+                                                type="button"
+                                                className="quick-action-option"
+                                                data-selected={!currentSlot.apiConfigId}
+                                                disabled={characterDisabled}
+                                                onClick={() => updateApiConfig(undefined)}
+                                            >
+                                                <span>{inheritApiLabel}</span>
+                                                {!currentSlot.apiConfigId ? <Check size={15} /> : null}
+                                            </button>
+                                            {apiConfigs.length === 0 ? (
+                                                <div className="quick-action-empty">暂无 API 配置</div>
+                                            ) : entries ? entries.map(entry => {
+                                                if (entry.item) return apiRow(entry.item);
+                                                const folder = entry.folder!;
+                                                const hasSelected = apiConfigs.some(api => api.folderId === folder.id && api.id === currentSlot.apiConfigId);
+                                                return (
+                                                    <button
+                                                        type="button"
+                                                        key={folder.id}
+                                                        className="quick-action-option quick-action-folder-chip"
+                                                        disabled={characterDisabled}
+                                                        onClick={() => setApiOpenFolderId(folder.id)}
+                                                    >
+                                                        <span className="inline-flex items-center gap-1.5"><Folder size={15} />{folder.name}</span>
+                                                        <span className="inline-flex items-center gap-1">{hasSelected ? "已选" : null}<ChevronRight size={15} /></span>
+                                                    </button>
+                                                );
+                                            }) : apiConfigs.map(apiRow)}
+                                        </>
+                                    );
+                                })()}
                             </div>
                         </section>
 
@@ -579,10 +625,10 @@ export function QuickActionFloat() {
                             ) : (
                                 <div className="quick-action-chip-grid">
                                     {(() => {
-                                        // 有文件夹就分层：最外层是文件夹和未分类的，点文件夹进去勾；不同文件夹里的可以同时勾
-                                        const grouped = groupWorldBooksByFolder(worldBooks, worldBookFolders);
-                                        const folders = worldBookFolders.filter(folder => grouped.inFolder(folder.id).length > 0);
-                                        const openFolder = wbOpenFolderId ? folders.find(folder => folder.id === wbOpenFolderId) : undefined;
+                                        // 有文件夹就分层：最外层是置顶的、文件夹和未分类的，点文件夹进去勾；不同文件夹里的可以同时勾
+                                        const entries = buildPickerEntries(worldBooks, worldBookFolders, loadWorldBookRootOrder());
+                                        const inFolder = (folderId: string) => worldBooks.filter(book => book.folderId === folderId);
+                                        const openFolder = entries && wbOpenFolderId ? worldBookFolders.find(folder => folder.id === wbOpenFolderId) : undefined;
                                         const bookChip = (book: WorldBookConfig) => {
                                             const selected = selectedWorldBookIds.includes(book.id);
                                             return (
@@ -610,22 +656,18 @@ export function QuickActionFloat() {
                                                         <ChevronLeft size={14} />
                                                         <span>{openFolder.name}</span>
                                                     </button>
-                                                    {grouped.inFolder(openFolder.id).map(bookChip)}
+                                                    {inFolder(openFolder.id).map(bookChip)}
                                                 </>
                                             );
                                         }
                                         return (
                                             <>
                                                 {/* 跟世界书设置页一样：置顶的在最前，然后文件夹和世界书按拖出来的顺序混排 */}
-                                                {folders.length > 0 ? grouped.pinned.map(bookChip) : null}
-                                                {(folders.length > 0
-                                                    ? buildWorldBookRootEntries(worldBooks, worldBookFolders, loadWorldBookRootOrder())
-                                                    : worldBooks.map(book => ({ id: book.id, item: book, folder: undefined }))
-                                                ).map(entry => {
+                                                {(entries ?? worldBooks.map(book => ({ id: book.id, item: book, folder: undefined }))).map(entry => {
                                                     if (entry.item) return bookChip(entry.item);
                                                     const folder = entry.folder;
-                                                    if (!folder || !folders.some(used => used.id === folder.id)) return null;
-                                                    const count = grouped.inFolder(folder.id).filter(book => selectedWorldBookIds.includes(book.id)).length;
+                                                    if (!folder) return null;
+                                                    const count = inFolder(folder.id).filter(book => selectedWorldBookIds.includes(book.id)).length;
                                                     return (
                                                         <button
                                                             type="button"

@@ -73,9 +73,13 @@ import {
   StoryExtraOrderCard,
   StoryExtraPresetBar,
   StoryExtraTemplateSheet,
+  StoryMainBindingsSection,
   StoryNowCard,
   StoryRecentSection,
+  loadStoryApiOverride,
   orderStoryCharacters,
+  saveStoryApiOverride,
+  storyApiFollowLabel,
   type StoryBindingKind,
 } from "@/components/story/story-extra-ui";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
@@ -170,7 +174,7 @@ function storyDisplaySettings(session: StorySession) {
   };
 }
 
-type StoryDrawerSheet = { type: "characters" } | { type: "binding"; kind: StoryBindingKind };
+type StoryDrawerSheet = { type: "characters" } | { type: "binding"; kind: StoryBindingKind } | { type: "mainApi" };
 
 function resizeStoryComposerTextarea(el: HTMLTextAreaElement) {
   el.style.height = "auto";
@@ -316,6 +320,13 @@ export function StoryApp({ onClose }: StoryAppProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   // 侧栏里再盖的一层：全部角色 / 番外绑定的选项
   const [drawerSheet, setDrawerSheet] = useState<StoryDrawerSheet | null>(null);
+  // 剧情正篇的 API 存在设置的绑定里：那边（或这里）一改就加一，侧栏重新读
+  const [bindingRevision, setBindingRevision] = useState(0);
+  useEffect(() => {
+    const bump = () => setBindingRevision((value) => value + 1);
+    window.addEventListener("settings-bindings-updated", bump);
+    return () => window.removeEventListener("settings-bindings-updated", bump);
+  }, []);
   const [confirmingClearExtra, setConfirmingClearExtra] = useState(false);
   // 正篇还是番外；换角色时回到正篇
   const [mode, setMode] = useState<"main" | "extra">("main");
@@ -1106,7 +1117,13 @@ export function StoryApp({ onClose }: StoryAppProps) {
               </button>
             </div>
           </>
-        ) : null}
+        ) : (
+          <StoryMainBindingsSection
+            characterId={activeCharacterId}
+            revision={bindingRevision}
+            onOpen={() => setDrawerSheet({ type: "mainApi" })}
+          />
+        )}
 
         <div className="story-drawer-section">
           <div className="story-drawer-eyebrow">显示选项</div>
@@ -1193,6 +1210,16 @@ export function StoryApp({ onClose }: StoryAppProps) {
           kind={drawerSheet.kind}
           bindings={extraConfig.bindings}
           onChange={(bindings) => updateExtraConfig(currentSession.id, { bindings })}
+          onClose={() => setDrawerSheet(null)}
+        />
+      ) : null}
+      {drawerOpen && drawerSheet?.type === "mainApi" ? (
+        <StoryBindingPicker
+          kind="api"
+          title="剧情API"
+          followLabel={storyApiFollowLabel(activeCharacterId)}
+          bindings={{ apiConfigId: loadStoryApiOverride(activeCharacterId) }}
+          onChange={(bindings) => saveStoryApiOverride(activeCharacterId, bindings.apiConfigId)}
           onClose={() => setDrawerSheet(null)}
         />
       ) : null}

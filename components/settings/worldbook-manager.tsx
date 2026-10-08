@@ -23,6 +23,7 @@ import {
     type WorldBookFolder,
 } from "@/lib/worldbook-folders";
 import { applyGroupOrder } from "@/lib/list-order";
+import { buildPinnedEntries, commitRootGroupOrder } from "@/lib/item-folders";
 import { Toggle } from "@/components/ui/form";
 import { SettingsContext } from "../phone-settings-app";
 import { useLongPressReorder } from "./use-long-press-reorder";
@@ -77,15 +78,14 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
 
     const currentFolder = currentFolderId ? folders.find(f => f.id === currentFolderId) ?? null : null;
 
-    // 长按卡片拖动排序：最外层的文件夹和世界书混在一起排；置顶的之间、文件夹里面各自排
+    // 长按卡片拖动排序：最外层的文件夹和世界书混在一起排；置顶的（文件夹和世界书）之间、文件夹里面各自排
     const reorder = useLongPressReorder((group, orderedIds) => {
-        if (group === "root") {
-            const byId = new Map(folders.map(f => [f.id, f]));
-            const orderedFolders = orderedIds.map(id => byId.get(id)).filter((f): f is WorldBookFolder => Boolean(f));
-            if (orderedFolders.length === folders.length) persistFolders(orderedFolders);
-            persist(applyGroupOrder(books, orderedIds.filter(id => !byId.has(id))));
-            setRootOrder(orderedIds);
-            saveWorldBookRootOrder(orderedIds);
+        if (group === "root" || group === "pinned") {
+            const next = commitRootGroupOrder(group, orderedIds, books, folders, rootOrder);
+            persistFolders(next.folders);
+            persist(applyGroupOrder(books, next.itemIds));
+            setRootOrder(next.rootOrder);
+            saveWorldBookRootOrder(next.rootOrder);
             return;
         }
         persist(applyGroupOrder(books, orderedIds));
@@ -332,6 +332,10 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
         const name = folderNameDraft.trim().slice(0, 40);
         if (!name) return;
         persistFolders(folders.map(f => f.id === dialog.id ? { ...f, name } : f));
+    };
+
+    const toggleFolderPinned = (folderId: string) => {
+        persistFolders(folders.map(f => f.id === folderId ? { ...f, pinned: f.pinned ? undefined : true } : f));
     };
 
     const removeFolder = (folderId: string) => {
@@ -637,12 +641,22 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
             {viewMode === "list" ? (
                 currentFolder ? (
                     <>
-                        {/* 文件夹名已经在顶上标题栏里了，这里不再写一遍大字 */}
-                        <div className="flex justify-center gap-2">
+                        {/* 文件夹名已经在顶上标题栏里了，这里不再写一遍大字；最前面的图钉是置顶这个文件夹，变黑就是已置顶 */}
+                        <div className="flex justify-center gap-2 max-[420px]:gap-1.5">
+                            <button
+                                type="button"
+                                onClick={() => toggleFolderPinned(currentFolder.id)}
+                                aria-label={currentFolder.pinned ? "取消置顶文件夹" : "置顶文件夹"}
+                                aria-pressed={currentFolder.pinned === true}
+                                title={currentFolder.pinned ? "取消置顶" : "置顶"}
+                                className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-black/10 transition-all active:scale-95 ${currentFolder.pinned ? "bg-black text-white hover:bg-gray-800" : "bg-white text-gray-800 hover:bg-gray-50"}`}
+                            >
+                                <Pin size={15} strokeWidth={1.8} />
+                            </button>
                             <button
                                 type="button"
                                 onClick={() => setMoveSelection(new Set())}
-                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] bg-black px-4 text-xs font-bold text-white transition-all hover:bg-gray-800 active:scale-95"
+                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] bg-black whitespace-nowrap px-4 text-xs max-[420px]:px-3 font-bold text-white transition-all hover:bg-gray-800 active:scale-95"
                             >
                                 <FolderInput size={15} strokeWidth={1.8} />
                                 <span>移入世界书</span>
@@ -650,7 +664,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                             <button
                                 type="button"
                                 onClick={() => openFolderNameDialog({ mode: "rename", id: currentFolder.id })}
-                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] border border-black/10 bg-white px-4 text-xs font-bold text-gray-800 transition-all hover:bg-gray-50 active:scale-95"
+                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] border border-black/10 bg-white whitespace-nowrap px-4 text-xs max-[420px]:px-3 font-bold text-gray-800 transition-all hover:bg-gray-50 active:scale-95"
                             >
                                 <Pencil size={15} strokeWidth={1.8} />
                                 <span>重命名</span>
@@ -658,7 +672,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                             <button
                                 type="button"
                                 onClick={() => setConfirmDeleteFolderId(currentFolder.id)}
-                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] border border-black/10 bg-white px-4 text-xs font-bold text-[var(--c-danger)] transition-all hover:bg-gray-50 active:scale-95"
+                                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[20px] border border-black/10 bg-white whitespace-nowrap px-4 text-xs max-[420px]:px-3 font-bold text-[var(--c-danger)] transition-all hover:bg-gray-50 active:scale-95"
                             >
                                 <Trash2 size={15} strokeWidth={1.8} />
                                 <span>删除文件夹</span>
@@ -709,15 +723,16 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                         <div className="grid grid-cols-2 gap-3">
                             {(() => {
                                 const grouped = groupWorldBooksByFolder(books, folders);
-                                const pinnedIds = grouped.pinned.map(b => b.id);
+                                const pinnedEntries = buildPinnedEntries(books, folders, rootOrder);
+                                const pinnedIds = pinnedEntries.map(entry => entry.id);
                                 const rootEntries = buildWorldBookRootEntries(books, folders, rootOrder);
                                 const rootIds = rootEntries.map(entry => entry.id);
-                                const renderFolderCard = (folder: WorldBookFolder) => {
+                                const renderFolderCard = (folder: WorldBookFolder, group: string, groupIds: string[]) => {
                                     const inside = grouped.inFolder(folder.id);
                                     return (
                                                 <div
                                                     key={folder.id}
-                                                    {...reorder.itemProps("root", folder.id, rootIds)}
+                                                    {...reorder.itemProps(group, folder.id, groupIds)}
                                                     className="ui-config-card min-w-0 cursor-pointer"
                                                     style={{ aspectRatio: "3 / 2", padding: "12px", justifyContent: "space-between" }}
                                                     role="button"
@@ -736,6 +751,7 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                                         <div className="min-w-0 flex items-center gap-[6px]">
                                                             <Folder size={16} className="shrink-0" />
                                                             <span className="truncate text-[calc(14.4px*var(--app-text-scale,1))] font-bold leading-tight text-[var(--c-text-title)]">{folder.name}</span>
+                                                            {folder.pinned ? <Pin size={13} className="ml-auto shrink-0 opacity-45" aria-label="已置顶" /> : null}
                                                         </div>
                                                         <span className="menu-desc truncate">
                                                             {inside.length > 0 ? inside.map(b => b.name).join("、") : "空文件夹"}
@@ -750,11 +766,13 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
                                 };
                                 return (
                                     <>
-                                        {/* 置顶的放最上面，在文件夹里的也会出现在这里 */}
-                                        {reorder.order("pinned", grouped.pinned).map(book => renderBookCard(book, "pinned", pinnedIds))}
+                                        {/* 置顶的文件夹和世界书放最上面（在文件夹里的置顶世界书也会出现在这里） */}
+                                        {reorder.order("pinned", pinnedEntries).map(entry => (
+                                            entry.folder ? renderFolderCard(entry.folder, "pinned", pinnedIds) : entry.item ? renderBookCard(entry.item, "pinned", pinnedIds) : null
+                                        ))}
                                         {/* 文件夹和世界书混在一起，按拖出来的顺序 */}
                                         {reorder.order("root", rootEntries).map(entry => (
-                                            entry.folder ? renderFolderCard(entry.folder) : entry.item ? renderBookCard(entry.item, "root", rootIds) : null
+                                            entry.folder ? renderFolderCard(entry.folder, "root", rootIds) : entry.item ? renderBookCard(entry.item, "root", rootIds) : null
                                         ))}
                                     </>
                                 );
