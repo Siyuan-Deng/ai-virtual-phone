@@ -43,6 +43,7 @@ import { maybeRunSummarization } from "@/lib/memory-summarizer";
 import { incrementEventCounter } from "@/lib/memory-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "@/lib/chat-asset-storage";
+import { getThemeAssetDataUrl, saveThemeAssetFromBlob } from "@/lib/theme-storage";
 import {
   generateStoryCompletion,
   getStoryRenderSignature,
@@ -181,7 +182,35 @@ function storyDisplaySettings(session: StorySession) {
     contextExcludedTags: session.contextExcludedTags ?? main?.contextExcludedTags,
     metaQuote: session.metaQuote ?? main?.metaQuote ?? DEFAULT_STORY_META_QUOTE,
     backgroundImage: session.backgroundImage ?? main?.backgroundImage ?? "",
+    paperHidden: session.paperHidden ?? main?.paperHidden ?? false,
+    fontAsset: session.fontAsset ?? main?.fontAsset ?? "",
+    textColor: session.textColor ?? main?.textColor ?? "",
   };
+}
+
+/** 默认正文字体栈：上传的字体缺字时接着用这些 */
+const STORY_FONT_FALLBACK = '"Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", Georgia, serif';
+
+/** 上传的字体按资源 id 注册一次（FontFace），之后同一个字体不用再读 */
+const loadedStoryFonts = new Map<string, Promise<string | null>>();
+function storyFontFamilyName(assetId: string): string {
+  return `StoryUserFont-${assetId.replace(/[^\w-]/g, "")}`;
+}
+function loadStoryFont(assetId: string): Promise<string | null> {
+  const cached = loadedStoryFonts.get(assetId);
+  if (cached) return cached;
+  const task = (async () => {
+    const dataUrl = await getThemeAssetDataUrl(assetId);
+    if (!dataUrl || typeof FontFace === "undefined") return null;
+    const family = storyFontFamilyName(assetId);
+    const buffer = await (await fetch(dataUrl)).arrayBuffer();
+    const face = new FontFace(family, buffer);
+    await face.load();
+    document.fonts.add(face);
+    return family;
+  })().catch(() => null);
+  loadedStoryFonts.set(assetId, task);
+  return task;
 }
 
 /** 剧情背景存之前缩到长边 1600：手机原图好几兆，整张塞进页面背景会卡 */
@@ -475,6 +504,25 @@ export function StoryApp({ onClose }: StoryAppProps) {
   const backgroundImageId = display?.backgroundImage || "";
   const [wallpaperUrl, setWallpaperUrl] = useState<string | null>(null);
   const backgroundInputRef = useRef<HTMLInputElement | null>(null);
+  // 上传的字体、文字颜色：写成一条只有一个 class 权重的规则，放在自定义 CSS 前面——
+  // 主题默认值压得住，自定义 CSS 里写了同样的变量就以 CSS 为准
+  const fontAssetId = display?.fontAsset || "";
+  const customTextColor = display?.textColor || "";
+  const paperHidden = display?.paperHidden === true;
+  const [loadedFontFamily, setLoadedFontFamily] = useState<string | null>(null);
+  const fontInputRef = useRef<HTMLInputElement | null>(null);
+  const colorInputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (!fontAssetId) {
+      setLoadedFontFamily(null);
+      return;
+    }
+    let cancelled = false;
+    void loadStoryFont(fontAssetId).then((family) => {
+      if (!cancelled) setLoadedFontFamily(family);
+    });
+    return () => { cancelled = true; };
+  }, [fontAssetId]);
   useEffect(() => {
     if (!backgroundImageId) {
       setWallpaperUrl(null);
@@ -794,6 +842,21 @@ export function StoryApp({ onClose }: StoryAppProps) {
     setStorageVersion((value) => value + 1);
   }
 
+  async function handleFontFile(file: File | undefined) {
+    if (!file || !currentSession) return;
+    try {
+      const id = await saveThemeAssetFromBlob(file, "font");
+      // 先试着加载，打不开的文件（不是字体、格式不支持）就不留着
+      if (!(await loadStoryFont(id))) {
+        alert("这个字体文件用不了，换一个 ttf / otf / woff 试试");
+        return;
+      }
+      applySessionUpdates({ fontAsset: id, updatedAt: currentSession.updatedAt });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "字体保存失败，请重试");
+    }
+  }
+
   async function handleBackgroundFile(file: File | undefined) {
     if (!file || !currentSession) return;
     try {
@@ -803,6 +866,17 @@ export function StoryApp({ onClose }: StoryAppProps) {
     } catch (error) {
       alert(error instanceof Error ? error.message : "背景保存失败，请重试");
     }
+  }
+
+  // 番外里清除 = 番外用默认（空字符串）；正篇清除就是去掉，跟着正篇的番外也一起回到默认
+  function clearFont() {
+    if (!currentSession) return;
+    applySessionUpdates({ fontAsset: isExtra ? "" : undefined, updatedAt: currentSession.updatedAt });
+  }
+
+  function clearTextColor() {
+    if (!currentSession) return;
+    applySessionUpdates({ textColor: isExtra ? "" : undefined, updatedAt: currentSession.updatedAt });
   }
 
   function clearBackground() {
@@ -1162,6 +1236,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
       className={`story-app-shell story-session-${currentSession.id}`}
       data-story-theme={uiPrefs.theme || "paper"}
       data-wallpaper={wallpaperUrl ? "" : undefined}
+      data-paper={paperHidden ? "off" : undefined}
       style={wallpaperUrl ? ({ "--story-wallpaper": `url("${wallpaperUrl}")` } as React.CSSProperties) : undefined}
       onTouchStart={(event) => handleTouchStart(event.touches[0]?.clientX || 0)}
       onTouchMove={(event) => handleTouchMove(event.touches[0]?.clientX || 0)}
@@ -1174,6 +1249,12 @@ export function StoryApp({ onClose }: StoryAppProps) {
       onMouseLeave={handleTouchEnd}
     >
       {/* Styles moved to styles/story.css */}
+      {loadedFontFamily || customTextColor ? (
+        <style>{`${sessionScope}{${[
+          loadedFontFamily ? `--story-user-font:"${loadedFontFamily}", ${STORY_FONT_FALLBACK};--story-font:var(--story-user-font);` : "",
+          customTextColor ? `--story-user-text-color:${customTextColor};--c-story-text:var(--story-user-text-color);` : "",
+        ].join("")}}`}</style>
+      ) : null}
       {display?.customCSS ? (
         <SessionCustomCSS css={display.customCSS} scope={sessionScope} />
       ) : null}
@@ -1271,6 +1352,23 @@ export function StoryApp({ onClose }: StoryAppProps) {
         <div className="story-drawer-section">
           <div className="story-drawer-eyebrow">显示选项</div>
           <div className="story-bg-row">
+            <span className="story-bg-row-label">纸张显示</span>
+            <button
+              type="button"
+              className="story-template-toggle story-bg-row-switch"
+              role="switch"
+              aria-checked={!paperHidden}
+              aria-label="纸张显示"
+              data-on={paperHidden ? undefined : "true"}
+              onClick={() => {
+                if (!currentSession) return;
+                applySessionUpdates({ paperHidden: !paperHidden, updatedAt: currentSession.updatedAt });
+              }}
+            >
+              <i aria-hidden="true" />
+            </button>
+          </div>
+          <div className="story-bg-row">
             <span className="story-bg-row-label">剧情背景</span>
             <span className="story-bg-row-actions">
               <button type="button" onClick={() => backgroundInputRef.current?.click()}>更换</button>
@@ -1284,6 +1382,41 @@ export function StoryApp({ onClose }: StoryAppProps) {
               onChange={(event) => {
                 void handleBackgroundFile(event.target.files?.[0]);
                 event.target.value = "";
+              }}
+            />
+          </div>
+          <div className="story-bg-row">
+            <span className="story-bg-row-label">正文字体</span>
+            <span className="story-bg-row-actions">
+              <button type="button" onClick={() => fontInputRef.current?.click()}>更换</button>
+              {fontAssetId ? <button type="button" onClick={clearFont}>清除</button> : null}
+            </span>
+            <input
+              ref={fontInputRef}
+              type="file"
+              accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2"
+              hidden
+              onChange={(event) => {
+                void handleFontFile(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+          </div>
+          <div className="story-bg-row">
+            <span className="story-bg-row-label">文字颜色</span>
+            <span className="story-bg-row-actions">
+              {customTextColor ? <i className="story-bg-row-swatch" style={{ background: customTextColor }} aria-hidden="true" /> : null}
+              <button type="button" onClick={() => colorInputRef.current?.click()}>更换</button>
+              {customTextColor ? <button type="button" onClick={clearTextColor}>清除</button> : null}
+            </span>
+            <input
+              ref={colorInputRef}
+              type="color"
+              className="story-bg-row-color-input"
+              value={customTextColor || "#3a3b3c"}
+              onChange={(event) => {
+                if (!currentSession) return;
+                applySessionUpdates({ textColor: event.target.value, updatedAt: currentSession.updatedAt });
               }}
             />
           </div>
@@ -1654,6 +1787,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
           charName={currentCharacter.name}
           top={templateTop}
           sending={isGenerating}
+          quickCommands={quickCommands}
           onSave={(template) => updateExtraConfig(currentSession.id, { template })}
           onBindingsChange={(bindings) => updateExtraConfig(currentSession.id, { bindings })}
           onSend={(template) => {

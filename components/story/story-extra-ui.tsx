@@ -4,7 +4,7 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronLeft, ChevronRight, Eraser, Folder, Save, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Eraser, Folder, Plus, Save, Trash2, X } from "lucide-react";
 import { Avatar } from "@/components/ui/primitives";
 import type { Character } from "@/lib/character-types";
 import { loadApiConfigs, loadPresets, loadRegexes, loadWorldBooks } from "@/lib/settings-storage";
@@ -758,12 +758,15 @@ export function StoryExtraTemplateSheet({
   charName,
   top,
   sending,
+  quickCommands,
   onSave,
   onBindingsChange,
   onSend,
   onClose,
 }: {
   initial: StoryExtraTemplate;
+  /** 侧栏里存的快捷指令，可以挑一条接进「其它要求」 */
+  quickCommands: string[];
   bindings: StoryExtraBindings;
   userName: string;
   charName: string;
@@ -787,6 +790,21 @@ export function StoryExtraTemplateSheet({
   const set = (patch: Partial<StoryExtraTemplate>) => setDraft((prev) => ({ ...prev, ...patch }));
   // 梗概和 if线设定共用一个框，上面切换；清空只清当前这一页
   const [textTab, setTextTab] = useState<"content" | "ifLine">("content");
+  // 「其它要求」右边的「＋快捷指令」：点开挑一条，接在其它要求后面
+  const [quickMenuOpen, setQuickMenuOpen] = useState(false);
+  const quickMenuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!quickMenuOpen) return;
+    const close = (event: PointerEvent) => {
+      if (!quickMenuRef.current?.contains(event.target as Node)) setQuickMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [quickMenuOpen]);
+  const appendQuickCommand = (command: string) => {
+    setDraft((prev) => ({ ...prev, extra: prev.extra.trim() ? `${prev.extra.trim()}\n${command}` : command }));
+    setQuickMenuOpen(false);
+  };
   const personRows = [
     { name: userName, value: draft.userPerson, pick: (value: StoryExtraPerson) => set({ userPerson: value }) },
     { name: charName, value: draft.charPerson, pick: (value: StoryExtraPerson) => set({ charPerson: value }) },
@@ -855,10 +873,29 @@ export function StoryExtraTemplateSheet({
             </Fragment>
           ))}
         </div>
-        <label className="story-template-field">
-          <span className="story-template-label">其它要求</span>
-          <textarea rows={2} value={draft.extra} placeholder="可选：结局、要出现的细节、禁止事项……" onChange={(event) => set({ extra: event.target.value })} />
-        </label>
+        <div className="story-template-field story-template-extra" ref={quickMenuRef}>
+          <div className="story-template-label-row">
+            <span className="story-template-label">其它要求</span>
+            <button
+              type="button"
+              className="story-template-quick-btn"
+              aria-expanded={quickMenuOpen}
+              onClick={() => setQuickMenuOpen((value) => !value)}
+            >
+              <Plus size={12} />快捷指令
+            </button>
+          </div>
+          <textarea rows={2} value={draft.extra} placeholder="可选：结局、要出现的细节、禁止事项……" aria-label="其它要求" onChange={(event) => set({ extra: event.target.value })} />
+          {quickMenuOpen ? (
+            <div className="story-template-quick-menu" role="menu">
+              {quickCommands.length > 0 ? quickCommands.map((command) => (
+                <button key={command} type="button" role="menuitem" onClick={() => appendQuickCommand(command)}>{command}</button>
+              )) : (
+                <span className="story-template-quick-empty">快捷指令在右上角菜单里添加</span>
+              )}
+            </div>
+          ) : null}
+        </div>
         <button
           type="button"
           className="story-template-toggle"

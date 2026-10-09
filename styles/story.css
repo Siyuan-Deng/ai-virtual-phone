@@ -237,6 +237,12 @@
           padding: calc(var(--page-header-safe-top, 48px) + var(--page-header-content-height, 42px) + 36px) 22px 150px;
         }
         
+        /* 侧栏关掉「纸张显示」：这张纸变透明，露出背景。只有一个 class 的权重，自定义 CSS 想怎么画都盖得住 */
+        :where(.story-app-shell[data-paper="off"]) .story-stage-inner {
+          background: transparent;
+          box-shadow: none;
+        }
+
         /* 顶部信息阅读区：与正文同处一张长卡片，不再是独立卡片 */
         .story-meta {
           position: relative;
@@ -1441,15 +1447,16 @@
           box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.05);
         }
 
-        /* === 番外：输入栏左边的「模板」 === */
+        /* === 番外：输入栏左边的「模板」，和「指令」关着时一个样子：透明底 + 细边 === */
         .story-template-btn {
           flex: 0 0 auto;
           height: 36px;
           padding: 0 12px;
           border: none;
           border-radius: 0;
-          background: var(--c-story-heading, #1e293b);
-          color: var(--c-story-on-heading, var(--c-story-drawer-top, #ffffff));
+          background: transparent;
+          box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-story-sub, #64748b) 45%, transparent);
+          color: var(--c-story-sub, #64748b);
           font: inherit;
           font-size: calc(12px*var(--app-text-scale,1));
           letter-spacing: 0.1em;
@@ -1469,7 +1476,31 @@
         }
         .story-bg-row-actions {
           display: inline-flex;
+          align-items: center;
           gap: 14px;
+        }
+        /* 「纸张显示」开关：借番外模板开关的样子，只留右边那个小开关（自定义 CSS 给开关配的色照样生效） */
+        .story-bg-row .story-bg-row-switch {
+          width: auto;
+          padding: 0;
+          background: none;
+          box-shadow: none;
+        }
+        /* 文字颜色：现在用的颜色点 */
+        .story-bg-row-swatch {
+          display: inline-block;
+          width: 16px;
+          height: 16px;
+          border-radius: 50%;
+          box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+        }
+        /* 取色器本身不显示，点「更换」打开（不能用 display:none，iOS 上那样点不开） */
+        .story-bg-row-color-input {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          opacity: 0;
+          pointer-events: none;
         }
         .story-bg-row-actions button {
           border: none;
@@ -1480,6 +1511,60 @@
           color: var(--c-story-heading, #1e293b);
         }
         .story-bg-row-actions button + button {
+          color: var(--c-story-sub, #94a3b8);
+        }
+
+        /* === 番外模板：「其它要求」右边的「＋快捷指令」，点开挑一条接进去 === */
+        .story-template-extra {
+          position: relative;
+        }
+        .story-template-label-row {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+        }
+        .story-template-quick-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+          border: none;
+          background: none;
+          padding: 0 0 6px;
+          font: inherit;
+          font-size: calc(11px*var(--app-text-scale,1));
+          letter-spacing: 0.06em;
+          color: var(--c-story-heading, #1e293b);
+        }
+        .story-template-quick-menu {
+          position: absolute;
+          right: 0;
+          top: 22px;
+          z-index: 3;
+          min-width: 60%;
+          max-width: 100%;
+          max-height: 220px;
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          background: var(--c-story-drawer-top, #ffffff);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2), inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+        }
+        .story-template-quick-menu button {
+          border: none;
+          background: none;
+          padding: 10px 12px;
+          text-align: left;
+          font: inherit;
+          font-size: calc(12.5px*var(--app-text-scale,1));
+          line-height: 1.5;
+          color: var(--c-story-text, #3a3b3c);
+        }
+        .story-template-quick-menu button + button {
+          border-top: 1px solid color-mix(in srgb, var(--c-story-sub, #94a3b8) 25%, transparent);
+        }
+        .story-template-quick-empty {
+          padding: 10px 12px;
+          font-size: calc(12px*var(--app-text-scale,1));
           color: var(--c-story-sub, #94a3b8);
         }
 
