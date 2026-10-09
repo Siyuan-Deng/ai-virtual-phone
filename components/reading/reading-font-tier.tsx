@@ -7,6 +7,7 @@ import { ReadingSettingsSection } from "./reading-settings-section";
 import {
     READING_FONT_OPTIONS,
     READING_FONT_PREVIEW_TEXT,
+    ensureReadingWebFont,
     listReadingAnnotationFontOptions,
     type ReadingAnnotationFontFamilyId,
 } from "@/lib/reading-appearance";
@@ -103,7 +104,8 @@ export function ReadingFontTier({
             .getPropertyValue("--app-font-family").trim() || "sans-serif";
         const result = new Set<string>();
         for (const option of READING_FONT_OPTIONS) {
-            if (option.id === "system" || option.id === "custom") continue;
+            // 网络字体量的时候多半还没下载完，量不准；它们在哪台设备上都有效，不用测
+            if (option.id === "system" || option.id === "custom" || option.webCss) continue;
             if (isFontStackIneffective(option.cssValue, baseline)) result.add(option.id);
         }
         return result;
@@ -120,6 +122,7 @@ export function ReadingFontTier({
     }, [ineffective, inheritLabel, value]);
 
     const isCustom = value === "custom";
+    useEffect(() => { ensureReadingWebFont(value); }, [value]);
     const customFamily = previewFamily || loadedCustomFamily;
     /** 预览用的字体：自定义但还没上传就退回继承链，和真实渲染的结果一致 */
     const previewCss = value === "inherit"
