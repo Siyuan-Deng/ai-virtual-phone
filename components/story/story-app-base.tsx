@@ -511,7 +511,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
   const paperHidden = display?.paperHidden === true;
   const [loadedFontFamily, setLoadedFontFamily] = useState<string | null>(null);
   const fontInputRef = useRef<HTMLInputElement | null>(null);
-  const colorInputRef = useRef<HTMLInputElement | null>(null);
+  // 折叠标签 / 不进上下文标签：平时只露一行，点开才是输入框
+  const [openTagRow, setOpenTagRow] = useState<"fold" | "context" | null>(null);
   useEffect(() => {
     if (!fontAssetId) {
       setLoadedFontFamily(null);
@@ -1288,43 +1289,6 @@ export function StoryApp({ onClose }: StoryAppProps) {
               config={extraConfig}
               onLoad={(config) => updateExtraConfig(currentSession.id, config)}
             />
-            <div className="story-drawer-section">
-              <div className="story-drawer-eyebrow">工具</div>
-              <button
-                type="button"
-                className={`story-tool-btn${confirmingClearExtra ? " is-danger" : ""}`}
-                onClick={() => {
-                  if (!confirmingClearExtra) {
-                    setConfirmingClearExtra(true);
-                    return;
-                  }
-                  cancelStoryGenerationRun(currentSession.id);
-                  markGenerating(currentSession.id, false);
-                  clearStoryMessages(currentSession.id);
-                  setMessages([]);
-                  setVisibleMessageCount(STORY_INITIAL_LOAD);
-                  setConfirmingClearExtra(false);
-                  setStorageVersion((value) => value + 1);
-                }}
-              >
-                {confirmingClearExtra ? "再点一次，清空这个番外窗口" : "清空番外"}
-              </button>
-              <button
-                className="story-tool-btn"
-                onClick={() => {
-                  try {
-                    const rebuilt = rebuildStorySessionRenderCache(activeCharacterId, currentSession.id, { sessionFoldTags: display?.foldTags, bindings: extraBindings });
-                    setMessages(rebuilt);
-                    setStorageVersion((value) => value + 1);
-                    alert(`缓存重建完成，${rebuilt.length} 条消息已更新`);
-                  } catch (error) {
-                    alert(error instanceof Error ? error.message : "缓存重建失败，请检查 API 绑定配置");
-                  }
-                }}
-              >
-                重建渲染缓存
-              </button>
-            </div>
           </>
         ) : (
           <StoryMainBindingsSection
@@ -1406,69 +1370,112 @@ export function StoryApp({ onClose }: StoryAppProps) {
             <span className="story-bg-row-label">文字颜色</span>
             <span className="story-bg-row-actions">
               {customTextColor ? <i className="story-bg-row-swatch" style={{ background: customTextColor }} aria-hidden="true" /> : null}
-              <button type="button" onClick={() => colorInputRef.current?.click()}>更换</button>
+              {/* 取色器透明地盖在「更换」上：iPhone 上只能手指直接点到它才会弹出来，用代码 click() 打不开 */}
+              <span className="story-bg-row-color-btn">
+                更换
+                <input
+                  type="color"
+                  aria-label="更换文字颜色"
+                  value={customTextColor || "#3a3b3c"}
+                  onChange={(event) => {
+                    if (!currentSession) return;
+                    applySessionUpdates({ textColor: event.target.value, updatedAt: currentSession.updatedAt });
+                  }}
+                />
+              </span>
               {customTextColor ? <button type="button" onClick={clearTextColor}>清除</button> : null}
             </span>
-            <input
-              ref={colorInputRef}
-              type="color"
-              className="story-bg-row-color-input"
-              value={customTextColor || "#3a3b3c"}
-              onChange={(event) => {
-                if (!currentSession) return;
-                applySessionUpdates({ textColor: event.target.value, updatedAt: currentSession.updatedAt });
-              }}
-            />
           </div>
-          <div style={{ padding: "10px 0", borderBottom: "1px solid var(--c-story-drawer-border, rgba(124, 104, 68, 0.08))" }}>
-            <label style={{ fontSize: "calc(13px*var(--app-text-scale,1))", color: "var(--c-story-sub, rgba(95, 82, 61, 0.72))", display: "block", marginBottom: 6 }}>
-              折叠标签
-            </label>
-            <input
-              type="text"
-              value={foldTagsDraft}
-              onChange={(e) => setFoldTagsDraft(e.target.value)}
-              onBlur={() => applySessionUpdates({ foldTags: foldTagsDraft.trim() || undefined })}
-              placeholder="think,thinking"
-              style={{
-                width: "100%", boxSizing: "border-box",
-                padding: "8px 12px", borderRadius: 0,
-                border: "none", boxShadow: "inset 0 1px 3px rgba(0,0,0,0.06)",
-                background: "var(--c-story-css-box-bg, rgba(255, 251, 246, 0.88))",
-                color: "var(--c-story-text, #4b4335)",
-                fontSize: "calc(13px*var(--app-text-scale,1))", lineHeight: 1.6, fontFamily: "inherit",
-              }}
-            />
-            <div style={{ fontSize: "calc(11px*var(--app-text-scale,1))", marginTop: 4, color: "var(--c-story-sub, rgba(95, 82, 61, 0.72))" }}>
-              逗号分隔标签名，如 think,thinking,reasoning
+          <button
+            type="button"
+            className="story-bg-row story-bg-row-fold"
+            aria-expanded={openTagRow === "fold"}
+            onClick={() => setOpenTagRow((value) => (value === "fold" ? null : "fold"))}
+          >
+            <span className="story-bg-row-label">折叠标签</span>
+            <span className="story-bg-row-value">
+              <span>{foldTagsDraft.trim() || "think,thinking"}</span>
+              <i aria-hidden="true">›</i>
+            </span>
+          </button>
+          {openTagRow === "fold" ? (
+            <div className="story-bg-row-panel">
+              <input
+                type="text"
+                value={foldTagsDraft}
+                onChange={(e) => setFoldTagsDraft(e.target.value)}
+                onBlur={() => applySessionUpdates({ foldTags: foldTagsDraft.trim() || undefined })}
+                placeholder="think,thinking"
+              />
+              <div className="story-bg-row-help">逗号分隔标签名，如 think,thinking,reasoning</div>
             </div>
-          </div>
-          <div style={{ padding: "10px 0", borderBottom: "1px solid var(--c-story-drawer-border, rgba(124, 104, 68, 0.08))" }}>
-            <label style={{ fontSize: "calc(13px*var(--app-text-scale,1))", color: "var(--c-story-sub, rgba(95, 82, 61, 0.72))", display: "block", marginBottom: 6 }}>
-              不进上下文标签
-            </label>
-            <input
-              type="text"
-              value={contextExcludedTagsDraft}
-              onChange={(e) => setContextExcludedTagsDraft(e.target.value)}
-              onBlur={() => applySessionUpdates({ contextExcludedTags: contextExcludedTagsDraft.trim() || undefined })}
-              placeholder="think,thinking"
-              style={{
-                width: "100%", boxSizing: "border-box",
-                padding: "8px 12px", borderRadius: 0,
-                border: "none", boxShadow: "inset 0 1px 3px rgba(0,0,0,0.06)",
-                background: "var(--c-story-css-box-bg, rgba(255, 251, 246, 0.88))",
-                color: "var(--c-story-text, #4b4335)",
-                fontSize: "calc(13px*var(--app-text-scale,1))", lineHeight: 1.6, fontFamily: "inherit",
-              }}
-            />
-            <div style={{ fontSize: "calc(11px*var(--app-text-scale,1))", marginTop: 4, color: "var(--c-story-sub, rgba(95, 82, 61, 0.72))" }}>
-              默认 think,thinking；影响后续生成上下文，不影响显示与保存
+          ) : null}
+          <button
+            type="button"
+            className="story-bg-row story-bg-row-fold"
+            aria-expanded={openTagRow === "context"}
+            onClick={() => setOpenTagRow((value) => (value === "context" ? null : "context"))}
+          >
+            <span className="story-bg-row-label">不进上下文标签</span>
+            <span className="story-bg-row-value">
+              <span>{contextExcludedTagsDraft.trim() || "think,thinking"}</span>
+              <i aria-hidden="true">›</i>
+            </span>
+          </button>
+          {openTagRow === "context" ? (
+            <div className="story-bg-row-panel">
+              <input
+                type="text"
+                value={contextExcludedTagsDraft}
+                onChange={(e) => setContextExcludedTagsDraft(e.target.value)}
+                onBlur={() => applySessionUpdates({ contextExcludedTags: contextExcludedTagsDraft.trim() || undefined })}
+                placeholder="think,thinking"
+              />
+              <div className="story-bg-row-help">默认 think,thinking；影响后续生成上下文，不影响显示与保存</div>
             </div>
-          </div>
+          ) : null}
         </div>
 
-        {isExtra ? null : (
+        {/* 工具放最下面：正篇只有重建缓存，番外多一个清空番外 */}
+        {isExtra ? (
+          <div className="story-drawer-section">
+            <div className="story-drawer-eyebrow">工具</div>
+            <button
+              type="button"
+              className={`story-tool-btn${confirmingClearExtra ? " is-danger" : ""}`}
+              onClick={() => {
+                if (!confirmingClearExtra) {
+                  setConfirmingClearExtra(true);
+                  return;
+                }
+                cancelStoryGenerationRun(currentSession.id);
+                markGenerating(currentSession.id, false);
+                clearStoryMessages(currentSession.id);
+                setMessages([]);
+                setVisibleMessageCount(STORY_INITIAL_LOAD);
+                setConfirmingClearExtra(false);
+                setStorageVersion((value) => value + 1);
+              }}
+            >
+              {confirmingClearExtra ? "再点一次，清空这个番外窗口" : "清空番外"}
+            </button>
+            <button
+              className="story-tool-btn"
+              onClick={() => {
+                try {
+                  const rebuilt = rebuildStorySessionRenderCache(activeCharacterId, currentSession.id, { sessionFoldTags: display?.foldTags, bindings: extraBindings });
+                  setMessages(rebuilt);
+                  setStorageVersion((value) => value + 1);
+                  alert(`缓存重建完成，${rebuilt.length} 条消息已更新`);
+                } catch (error) {
+                  alert(error instanceof Error ? error.message : "缓存重建失败，请检查 API 绑定配置");
+                }
+              }}
+            >
+              重建渲染缓存
+            </button>
+          </div>
+        ) : (
           <div className="story-drawer-section">
             <div className="story-drawer-eyebrow">工具</div>
             <button

@@ -1494,13 +1494,79 @@
           border-radius: 50%;
           box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
         }
-        /* 取色器本身不显示，点「更换」打开（不能用 display:none，iOS 上那样点不开） */
-        .story-bg-row-color-input {
+        /* 文字颜色「更换」：取色器透明地盖在字上，手指点到的就是取色器本身（iPhone 只认这样） */
+        .story-bg-row-color-btn {
+          position: relative;
+          font-size: calc(13px*var(--app-text-scale,1));
+          color: var(--c-story-heading, #1e293b);
+        }
+        .story-bg-row-color-btn input {
           position: absolute;
-          width: 1px;
-          height: 1px;
+          inset: -8px -6px;
+          width: calc(100% + 12px);
+          height: calc(100% + 16px);
+          margin: 0;
+          padding: 0;
+          border: none;
           opacity: 0;
-          pointer-events: none;
+          cursor: pointer;
+        }
+        /* 折叠标签 / 不进上下文标签：平时一行，右边是现在填的；点开下面是输入框 */
+        .story-bg-row-fold {
+          width: 100%;
+          border-top: none;
+          border-left: none;
+          border-right: none;
+          background: none;
+          font: inherit;
+          text-align: left;
+        }
+        .story-bg-row-value {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+          max-width: 55%;
+          font-size: calc(13px*var(--app-text-scale,1));
+          color: var(--c-story-sub, #94a3b8);
+        }
+        .story-bg-row-value span {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .story-bg-row-value i {
+          font-style: normal;
+          transition: transform 0.15s ease;
+        }
+        .story-bg-row-fold[aria-expanded="true"] .story-bg-row-value i {
+          transform: rotate(90deg);
+        }
+        /* 展开时这一行和下面的输入框算一格，中间不画线 */
+        .story-bg-row-fold[aria-expanded="true"] {
+          border-bottom-color: transparent;
+        }
+        .story-bg-row-panel {
+          padding: 10px 0;
+          border-bottom: 1px solid var(--c-story-drawer-border, rgba(124, 104, 68, 0.08));
+        }
+        .story-bg-row-panel input {
+          width: 100%;
+          box-sizing: border-box;
+          padding: 8px 12px;
+          border: none;
+          border-radius: 0;
+          box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.06);
+          background: var(--c-story-css-box-bg, rgba(255, 251, 246, 0.88));
+          color: var(--c-story-text, #4b4335);
+          font: inherit;
+          font-size: calc(13px*var(--app-text-scale,1));
+          line-height: 1.6;
+        }
+        .story-bg-row-help {
+          margin-top: 4px;
+          font-size: calc(11px*var(--app-text-scale,1));
+          color: var(--c-story-sub, rgba(95, 82, 61, 0.72));
         }
         .story-bg-row-actions button {
           border: none;
@@ -1838,8 +1904,27 @@
           font-weight: 400;
           letter-spacing: 0.04em;
         }
-        .story-template-tabs .story-template-clear:disabled {
+        .story-template-tabs .story-template-clear:disabled,
+        .story-template-label-actions .story-template-clear:disabled {
           opacity: 0.4;
+        }
+        /* 「其它要求」右边：＋快捷指令、清空 */
+        .story-template-label-actions {
+          display: inline-flex;
+          align-items: baseline;
+          gap: 14px;
+        }
+        .story-template-label-actions .story-template-clear {
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          border: none;
+          background: none;
+          padding: 0 0 6px;
+          font: inherit;
+          font-size: calc(11.5px*var(--app-text-scale,1));
+          letter-spacing: 0.04em;
+          color: var(--c-story-sub, #94a3b8);
         }
         /* 番外方案：标签、下拉和按钮同一行 */
         .story-template-preset .story-template-label {

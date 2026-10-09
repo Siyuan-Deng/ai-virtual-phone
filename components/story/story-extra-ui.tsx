@@ -876,14 +876,25 @@ export function StoryExtraTemplateSheet({
         <div className="story-template-field story-template-extra" ref={quickMenuRef}>
           <div className="story-template-label-row">
             <span className="story-template-label">其它要求</span>
-            <button
-              type="button"
-              className="story-template-quick-btn"
-              aria-expanded={quickMenuOpen}
-              onClick={() => setQuickMenuOpen((value) => !value)}
-            >
-              <Plus size={12} />快捷指令
-            </button>
+            <span className="story-template-label-actions">
+              <button
+                type="button"
+                className="story-template-quick-btn"
+                aria-expanded={quickMenuOpen}
+                onClick={() => setQuickMenuOpen((value) => !value)}
+              >
+                <Plus size={12} />快捷指令
+              </button>
+              <button
+                type="button"
+                className="story-template-clear"
+                disabled={!draft.extra}
+                onClick={() => set({ extra: "" })}
+                aria-label="清空其它要求"
+              >
+                <Eraser size={13} />清空
+              </button>
+            </span>
           </div>
           <textarea rows={2} value={draft.extra} placeholder="可选：结局、要出现的细节、禁止事项……" aria-label="其它要求" onChange={(event) => set({ extra: event.target.value })} />
           {quickMenuOpen ? (
