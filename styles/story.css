@@ -1657,9 +1657,6 @@
         .story-composer[data-command="true"] {
           flex-wrap: wrap;
         }
-        .story-composer[data-command="true"] textarea {
-          box-shadow: inset 0 0 0 1px var(--c-story-heading, #1e293b);
-        }
         /* 指令模式时输入框上面一排快捷指令，横着滑 */
         .story-command-strip {
           flex: 0 0 100%;

@@ -925,7 +925,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
     setTemplateTop(shell && header ? header.getBoundingClientRect().bottom - shell.getBoundingClientRect().top : 96);
   }
 
-  /** asInstruction：系统指令，存成 system 消息，发给模型时也是 system */
+  /** asInstruction：系统指令，存成 system 消息、不马上生成；等下一次正常输入时一起发给模型（它是 system，你的输入是 user） */
   async function handleSend(userTextInput: string, extraOrder?: StoryExtraOrder, asInstruction = false) {
     const userText = userTextInput.trim();
     if (!activeSessionId || !userText || isGenerating) return;
@@ -944,6 +944,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
     });
     setMessages((prev) => [...prev, userMessage]);
     setStorageVersion((value) => value + 1);
+    if (asInstruction) return;
     markGenerating(sessionId, true);
     const generationRun = createStoryGenerationRun(sessionId);
     const generationRunId = generationRun.runId;
