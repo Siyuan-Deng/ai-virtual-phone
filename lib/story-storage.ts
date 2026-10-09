@@ -139,7 +139,18 @@ function getStorySessionActivityTime(session: StorySession): number {
   return Math.max(lastMessageTime, parseTime(session.updatedAt));
 }
 
+function storySessionMessageCount(sessionId: string): number {
+  let count = 0;
+  for (const message of _messagesCache) if (message.sessionId === sessionId) count += 1;
+  return count;
+}
+
 function isPreferredStorySession(candidate: StorySession, current: StorySession): boolean {
+  // 有内容的永远比空的优先：同一格里多出来的多半是读库没读到时新建的空会话，
+  // 不能因为它「更新」就把有剧情的那个挤掉
+  const candidateHasMessages = storySessionMessageCount(candidate.id) > 0;
+  const currentHasMessages = storySessionMessageCount(current.id) > 0;
+  if (candidateHasMessages !== currentHasMessages) return candidateHasMessages;
   const candidateTime = getStorySessionActivityTime(candidate);
   const currentTime = getStorySessionActivityTime(current);
   if (candidateTime !== currentTime) return candidateTime > currentTime;
@@ -187,24 +198,44 @@ function normalizeStorySessions(sessions: StorySession[]): { items: StorySession
   return { items: normalized, changed };
 }
 
+// 只写回整理后的会话，不删库里的记录：同一格里被挤掉的那个留在库里，
+// 它的消息在「找回剧情」里还能挂回来（以前这里先清空整张表，挤掉的会话连同引言等设置就没了）
 function persistStorySessionsSnapshot(sessions: StorySession[]): void {
-  storyDb.transaction("rw", storyDb.sessions, async () => {
-    await storyDb.sessions.clear();
-    await storyDb.sessions.bulkPut(sessions);
-  }).catch(() => undefined);
+  storyDb.sessions.bulkPut(sessions).catch(() => undefined);
 }
 
-export async function hydrateStoryStorage(): Promise<void> {
-  if (_hydrated || typeof window === "undefined") return;
-  const [sessions, messages] = await Promise.all([
-    storyDb.sessions.toArray().catch(() => []),
-    storyDb.messages.toArray().catch(() => []),
-  ]);
-  _messagesCache = messages;
-  const normalized = normalizeStorySessions(sessions);
-  _sessionsCache = normalized.items;
-  if (normalized.changed) persistStorySessionsSnapshot(normalized.items);
-  _hydrated = true;
+async function readStoryTables(): Promise<[StorySession[], StoryMessage[]]> {
+  // iOS 上 IndexedDB 偶尔会读失败（刚从后台回来时尤其多），读不到就当成空库会新建空会话，所以多试几次
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await Promise.all([storyDb.sessions.toArray(), storyDb.messages.toArray()]);
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+    }
+  }
+  console.warn("[Story] 读取剧情库失败:", lastError);
+  return [[], []];
+}
+
+let _hydrating: Promise<void> | null = null;
+
+export function hydrateStoryStorage(): Promise<void> {
+  if (_hydrated || typeof window === "undefined") return Promise.resolve();
+  // 桌面和剧情 App 会同时调；只读一次库，免得后到的那次拿旧快照把中间新写的盖掉
+  if (!_hydrating) {
+    _hydrating = readStoryTables().then(([sessions, messages]) => {
+      _messagesCache = messages;
+      const normalized = normalizeStorySessions(sessions);
+      _sessionsCache = normalized.items;
+      if (normalized.changed) persistStorySessionsSnapshot(normalized.items);
+      _hydrated = true;
+    }).finally(() => {
+      _hydrating = null;
+    });
+  }
+  return _hydrating;
 }
 
 export function loadStorySessions(): StorySession[] {
@@ -378,4 +409,118 @@ export function loadStoryProjectionEntries(
   }
 
   return projections;
+}
+
+// ── 找回剧情：消息还在、会话记录却没了（或被同一格里另一个挤掉）的那些 ──
+
+export type StoryOrphanGroup = {
+  sessionId: string;
+  count: number;
+  firstAt: string;
+  lastAt: string;
+  firstText: string;
+  lastText: string;
+  /** 有用番外模板发出的指令，多半是番外 */
+  looksLikeExtra: boolean;
+  /** 库里还留着它原来的会话记录（被挤掉的那种），能直接知道是谁的 */
+  record?: StorySession;
+  /** 确定是谁的才有（不按名字猜）：原记录里的角色，或某个角色的记忆总结进度正好停在这组的某条消息上 */
+  knownCharacterId?: string;
+  knownBy?: "record" | "memory";
+};
+
+function storyPlainText(message: StoryMessage, maxLen = 80): string {
+  const source = message.renderedContent || message.rawContent || "";
+  return source.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, maxLen);
+}
+
+/**
+ * 消息挂在一个不存在（或没被采用）的会话上的，按会话分组列出来。
+ * markers：时间戳 → 角色 id（各角色记忆总结进度停在的那一刻，精确到毫秒），对上了就能确定是谁的
+ */
+export async function listOrphanStoryGroups(markers?: Map<string, string>): Promise<StoryOrphanGroup[]> {
+  const known = new Set(_sessionsCache.map((session) => session.id));
+  const groups = new Map<string, StoryMessage[]>();
+  for (const message of _messagesCache) {
+    if (known.has(message.sessionId)) continue;
+    const list = groups.get(message.sessionId);
+    if (list) list.push(message);
+    else groups.set(message.sessionId, [message]);
+  }
+  if (groups.size === 0) return [];
+  const records = await storyDb.sessions.bulkGet([...groups.keys()]).catch(() => [] as (StorySession | undefined)[]);
+  const recordById = new Map(records.filter((item): item is StorySession => !!item).map((item) => [item.id, item]));
+  return [...groups.entries()].map(([sessionId, list]) => {
+    const sorted = [...list].sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+    const firstUser = sorted.find((message) => message.role === "user") ?? sorted[0];
+    const lastStory = [...sorted].reverse().find((message) => message.role === "assistant") ?? sorted[sorted.length - 1];
+    const record = recordById.get(sessionId);
+    const markerCharacterId = markers
+      ? sorted.map((message) => markers.get(message.createdAt)).find((id): id is string => !!id)
+      : undefined;
+    return {
+      sessionId,
+      count: sorted.length,
+      firstAt: sorted[0].createdAt,
+      lastAt: sorted[sorted.length - 1].createdAt,
+      firstText: storyPlainText(firstUser),
+      lastText: storyPlainText(lastStory),
+      looksLikeExtra: sorted.some((message) => !!message.extraOrder),
+      record,
+      knownCharacterId: record?.characterId || markerCharacterId,
+      knownBy: record?.characterId ? "record" as const : markerCharacterId ? "memory" as const : undefined,
+    };
+  }).sort((a, b) => b.lastAt.localeCompare(a.lastAt));
+}
+
+const STORY_DISPLAY_FIELDS = [
+  "customCSS", "foldTags", "contextExcludedTags", "metaQuote",
+  "backgroundImage", "paperHidden", "fontAsset", "textColor",
+] as const;
+
+/** 把一组找回的消息挂到某个角色的正篇 / 番外里；那边已经有消息的话按时间合在一起 */
+export async function attachOrphanStoryGroup(
+  orphanSessionId: string,
+  characterId: string,
+  kind: "main" | "extra",
+): Promise<StorySession> {
+  const target = createOrGetStorySession(characterId, kind);
+  if (target.id === orphanSessionId) return target;
+  const moved = _messagesCache
+    .filter((message) => message.sessionId === orphanSessionId)
+    .map((message) => ({ ...message, sessionId: target.id }));
+  if (moved.length === 0) return target;
+  const movedIds = new Set(moved.map((message) => message.id));
+  _messagesCache = _messagesCache.filter((message) => !movedIds.has(message.id));
+  _messagesCache.push(...moved);
+  await storyDb.messages.bulkPut(moved);
+
+  // 原来的会话记录还在的话，这边没设过的显示设置（引言、CSS 等）从那边拿回来
+  const record = await storyDb.sessions.get(orphanSessionId).catch(() => undefined);
+  const restored: Partial<StorySession> = {};
+  if (record) {
+    for (const field of STORY_DISPLAY_FIELDS) {
+      if (target[field] === undefined && record[field] !== undefined) {
+        (restored as Record<string, unknown>)[field] = record[field];
+      }
+    }
+    if (!target.uiPrefs?.theme && record.uiPrefs?.theme) restored.uiPrefs = record.uiPrefs;
+    if (kind === "extra" && !target.extraConfig && record.extraConfig) restored.extraConfig = record.extraConfig;
+  }
+
+  const all = loadStoryMessages(target.id);
+  const last = all[all.length - 1];
+  const previewSource = last ? (last.renderedContent || last.rawContent) : "";
+  const lastTime = last?.createdAt || target.updatedAt;
+  const next = updateStorySession(target.id, {
+    ...restored,
+    lastMessageId: last?.id,
+    lastMessagePreview: previewSource.replace(/\s+/g, " ").trim().slice(0, 64),
+    updatedAt: lastTime > target.updatedAt ? lastTime : target.updatedAt,
+  }) ?? target;
+  // 消息都搬走了，留着的旧记录只会在下次整理时又被挤掉，删掉
+  if (record && !_sessionsCache.some((session) => session.id === orphanSessionId)) {
+    await storyDb.sessions.delete(orphanSessionId).catch(() => undefined);
+  }
+  return next;
 }

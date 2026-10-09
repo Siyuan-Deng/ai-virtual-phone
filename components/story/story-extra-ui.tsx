@@ -18,6 +18,7 @@ import type {
   StoryExtraOrder,
   StoryExtraPerson,
   StoryExtraTemplate,
+  StoryOrphanGroup,
   StorySession,
 } from "@/lib/story-storage";
 import {
@@ -208,6 +209,202 @@ export function StoryCharacterSheet({
                 </button>
               ))}
             </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 找回剧情：消息还在、却没挂在任何角色上的 ──
+// 不按名字猜是谁的（会有同名角色）；只有原记录还在、或记忆总结进度精确对上时才预先选好
+
+function fullDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+type StorySlotCounts = (characterId: string, kind: "main" | "extra") => number;
+
+function StoryRecoverCard({
+  group,
+  entries,
+  characterId,
+  existingCount,
+  onChooseCharacter,
+  onAttach,
+}: {
+  group: StoryOrphanGroup;
+  entries: StoryCharacterEntry[];
+  characterId: string;
+  existingCount: StorySlotCounts;
+  onChooseCharacter: () => void;
+  onAttach: (sessionId: string, characterId: string, kind: "main" | "extra") => Promise<void>;
+}) {
+  const [kind, setKind] = useState<"main" | "extra">(() => (
+    group.record ? (group.record.kind === "extra" ? "extra" : "main") : (group.looksLikeExtra ? "extra" : "main")
+  ));
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setConfirming(false), [characterId]);
+  const character = entries.find((entry) => entry.character.id === characterId)?.character;
+  const kindLabel = kind === "extra" ? "番外" : "正篇";
+  const already = character ? existingCount(character.id, kind) : 0;
+  const range = fullDate(group.firstAt) === fullDate(group.lastAt)
+    ? fullDate(group.lastAt)
+    : `${fullDate(group.firstAt)} – ${fullDate(group.lastAt)}`;
+  const known = character && group.knownCharacterId === character.id;
+
+  return (
+    <div className="story-recover-card">
+      <div className="story-recover-meta">{group.count} 条 · {range}</div>
+      {group.firstText ? <div className="story-recover-line"><span>开头</span>{group.firstText}</div> : null}
+      {group.lastText && group.count > 1 ? <div className="story-recover-line"><span>最后</span>{group.lastText}</div> : null}
+      <button type="button" className="story-recover-pick" onClick={onChooseCharacter}>
+        {character ? (
+          <>
+            <Avatar src={character.avatar || undefined} name={character.name} size="sm" />
+            <span className="story-character-row-main">
+              <span className="story-character-row-name">{character.name}</span>
+              <span className="story-character-row-line">
+                正篇 {existingCount(character.id, "main")} 条 · 番外 {existingCount(character.id, "extra")} 条
+              </span>
+            </span>
+          </>
+        ) : (
+          <span className="story-recover-pick-empty">选择角色</span>
+        )}
+        <ChevronRight size={14} />
+      </button>
+      {known ? (
+        <div className="story-recover-note">
+          {group.knownBy === "record" ? "原来的记录里就是这个角色" : "这个角色的记忆总结进度正好停在这段里"}
+        </div>
+      ) : null}
+      <div className="story-mode-switch" role="tablist">
+        {(["main", "extra"] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            data-active={kind === value ? "true" : undefined}
+            onClick={() => {
+              setKind(value);
+              setConfirming(false);
+            }}
+          >
+            {value === "extra" ? "番外" : "正篇"}
+          </button>
+        ))}
+      </div>
+      {already > 0 && character ? (
+        <div className="story-recover-note">它的{kindLabel}里现在有 {already} 条，会按时间合在一起</div>
+      ) : null}
+      <button
+        type="button"
+        className={`story-tool-btn${confirming ? " is-danger" : ""}`}
+        disabled={!character || busy}
+        onClick={async () => {
+          if (!character) return;
+          if (!confirming) {
+            setConfirming(true);
+            return;
+          }
+          setBusy(true);
+          try {
+            await onAttach(group.sessionId, character.id, kind);
+          } finally {
+            setBusy(false);
+            setConfirming(false);
+          }
+        }}
+      >
+        {busy ? "正在挂回去…" : confirming ? `再点一次，挂到${character?.name ?? ""}的${kindLabel}` : "挂回去"}
+      </button>
+    </div>
+  );
+}
+
+export function StoryRecoverSheet({
+  groups,
+  entries,
+  existingCount,
+  onAttach,
+  onClose,
+}: {
+  groups: StoryOrphanGroup[];
+  entries: StoryCharacterEntry[];
+  existingCount: StorySlotCounts;
+  onAttach: (sessionId: string, characterId: string, kind: "main" | "extra") => Promise<void>;
+  onClose: () => void;
+}) {
+  const [picks, setPicks] = useState<Record<string, string>>({});
+  const [pickingFor, setPickingFor] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const pickedFor = (group: StoryOrphanGroup) => picks[group.sessionId] ?? (
+    group.knownCharacterId && entries.some(({ character }) => character.id === group.knownCharacterId) ? group.knownCharacterId : ""
+  );
+
+  if (pickingFor) {
+    const keyword = query.trim().toLowerCase();
+    const shown = keyword ? entries.filter(({ character }) => character.name.toLowerCase().includes(keyword)) : entries;
+    const close = () => {
+      setPickingFor(null);
+      setQuery("");
+    };
+    return (
+      <div className="story-drawer-sheet">
+        <SheetHead title="挂到哪个角色" onClose={close} />
+        <div className="story-sheet-body">
+          <div className="story-search">
+            <SearchIcon />
+            <input value={query} placeholder="搜索角色" onChange={(event) => setQuery(event.target.value)} />
+          </div>
+          <div className="story-sheet-scroll">
+            {shown.length === 0 ? <div className="story-sheet-empty">没有叫这个名字的角色</div> : null}
+            {shown.map(({ character }) => (
+              <button
+                key={character.id}
+                type="button"
+                className="story-character-row"
+                data-active={picks[pickingFor] === character.id ? "true" : undefined}
+                onClick={() => {
+                  setPicks((current) => ({ ...current, [pickingFor]: character.id }));
+                  close();
+                }}
+              >
+                <Avatar src={character.avatar || undefined} name={character.name} size="sm" />
+                <span className="story-character-row-main">
+                  <span className="story-character-row-name">{character.name}</span>
+                  <span className="story-character-row-line">
+                    正篇 {existingCount(character.id, "main")} 条 · 番外 {existingCount(character.id, "extra")} 条
+                  </span>
+                </span>
+                <span className="story-character-row-date">{shortDate(character.createdAt)}建</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="story-drawer-sheet">
+      <SheetHead title="找回剧情" onClose={onClose} />
+      <div className="story-sheet-body">
+        <div className="story-sheet-scroll">
+          {groups.length === 0 ? <div className="story-sheet-empty">没有要找回的剧情了</div> : null}
+          {groups.map((group) => (
+            <StoryRecoverCard
+              key={group.sessionId}
+              group={group}
+              entries={entries}
+              characterId={pickedFor(group)}
+              existingCount={existingCount}
+              onChooseCharacter={() => setPickingFor(group.sessionId)}
+              onAttach={onAttach}
+            />
           ))}
         </div>
       </div>

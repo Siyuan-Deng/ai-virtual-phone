@@ -40,7 +40,7 @@ import { Avatar } from "@/components/ui/primitives";
 import { StoryHtmlRenderer } from "@/components/ui/story-html-renderer";
 import { loadCharacters } from "@/lib/character-storage";
 import { maybeRunSummarization } from "@/lib/memory-summarizer";
-import { incrementEventCounter } from "@/lib/memory-storage";
+import { getLastSummarizedTimestamp, incrementEventCounter } from "@/lib/memory-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "@/lib/chat-asset-storage";
 import { getThemeAssetDataUrl, saveThemeAssetFromBlob } from "@/lib/theme-storage";
@@ -50,11 +50,13 @@ import {
   rebuildStorySessionRenderCache,
 } from "@/lib/story-engine";
 import {
+  attachOrphanStoryGroup,
   clearStoryMessages,
   createOrGetStorySession,
   findLastActiveStorySession,
   findMainStorySession,
   hydrateStoryStorage,
+  listOrphanStoryGroups,
   loadStoryMessages,
   loadStorySessions,
   pushStoryMessage,
@@ -64,6 +66,7 @@ import {
   type StoryExtraConfig,
   type StoryExtraOrder,
   type StoryMessage,
+  type StoryOrphanGroup,
   type StorySession,
   updateStorySession,
 } from "@/lib/story-storage";
@@ -80,6 +83,7 @@ import {
   StoryMainBindingsSection,
   StoryNowCard,
   StoryRecentSection,
+  StoryRecoverSheet,
   loadStoryApiOverride,
   orderStoryCharacters,
   saveStoryApiOverride,
@@ -237,7 +241,17 @@ async function shrinkStoryBackground(file: File): Promise<Blob> {
   }
 }
 
-type StoryDrawerSheet = { type: "characters" } | { type: "binding"; kind: StoryBindingKind } | { type: "mainApi" };
+/** 各角色记忆总结进度停在的时间（精确到毫秒）→ 角色 id；找回剧情时用它确定一段剧情是谁的 */
+function storyMemoryMarkers(): Map<string, string> {
+  const markers = new Map<string, string>();
+  for (const character of loadCharacters()) {
+    const timestamp = getLastSummarizedTimestamp(character.id);
+    if (timestamp) markers.set(timestamp, character.id);
+  }
+  return markers;
+}
+
+type StoryDrawerSheet = { type: "characters" } | { type: "binding"; kind: StoryBindingKind } | { type: "mainApi" } | { type: "recover" };
 
 function resizeStoryComposerTextarea(el: HTMLTextAreaElement) {
   el.style.height = "auto";
@@ -444,6 +458,18 @@ export function StoryApp({ onClose }: StoryAppProps) {
     return () => window.removeEventListener("settings-bindings-updated", bump);
   }, []);
   const [confirmingClearExtra, setConfirmingClearExtra] = useState(false);
+  // 消息还在、却没挂在任何角色上的剧情；有的话侧栏工具里出现「找回剧情」
+  const [orphanGroups, setOrphanGroups] = useState<StoryOrphanGroup[]>([]);
+  useEffect(() => {
+    if (!ready || !drawerOpen) return;
+    let cancelled = false;
+    listOrphanStoryGroups(storyMemoryMarkers()).then((groups) => {
+      if (!cancelled) setOrphanGroups(groups);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, drawerOpen]);
   // 正篇还是番外；换角色时回到正篇
   const [mode, setMode] = useState<"main" | "extra">("main");
   const [templateTop, setTemplateTop] = useState<number | null>(null);
@@ -884,6 +910,30 @@ export function StoryApp({ onClose }: StoryAppProps) {
     if (!currentSession) return;
     // 正篇清掉就没有了（跟着正篇的番外也一起没了）；番外清掉是「番外不要背景」，正篇不受影响
     applySessionUpdates({ backgroundImage: isExtra ? "" : undefined, updatedAt: currentSession.updatedAt });
+  }
+
+  function storySlotMessageCount(characterId: string, kind: "main" | "extra"): number {
+    const session = loadStorySessions().find((item) => (
+      item.characterId === characterId && (item.kind === "extra" ? "extra" : "main") === kind
+    ));
+    return session ? loadStoryMessages(session.id).length : 0;
+  }
+
+  async function attachOrphan(sessionId: string, characterId: string, kind: "main" | "extra") {
+    const count = orphanGroups.find((group) => group.sessionId === sessionId)?.count ?? 0;
+    try {
+      const target = await attachOrphanStoryGroup(sessionId, characterId, kind);
+      if (target.id === activeSessionIdRef.current) {
+        setMessages(loadStoryMessages(target.id));
+        setVisibleMessageCount(STORY_INITIAL_LOAD);
+      }
+      setOrphanGroups(await listOrphanStoryGroups(storyMemoryMarkers()));
+      setStorageVersion((value) => value + 1);
+      const name = loadCharacters().find((character) => character.id === characterId)?.name ?? "";
+      alert(`已挂回${name}的${kind === "extra" ? "番外" : "正篇"}，${count} 条`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "没挂上，请重试");
+    }
   }
 
   function updateExtraConfig(sessionId: string, patch: Partial<StoryExtraConfig>) {
@@ -1441,6 +1491,11 @@ export function StoryApp({ onClose }: StoryAppProps) {
         {isExtra ? (
           <div className="story-drawer-section">
             <div className="story-drawer-eyebrow">工具</div>
+            {orphanGroups.length > 0 ? (
+              <button type="button" className="story-tool-btn" onClick={() => setDrawerSheet({ type: "recover" })}>
+                找回剧情（{orphanGroups.length} 段）
+              </button>
+            ) : null}
             <button
               type="button"
               className={`story-tool-btn${confirmingClearExtra ? " is-danger" : ""}`}
@@ -1479,6 +1534,11 @@ export function StoryApp({ onClose }: StoryAppProps) {
         ) : (
           <div className="story-drawer-section">
             <div className="story-drawer-eyebrow">工具</div>
+            {orphanGroups.length > 0 ? (
+              <button type="button" className="story-tool-btn" onClick={() => setDrawerSheet({ type: "recover" })}>
+                找回剧情（{orphanGroups.length} 段）
+              </button>
+            ) : null}
             <button
               className="story-tool-btn"
               onClick={() => {
@@ -1511,6 +1571,15 @@ export function StoryApp({ onClose }: StoryAppProps) {
           kind={drawerSheet.kind}
           bindings={extraConfig.bindings}
           onChange={(bindings) => updateExtraConfig(currentSession.id, { bindings })}
+          onClose={() => setDrawerSheet(null)}
+        />
+      ) : null}
+      {drawerOpen && drawerSheet?.type === "recover" ? (
+        <StoryRecoverSheet
+          groups={orphanGroups}
+          entries={characterEntries}
+          existingCount={storySlotMessageCount}
+          onAttach={attachOrphan}
           onClose={() => setDrawerSheet(null)}
         />
       ) : null}
