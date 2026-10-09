@@ -90,22 +90,22 @@ export function cleanStoryExtraScenes(value: string): string {
 }
 
 /** 模板拼成发出去的那句指令，格式照用户给的范例：
- *  （$系统指令：现在暂停当前剧情，为我生成一个番外小剧场。不需要记忆区，标题自拟。大概内容为……。这是一条if线：……。
- *   内容要4000字以上，文风……，以第二人称称呼{user}，以第三人称称呼{char}。我需要3个不同的场景。其它要求）
+ *  （$系统指令：现在暂停当前剧情，为我生成一个番外小剧场。不需要记忆区，标题自拟。这是一条if线：……。大概内容为……。
+ *   内容要4000字以上，我需要3个不同的场景，文风……，以第二人称称呼{user}，以第三人称称呼{char}。其它要求）
  *  哪项没填就省掉那一句。剧情历史不走宏替换，所以名字在这里直接代入。 */
 export function buildStoryExtraInstruction(template: StoryExtraTemplate, names: { user: string; char: string }): string {
     let body = "现在暂停当前剧情，为我生成一个番外小剧场。不需要记忆区，标题自拟。";
-    if (template.content.trim()) body += asSentence(`大概内容为${template.content.trim()}`);
     if (template.ifLine.trim()) body += asSentence(`这是一条if线：${template.ifLine.trim()}`);
+    if (template.content.trim()) body += asSentence(`大概内容为${template.content.trim()}`);
     const clauses: string[] = [];
     const words = cleanWords(template.words);
     if (words) clauses.push(`内容要${words}字以上`);
+    const scenes = cleanStoryExtraScenes(template.scenes);
+    if (scenes) clauses.push(`我需要${scenes}个不同的场景`);
     if (template.style.trim()) clauses.push(`文风${template.style.trim()}`);
     clauses.push(`以${template.userPerson}称呼${names.user}`);
     clauses.push(`以${template.charPerson}称呼${names.char}`);
     body += `${clauses.join("，")}。`;
-    const scenes = cleanStoryExtraScenes(template.scenes);
-    if (scenes) body += `我需要${scenes}个不同的场景。`;
     if (template.extra.trim()) body += asSentence(template.extra);
     return `（$系统指令：${body}）`;
 }

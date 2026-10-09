@@ -668,17 +668,29 @@ export function StoryCommandSettingsSection({
   onButtonVisibleChange,
   commands,
   onCommandsChange,
+  sending,
+  onSend,
 }: {
   buttonVisible: boolean;
   onButtonVisibleChange: (visible: boolean) => void;
   commands: string[];
   onCommandsChange: (commands: string[]) => void;
+  /** 正在生成时不能发 */
+  sending: boolean;
+  /** 在这里直接把写的这条当系统指令发出去 */
+  onSend: (text: string) => void;
 }) {
   const [draft, setDraft] = useState("");
   const add = () => {
     const text = draft.trim();
     if (!text) return;
     onCommandsChange([...commands, text]);
+    setDraft("");
+  };
+  const send = () => {
+    const text = draft.trim();
+    if (!text || sending) return;
+    onSend(text);
     setDraft("");
   };
   return (
@@ -710,13 +722,20 @@ export function StoryCommandSettingsSection({
           </div>
         ) : null}
         <div className="story-command-add">
-          <textarea
-            rows={2}
+          <input
             value={draft}
             placeholder="输入快捷指令"
+            enterKeyHint="send"
             onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                send();
+              }
+            }}
           />
-          <button type="button" disabled={!draft.trim()} onClick={add}>保存</button>
+          <button type="button" className="story-command-save" disabled={!draft.trim()} onClick={add}>保存</button>
+          <button type="button" className="story-command-send" disabled={!draft.trim() || sending} onClick={send}>发送</button>
         </div>
       </div>
     </div>

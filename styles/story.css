@@ -1455,19 +1455,22 @@
         }
 
         /* === 系统指令：输入栏左边的「指令」开关，打开后输入框发的是系统指令 === */
+        /* 关着：透明底 + 细边，颜色全跟主题的次要文字色走，深色主题下也看得见 */
         .story-command-toggle {
           flex: 0 0 auto;
           height: 36px;
           padding: 0 12px;
           border: none;
           border-radius: 0;
-          background: var(--c-story-input-inner, rgba(248, 250, 252, 0.78));
+          background: transparent;
+          box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-story-sub, #64748b) 45%, transparent);
           color: var(--c-story-sub, #64748b);
           font: inherit;
           font-size: calc(12px*var(--app-text-scale,1));
           letter-spacing: 0.1em;
         }
         .story-command-toggle[data-on="true"] {
+          box-shadow: none;
           background: var(--c-story-heading, #1e293b);
           color: var(--c-story-on-heading, var(--c-story-drawer-top, #ffffff));
         }
@@ -1561,37 +1564,48 @@
           background: none;
           color: var(--c-story-sub, #94a3b8);
         }
+        /* [输入快捷指令][保存][发送] 一行 */
         .story-command-add {
           display: flex;
           align-items: stretch;
-          gap: 8px;
+          gap: 6px;
         }
-        .story-command-add textarea {
+        .story-command-add input {
           flex: 1;
           min-width: 0;
+          height: 34px;
           box-sizing: border-box;
-          padding: 8px 12px;
+          padding: 0 10px;
           border: none;
           border-radius: 0;
           outline: none;
-          resize: none;
           box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.06);
           background: var(--c-story-css-box-bg, rgba(255, 251, 246, 0.88));
           color: var(--c-story-text, #4b4335);
           font: inherit;
           font-size: calc(13px*var(--app-text-scale,1));
-          line-height: 1.6;
+        }
+        .story-command-add input::placeholder {
+          color: color-mix(in srgb, var(--c-story-placeholder, #94a3b8) 70%, transparent);
         }
         .story-command-add button {
           flex: 0 0 auto;
-          padding: 0 14px;
+          height: 34px;
+          padding: 0 10px;
           border: none;
           border-radius: 0;
-          background: var(--c-story-heading, #1e293b);
-          color: var(--c-story-on-heading, var(--c-story-drawer-top, #ffffff));
           font: inherit;
           font-size: calc(12px*var(--app-text-scale,1));
-          letter-spacing: 0.1em;
+          letter-spacing: 0.08em;
+        }
+        .story-command-add .story-command-save {
+          background: transparent;
+          box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-story-sub, #64748b) 45%, transparent);
+          color: var(--c-story-sub, #64748b);
+        }
+        .story-command-add .story-command-send {
+          background: var(--c-story-heading, #1e293b);
+          color: var(--c-story-on-heading, var(--c-story-drawer-top, #ffffff));
         }
         .story-command-add button:disabled {
           opacity: 0.4;

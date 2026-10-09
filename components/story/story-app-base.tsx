@@ -1201,6 +1201,11 @@ export function StoryApp({ onClose }: StoryAppProps) {
           }}
           commands={quickCommands}
           onCommandsChange={(commands) => setQuickCommands(saveStoryQuickCommands(commands))}
+          sending={isGenerating}
+          onSend={(text) => {
+            setDrawerOpen(false);
+            void handleSend(text, undefined, true);
+          }}
         />
 
         <div className="story-drawer-section">
