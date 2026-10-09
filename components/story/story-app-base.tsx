@@ -56,6 +56,7 @@ import {
   findLastActiveStorySession,
   findMainStorySession,
   hydrateStoryStorage,
+  isStoryStorageHydrated,
   listOrphanStoryGroups,
   loadStoryMessages,
   loadStorySessions,
@@ -446,6 +447,9 @@ const StoryComposer = memo(function StoryComposer({
 
 export function StoryApp({ onClose }: StoryAppProps) {
   const [ready, setReady] = useState(false);
+  // 剧情库这次没读出来（iOS 偶尔会）：不新建会话，提示重试
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [, setStorageVersion] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   // 侧栏里再盖的一层：全部角色 / 番外绑定的选项
@@ -591,6 +595,12 @@ export function StoryApp({ onClose }: StoryAppProps) {
 
   useEffect(() => {
     hydrateStoryStorage().then(() => {
+      if (!isStoryStorageHydrated()) {
+        setLoadFailed(true);
+        setReady(true);
+        return;
+      }
+      setLoadFailed(false);
       const allCharacters = loadCharacters();
       // 回到最近一次聊过的那个窗口（正篇或番外）；角色删了或者还没聊过就第一个角色的正篇
       const last = findLastActiveStorySession();
@@ -615,7 +625,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
       setCommandButtonVisible(loadStoryCommandButtonVisible());
       setReady(true);
     });
-  }, []);
+  }, [loadAttempt]);
 
   useEffect(() => {
     if (!activeCharacterId) return;
@@ -1241,7 +1251,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
 
   if (!ready) return null;
 
-  if (characters.length === 0) {
+  if (loadFailed || characters.length === 0) {
     return (
       <div className="story-app-shell" data-story-theme="paper">
         <div className="story-shell-inner">
@@ -1263,12 +1273,20 @@ export function StoryApp({ onClose }: StoryAppProps) {
               <div className="story-empty story-empty-panel">
                 <BookOpenIcon width={30} height={30} opacity={0.45} />
                 <div>
-                  <div className="story-empty-title">还没有角色卡</div>
-                  <div className="story-empty-desc">请先创建或导入角色卡，再进入剧情 APP 开始故事。</div>
+                  <div className="story-empty-title">{loadFailed ? "剧情这次没读出来" : "还没有角色卡"}</div>
+                  <div className="story-empty-desc">
+                    {loadFailed ? "数据还在，只是手机这次没读出来。点重试，不行就关掉 App 再打开。" : "请先创建或导入角色卡，再进入剧情 APP 开始故事。"}
+                  </div>
                 </div>
-                <button className="story-empty-action" onClick={onClose}>
-                  返回
-                </button>
+                {loadFailed ? (
+                  <button className="story-empty-action" onClick={() => setLoadAttempt((value) => value + 1)}>
+                    重试
+                  </button>
+                ) : (
+                  <button className="story-empty-action" onClick={onClose}>
+                    返回
+                  </button>
+                )}
               </div>
             </div>
           </div>

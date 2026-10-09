@@ -1,4 +1,5 @@
 import Dexie from "dexie";
+import { hydrateKvDb, kvGet, kvKeysWithPrefix, kvRemove, kvSet } from "./kv-db";
 import { formatChatTimestamp } from "./llm-prompt-assembler";
 
 export type StoryUiPrefs = {
@@ -204,34 +205,141 @@ function persistStorySessionsSnapshot(sessions: StorySession[]): void {
   storyDb.sessions.bulkPut(sessions).catch(() => undefined);
 }
 
-async function readStoryTables(): Promise<[StorySession[], StoryMessage[]]> {
-  // iOS 上 IndexedDB 偶尔会读失败（刚从后台回来时尤其多），读不到就当成空库会新建空会话，所以多试几次
+// ── 会话备份 ──
+// 每个会话（正篇 / 番外）的设置在 KV 库里另存一份，一个会话一条，只在设置真的变了时才写。
+// 剧情库里的会话记录要是没了（不管什么原因），只要它的消息还在，下次打开就从这里原样补回来：
+// 正文、记忆区的剧情事件、引言、CSS、背景都在，不用手动找回。
+const SESSION_BACKUP_PREFIX = "ai_phone_story_session_backup_v1:";
+// KV 库读好之后才写：没读出来时写进去的半份会把原来那份盖掉
+let _backupReady = false;
+const _backupSignatures = new Map<string, string>();
+
+/** 要备份的部分：最后一条消息能从消息算出来，不存 */
+function sessionBackupRecord(session: StorySession): Partial<StorySession> {
+  const record: Partial<StorySession> = { ...session };
+  delete record.lastMessageId;
+  delete record.lastMessagePreview;
+  return record;
+}
+
+function sessionBackupSignature(session: StorySession): string {
+  // 更新时间每发一条都会变，不算「设置变了」
+  const record = sessionBackupRecord(session);
+  delete record.updatedAt;
+  return JSON.stringify(record);
+}
+
+function backupStorySession(session: StorySession): void {
+  if (!_backupReady) return;
+  const signature = sessionBackupSignature(session);
+  if (_backupSignatures.get(session.id) === signature) return;
+  _backupSignatures.set(session.id, signature);
+  kvSet(SESSION_BACKUP_PREFIX + session.id, JSON.stringify(sessionBackupRecord(session)));
+}
+
+function removeStorySessionBackup(sessionId: string): void {
+  _backupSignatures.delete(sessionId);
+  if (kvGet(SESSION_BACKUP_PREFIX + sessionId) !== null) kvRemove(SESSION_BACKUP_PREFIX + sessionId);
+}
+
+function readStorySessionBackups(): Map<string, StorySession> {
+  const backups = new Map<string, StorySession>();
+  for (const key of kvKeysWithPrefix(SESSION_BACKUP_PREFIX)) {
+    try {
+      const record = JSON.parse(kvGet(key) || "null") as StorySession | null;
+      const id = key.slice(SESSION_BACKUP_PREFIX.length);
+      if (!record || typeof record.characterId !== "string" || !record.characterId.trim()) continue;
+      backups.set(id, { ...record, id });
+    } catch {
+      // 坏掉的一条跳过，别的照常
+    }
+  }
+  return backups;
+}
+
+/** 从消息补上最后一条和更新时间（备份里不存这几项） */
+function withLastMessageFrom(session: StorySession, messages: StoryMessage[]): StorySession {
+  let last: StoryMessage | undefined;
+  for (const message of messages) {
+    if (message.sessionId !== session.id) continue;
+    if (!last || (message.createdAt || "") > (last.createdAt || "")) last = message;
+  }
+  if (!last) return session;
+  const preview = (last.renderedContent || last.rawContent || "").replace(/\s+/g, " ").trim().slice(0, 64);
+  return {
+    ...session,
+    lastMessageId: last.id,
+    lastMessagePreview: preview,
+    updatedAt: (last.createdAt || "") > (session.updatedAt || "") ? last.createdAt : session.updatedAt,
+  };
+}
+
+async function readStoryTables(): Promise<{ ok: boolean; sessions: StorySession[]; messages: StoryMessage[] }> {
+  // iOS 上 IndexedDB 偶尔会读失败（刚从后台回来时尤其多），多试几次
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      return await Promise.all([storyDb.sessions.toArray(), storyDb.messages.toArray()]);
+      const [sessions, messages] = await Promise.all([storyDb.sessions.toArray(), storyDb.messages.toArray()]);
+      return { ok: true, sessions, messages };
     } catch (error) {
       lastError = error;
       await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
     }
   }
   console.warn("[Story] 读取剧情库失败:", lastError);
-  return [[], []];
+  return { ok: false, sessions: [], messages: [] };
 }
 
 let _hydrating: Promise<void> | null = null;
+
+/** 剧情库读好了没有。没读出来时别新建会话（那样会拿空库当真，新建一堆空会话） */
+export function isStoryStorageHydrated(): boolean {
+  return _hydrated;
+}
 
 export function hydrateStoryStorage(): Promise<void> {
   if (_hydrated || typeof window === "undefined") return Promise.resolve();
   // 桌面和剧情 App 会同时调；只读一次库，免得后到的那次拿旧快照把中间新写的盖掉
   if (!_hydrating) {
-    _hydrating = readStoryTables().then(([sessions, messages]) => {
+    _hydrating = (async () => {
+      const [read, kvReady] = await Promise.all([
+        readStoryTables(),
+        hydrateKvDb().then(() => true, () => false),
+      ]);
+      // 读失败不当成空库：_hydrated 保持 false，下次打开再读（和 kv-db 一样，成功才算读好）
+      if (!read.ok) return;
+      const { messages } = read;
+      let sessions = read.sessions;
+
+      if (kvReady) {
+        // 会话记录没了、消息还在的，从备份补回来
+        const backups = readStorySessionBackups();
+        const known = new Set(sessions.map((session) => session.id));
+        const referenced = new Set(messages.map((message) => message.sessionId));
+        const restored: StorySession[] = [];
+        for (const [id, backup] of backups) {
+          _backupSignatures.set(id, sessionBackupSignature(backup));
+          if (known.has(id)) continue;
+          if (referenced.has(id)) restored.push(withLastMessageFrom(backup, messages));
+          // 库里没有、也没有消息：会话真的不在了（比如清空了故事数据），备份也不留
+          else removeStorySessionBackup(id);
+        }
+        if (restored.length > 0) {
+          console.warn(`[Story] 从备份补回 ${restored.length} 个会话记录`);
+          storyDb.sessions.bulkPut(restored).catch(() => undefined);
+          sessions = [...sessions, ...restored];
+        }
+        _backupReady = true;
+        // 第一次用这一版时把现有的会话都备份一份；之后只写设置有变的
+        for (const session of sessions) backupStorySession(session);
+      }
+
       _messagesCache = messages;
       const normalized = normalizeStorySessions(sessions);
       _sessionsCache = normalized.items;
       if (normalized.changed) persistStorySessionsSnapshot(normalized.items);
       _hydrated = true;
-    }).finally(() => {
+    })().finally(() => {
       _hydrating = null;
     });
   }
@@ -285,6 +393,7 @@ export function createOrGetStorySession(characterId: string, kind: "main" | "ext
   };
   _sessionsCache.unshift(session);
   storyDb.sessions.put(session).catch(() => undefined);
+  backupStorySession(session);
   return session;
 }
 
@@ -299,6 +408,7 @@ export function updateStorySession(sessionId: string, updates: Partial<StorySess
   };
   _sessionsCache[idx] = next;
   storyDb.sessions.put(next).catch(() => undefined);
+  backupStorySession(next);
   return next;
 }
 
@@ -519,8 +629,9 @@ export async function attachOrphanStoryGroup(
     updatedAt: lastTime > target.updatedAt ? lastTime : target.updatedAt,
   }) ?? target;
   // 消息都搬走了，留着的旧记录只会在下次整理时又被挤掉，删掉
-  if (record && !_sessionsCache.some((session) => session.id === orphanSessionId)) {
-    await storyDb.sessions.delete(orphanSessionId).catch(() => undefined);
+  if (!_sessionsCache.some((session) => session.id === orphanSessionId)) {
+    if (record) await storyDb.sessions.delete(orphanSessionId).catch(() => undefined);
+    removeStorySessionBackup(orphanSessionId);
   }
   return next;
 }
