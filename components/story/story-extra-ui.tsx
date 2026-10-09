@@ -22,6 +22,7 @@ import type {
 } from "@/lib/story-storage";
 import {
   STORY_EXTRA_PERSONS,
+  STORY_EXTRA_PRESETS_UPDATED_EVENT,
   cleanStoryExtraScenes,
   deleteStoryExtraPreset,
   loadStoryExtraPresets,
@@ -457,6 +458,12 @@ export function StoryExtraPresetBar({
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [presets, setPresets] = useState<StoryExtraPreset[]>(() => loadStoryExtraPresets());
+  // 另一个下拉框（侧栏 / 番外模板）存了或删了方案，这里跟着刷新
+  useEffect(() => {
+    const reload = () => setPresets(loadStoryExtraPresets());
+    window.addEventListener(STORY_EXTRA_PRESETS_UPDATED_EVENT, reload);
+    return () => window.removeEventListener(STORY_EXTRA_PRESETS_UPDATED_EVENT, reload);
+  }, []);
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);

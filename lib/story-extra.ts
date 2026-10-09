@@ -151,12 +151,16 @@ export function loadStoryExtraPresets(): StoryExtraPreset[] {
     }
 }
 
+/** 方案列表变了：侧栏和番外模板里各有一个方案下拉框，靠这个互相刷新 */
+export const STORY_EXTRA_PRESETS_UPDATED_EVENT = "story-extra-presets-updated";
+
 function persistPresets(list: StoryExtraPreset[]): void {
     try {
         kvSet(PRESET_KEY, JSON.stringify(list.slice(-PRESET_LIMIT)));
     } catch {
         // 存不进去就只在这次打开里有效
     }
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(STORY_EXTRA_PRESETS_UPDATED_EVENT));
 }
 
 export function saveStoryExtraPreset(name: string, config: StoryExtraConfig): StoryExtraPreset {
