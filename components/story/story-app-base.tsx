@@ -42,6 +42,7 @@ import { loadCharacters } from "@/lib/character-storage";
 import { maybeRunSummarization } from "@/lib/memory-summarizer";
 import { incrementEventCounter } from "@/lib/memory-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
+import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "@/lib/chat-asset-storage";
 import {
   generateStoryCompletion,
   getStoryRenderSignature,
@@ -179,7 +180,32 @@ function storyDisplaySettings(session: StorySession) {
     foldTags: session.foldTags ?? main?.foldTags,
     contextExcludedTags: session.contextExcludedTags ?? main?.contextExcludedTags,
     metaQuote: session.metaQuote ?? main?.metaQuote ?? DEFAULT_STORY_META_QUOTE,
+    backgroundImage: session.backgroundImage ?? main?.backgroundImage ?? "",
   };
+}
+
+/** 剧情背景存之前缩到长边 1600：手机原图好几兆，整张塞进页面背景会卡 */
+async function shrinkStoryBackground(file: File): Promise<Blob> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("这张图片打不开，换一张试试"));
+      img.src = url;
+    });
+    const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+    if (scale === 1 && file.size < 1.5 * 1024 * 1024) return file;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return await new Promise<Blob>((resolve) => canvas.toBlob((blob) => resolve(blob ?? file), "image/jpeg", 0.88));
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 type StoryDrawerSheet = { type: "characters" } | { type: "binding"; kind: StoryBindingKind } | { type: "mainApi" };
@@ -445,6 +471,21 @@ export function StoryApp({ onClose }: StoryAppProps) {
   );
   const display = currentSession ? storyDisplaySettings(currentSession) : null;
   const uiPrefs = display?.uiPrefs || {};
+  // 剧情背景：存的是图片库 id，读成地址后放进 --story-wallpaper（自定义 CSS 也用这个变量）
+  const backgroundImageId = display?.backgroundImage || "";
+  const [wallpaperUrl, setWallpaperUrl] = useState<string | null>(null);
+  const backgroundInputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (!backgroundImageId) {
+      setWallpaperUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void getChatImageFromIndexedDB(backgroundImageId).then((url) => {
+      if (!cancelled) setWallpaperUrl(url);
+    });
+    return () => { cancelled = true; };
+  }, [backgroundImageId]);
   const isGenerating = Boolean(activeSessionId) && generatingSessionIds.has(activeSessionId);
   // 番外：单独的绑定，历史只取当前这一篇，不写记忆区
   const isExtra = currentSession?.kind === "extra";
@@ -751,6 +792,23 @@ export function StoryApp({ onClose }: StoryAppProps) {
     setFoldTagsDraft(nextDisplay.foldTags ?? "think,thinking");
     setContextExcludedTagsDraft(nextDisplay.contextExcludedTags ?? "think,thinking");
     setStorageVersion((value) => value + 1);
+  }
+
+  async function handleBackgroundFile(file: File | undefined) {
+    if (!file || !currentSession) return;
+    try {
+      const id = await saveChatImageToIndexedDB(await shrinkStoryBackground(file));
+      // 换背景不算一次阅读，不改「最近」的顺序
+      applySessionUpdates({ backgroundImage: id, updatedAt: currentSession.updatedAt });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "背景保存失败，请重试");
+    }
+  }
+
+  function clearBackground() {
+    if (!currentSession) return;
+    // 正篇清掉就没有了（跟着正篇的番外也一起没了）；番外清掉是「番外不要背景」，正篇不受影响
+    applySessionUpdates({ backgroundImage: isExtra ? "" : undefined, updatedAt: currentSession.updatedAt });
   }
 
   function updateExtraConfig(sessionId: string, patch: Partial<StoryExtraConfig>) {
@@ -1103,6 +1161,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
     <div
       className={`story-app-shell story-session-${currentSession.id}`}
       data-story-theme={uiPrefs.theme || "paper"}
+      data-wallpaper={wallpaperUrl ? "" : undefined}
+      style={wallpaperUrl ? ({ "--story-wallpaper": `url("${wallpaperUrl}")` } as React.CSSProperties) : undefined}
       onTouchStart={(event) => handleTouchStart(event.touches[0]?.clientX || 0)}
       onTouchMove={(event) => handleTouchMove(event.touches[0]?.clientX || 0)}
       onTouchEnd={handleTouchEnd}
@@ -1210,6 +1270,23 @@ export function StoryApp({ onClose }: StoryAppProps) {
 
         <div className="story-drawer-section">
           <div className="story-drawer-eyebrow">显示选项</div>
+          <div className="story-bg-row">
+            <span className="story-bg-row-label">剧情背景</span>
+            <span className="story-bg-row-actions">
+              <button type="button" onClick={() => backgroundInputRef.current?.click()}>更换</button>
+              {backgroundImageId ? <button type="button" onClick={clearBackground}>清除</button> : null}
+            </span>
+            <input
+              ref={backgroundInputRef}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(event) => {
+                void handleBackgroundFile(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+          </div>
           <div style={{ padding: "10px 0", borderBottom: "1px solid var(--c-story-drawer-border, rgba(124, 104, 68, 0.08))" }}>
             <label style={{ fontSize: "calc(13px*var(--app-text-scale,1))", color: "var(--c-story-sub, rgba(95, 82, 61, 0.72))", display: "block", marginBottom: 6 }}>
               折叠标签

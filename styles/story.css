@@ -17,8 +17,9 @@
             0 14px 30px rgba(0, 0, 0, 0.016);
           /* 文字颜色：柔和的深灰/铅笔色，比纯黑更有质感 */
           color: var(--c-story-text, #3a3b3c);
-          /* 背景：纯白（其他主题通过变量覆盖） */
+          /* 背景：纯白（其他主题通过变量覆盖）；侧栏里换了剧情背景就铺在最上层（--story-wallpaper，自定义 CSS 也能用） */
           background:
+            var(--story-wallpaper, none) center center / cover no-repeat,
             linear-gradient(160deg, var(--c-story-bg-top, #ffffff) 0%, var(--c-story-bg-mid, #ffffff) 60%, var(--c-story-bg-bottom, #ffffff) 100%);
           /* 书籍阅读感：宋体衬线字体，UI 全局统一 */
           --story-font: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", Georgia, serif;
@@ -1452,6 +1453,34 @@
           font: inherit;
           font-size: calc(12px*var(--app-text-scale,1));
           letter-spacing: 0.1em;
+        }
+
+        /* === 侧栏「显示选项」：剧情背景一行，右边「更换」「清除」 === */
+        .story-bg-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 10px 0;
+          border-bottom: 1px solid var(--c-story-drawer-border, rgba(124, 104, 68, 0.08));
+        }
+        .story-bg-row-label {
+          font-size: calc(13px*var(--app-text-scale,1));
+          color: var(--c-story-sub, rgba(95, 82, 61, 0.72));
+        }
+        .story-bg-row-actions {
+          display: inline-flex;
+          gap: 14px;
+        }
+        .story-bg-row-actions button {
+          border: none;
+          background: none;
+          padding: 0;
+          font: inherit;
+          font-size: calc(13px*var(--app-text-scale,1));
+          color: var(--c-story-heading, #1e293b);
+        }
+        .story-bg-row-actions button + button {
+          color: var(--c-story-sub, #94a3b8);
         }
 
         /* === 系统指令：输入栏左边的「指令」开关，打开后输入框发的是系统指令 === */

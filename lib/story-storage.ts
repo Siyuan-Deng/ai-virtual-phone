@@ -67,6 +67,8 @@ export type StorySession = {
   uiPrefs?: StoryUiPrefs;
   /** 顶部阅读卡里那句引言；没改过就用默认的，番外没改过跟正篇 */
   metaQuote?: string;
+  /** 剧情背景：聊天图片库里的 id。番外没设过就用正篇的；番外设成空字符串就是番外不要背景 */
+  backgroundImage?: string;
   lastMessageId?: string;
   lastMessagePreview?: string;
 };
