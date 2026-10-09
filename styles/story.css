@@ -506,8 +506,13 @@
         .story-row[data-role="system"] {
           justify-content: center;
         }
+        /* 系统消息（系统指令卡片、出错提示）居中、最宽 500px。
+           这一行是上下排列的，原来写的 flex: 0 1 500px 实际变成了「高 500px」，每条下面都空出一大块 */
         .story-row[data-role="system"] .story-bubble-wrap {
-          flex: 0 1 500px;
+          flex: 0 0 auto;
+          align-self: center;
+          width: 100%;
+          max-width: 500px;
         }
         .story-row[data-role="system"] .story-bubble {
           background: transparent;
