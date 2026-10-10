@@ -103,6 +103,10 @@ export type LlmRequestPayload = {
     sessionId?: string;
     /** 这次请求是替哪个角色生成的（宿主知道时才有，比如剧情没有会话但知道角色） */
     characterId?: string;
+    /** 请求的细分标签（如 ["story", "story_extra"] 表示剧情番外） */
+    appTags?: string[];
+    /** 提示词查看器的预览：只看最终提示词、不会真的发出去。有副作用（记账、排队）的插件这时应跳过那部分 */
+    preview?: boolean;
     /** 采样参数改写（留空则用用户配置；仅在该次请求带预设时生效） */
     temperature?: number;
     maxTokens?: number;

@@ -302,7 +302,8 @@ function handleLlmRequest(payload: LlmRequestPayload): LlmRequestPayload {
     changed = true;
   }
 
-  if (injectMergeIfDue(payload, messages)) changed = true;
+  // 预览不动合并队列
+  if (!payload.preview && injectMergeIfDue(payload, messages)) changed = true;
 
   return changed ? { ...payload, messages } : payload;
 }

@@ -1018,6 +1018,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
         sessionContextExcludedTags: display?.contextExcludedTags,
         signal: generationRun.controller.signal,
         bindings,
+        extra,
       });
       if (!isCurrentGeneration()) return;
       const assistantMessage = pushStoryMessage({
@@ -1227,6 +1228,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
         sessionContextExcludedTags: display?.contextExcludedTags,
         signal: generationRun.controller.signal,
         bindings: extraBindings,
+        extra: isExtra,
       });
       if (!isCurrentGeneration()) return;
       const assistantMessage = pushStoryMessage({

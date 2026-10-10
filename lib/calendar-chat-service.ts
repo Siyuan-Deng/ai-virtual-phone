@@ -789,6 +789,8 @@ function prepareCalendarWriteRequest(payload: LlmRequestPayload, messages: Messa
     if (!character) return false;
     const requestId = interactionFingerprint(payload.purpose, payload.sessionId, (payload.messages || []) as Message[]);
     injectMarkedSystemMessage(messages, calendarWriteDirective(character.name, requestId), CALENDAR_ACTION_MARKER);
+    // 预览只看提示词，不登记等回复的修改请求
+    if (payload.preview) return true;
     activeCalendarWriteRequests.push({
         purpose: payload.purpose,
         sessionId: payload.sessionId || "",
@@ -1016,6 +1018,8 @@ function periodStatusForPayload(payload: LlmRequestPayload): string | null {
 
 function handleLlmRequest(payload: LlmRequestPayload): LlmRequestPayload {
     if (!payload || !Array.isArray(payload.messages)) return payload;
+    // 番外不看日历、备忘录和经期，只有正篇看
+    if (payload.appTags?.includes("story_extra")) return payload;
     const messages = payload.messages.map((message) => ({ ...message })) as Message[];
     let changed = false;
     const config = loadCalendarConfig();
@@ -1032,7 +1036,8 @@ function handleLlmRequest(payload: LlmRequestPayload): LlmRequestPayload {
         }
     }
 
-    if (prepareCompletionMerge(payload, messages, extras)) changed = true;
+    // 预览不动待办完成的队列（那边会记「这一轮已经提过」）
+    if (!payload.preview && prepareCompletionMerge(payload, messages, extras)) changed = true;
 
     try {
         const periodStatus = periodStatusForPayload(payload);

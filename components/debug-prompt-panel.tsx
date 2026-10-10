@@ -448,6 +448,7 @@ export function DebugPromptPanel() {
             const result = await previewStoryPromptPayload(storyCharacterId, isExtra ? storyExtraHistory(messages) : messages, {
                 sessionContextExcludedTags: session?.contextExcludedTags ?? main?.contextExcludedTags,
                 bindings: isExtra ? normalizeStoryExtraConfig(session?.extraConfig).bindings : undefined,
+                extra: isExtra,
             });
             setStoryResult(isExtra ? { ...result, characterName: `${result.characterName} · 番外` } : result);
             setExpandedIdx(new Set()); setBadgesShownIdx(new Set());

@@ -1801,11 +1801,21 @@
           line-height: 1.6;
           color: var(--c-story-text, #4b4335);
         }
-        .story-command-item span {
+        /* 点文字：放进下面的输入框 */
+        .story-command-item .story-command-item-text {
           flex: 1;
           min-width: 0;
+          display: block;
+          padding: 0;
+          border: none;
+          background: none;
+          color: inherit;
+          font: inherit;
+          line-height: inherit;
+          text-align: left;
           white-space: pre-wrap;
           word-break: break-word;
+          cursor: pointer;
         }
         .story-command-item button {
           flex: 0 0 auto;
@@ -1815,18 +1825,23 @@
           background: none;
           color: var(--c-story-sub, #94a3b8);
         }
-        /* [输入快捷指令][保存][发送] 一行 */
+        /* [输入快捷指令][保存][发送] 一行；字多了输入框往上长，按钮贴着底 */
         .story-command-add {
           display: flex;
-          align-items: stretch;
+          align-items: flex-end;
           gap: 6px;
         }
-        .story-command-add input {
+        .story-command-add textarea {
           flex: 1;
           min-width: 0;
           height: 34px;
+          min-height: 34px;
+          max-height: 160px;
           box-sizing: border-box;
-          padding: 0 10px;
+          padding: 7px 10px;
+          resize: none;
+          overflow-y: auto;
+          display: block;
           border: none;
           border-radius: 0;
           outline: none;
@@ -1835,8 +1850,9 @@
           color: var(--c-story-text, #4b4335);
           font: inherit;
           font-size: calc(13px*var(--app-text-scale,1));
+          line-height: 20px;
         }
-        .story-command-add input::placeholder {
+        .story-command-add textarea::placeholder {
           color: color-mix(in srgb, var(--c-story-placeholder, #94a3b8) 70%, transparent);
         }
         .story-command-add button {
