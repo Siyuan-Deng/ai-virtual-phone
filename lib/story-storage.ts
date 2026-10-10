@@ -70,6 +70,8 @@ export type StorySession = {
   metaQuote?: string;
   /** 剧情背景：聊天图片库里的 id。番外没设过就用正篇的；番外设成空字符串就是番外不要背景 */
   backgroundImage?: string;
+  /** 剧情背景亮度 20–100（100 是原图），往暗调就是在图上盖一层黑。番外没设过就跟正篇 */
+  backgroundBrightness?: number;
   /** 「纸张显示」关掉：正文那张纸变透明。番外没设过就跟正篇 */
   paperHidden?: boolean;
   /** 上传的正文字体（主题资源库里的 id）；番外设成空字符串就是番外用默认字体 */

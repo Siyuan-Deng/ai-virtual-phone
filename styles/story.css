@@ -1653,6 +1653,70 @@
         .story-bg-row-actions button + button {
           color: var(--c-story-sub, #94a3b8);
         }
+        .story-bg-row-actions .story-bg-brightness-toggle[data-open="true"] {
+          font-weight: 600;
+        }
+        /* 背景亮度：点「亮度」才展开的那条滑块 */
+        .story-bg-row-panel.story-bg-brightness {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          font-size: calc(12px*var(--app-text-scale,1));
+          color: var(--c-story-sub, #94a3b8);
+        }
+        /* 滑块自己画：细线轨道 + 方头，和剧情里四角尖尖的样子一致（系统自带的是圆头） */
+        .story-bg-row-panel.story-bg-brightness input {
+          flex: 1;
+          min-width: 0;
+          width: auto;
+          height: 18px;
+          margin: 0;
+          padding: 0;
+          box-shadow: none;
+          background: none;
+          -webkit-appearance: none;
+          appearance: none;
+          cursor: pointer;
+        }
+        .story-bg-row-panel.story-bg-brightness input::-webkit-slider-runnable-track {
+          height: 2px;
+          border-radius: 0;
+          background: linear-gradient(to right,
+            var(--c-story-heading, #1e293b) var(--story-range-fill, 100%),
+            color-mix(in srgb, var(--c-story-sub, #94a3b8) 40%, transparent) var(--story-range-fill, 100%));
+        }
+        .story-bg-row-panel.story-bg-brightness input::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          width: 12px;
+          height: 12px;
+          margin-top: -5px;
+          border: none;
+          border-radius: 0;
+          background: var(--c-story-heading, #1e293b);
+        }
+        .story-bg-row-panel.story-bg-brightness input::-moz-range-track {
+          height: 2px;
+          border-radius: 0;
+          background: color-mix(in srgb, var(--c-story-sub, #94a3b8) 40%, transparent);
+        }
+        .story-bg-row-panel.story-bg-brightness input::-moz-range-progress {
+          height: 2px;
+          background: var(--c-story-heading, #1e293b);
+        }
+        .story-bg-row-panel.story-bg-brightness input::-moz-range-thumb {
+          width: 12px;
+          height: 12px;
+          border: none;
+          border-radius: 0;
+          background: var(--c-story-heading, #1e293b);
+        }
+        .story-bg-row-panel.story-bg-brightness b {
+          min-width: 34px;
+          text-align: right;
+          font-weight: 400;
+          color: var(--c-story-text, #334155);
+          font-variant-numeric: tabular-nums;
+        }
 
         /* === 番外模板：「其它要求」右边的「＋快捷指令」，点开挑一条接进去 === */
         .story-template-extra {
