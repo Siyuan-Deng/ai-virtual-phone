@@ -3,10 +3,12 @@
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { openIndexedDbAtLeast } from "./idb-open";
 
-/** 字体档位。iOS / macOS 自带的中文字体各取一个 id；
- *  serif / sans 是早期版本留下的 id，只为读得懂老配置，见 READING_FONT_OPTIONS。 */
+/** 字体档位。song / kai 现在是网络字体（思源宋体 / 霞鹜文楷），id 沿用好让老配置直接生效；
+ *  yuan 到 lanting 是只在 Mac 上有的系统字体、serif / sans 是更早的 id，都只为读得懂老配置，见 READING_FONT_OPTIONS。 */
 export type ReadingFontFamilyId =
-    | "system" | "song" | "kai" | "yuan" | "hannotate" | "hanzipen"
+    | "system" | "song" | "kai"
+    | "mashanzheng" | "zcoolxiaowei" | "zcoolkuaile" | "longcang" | "zhimangxing" | "liujianmaocao"
+    | "yuan" | "hannotate" | "hanzipen"
     | "baoli" | "libian" | "weibei" | "xingkai" | "lanting"
     | "custom"
     | "serif" | "sans";
@@ -108,35 +110,61 @@ export type ReadingFontOption = {
     id: ReadingFontFamilyId;
     label: string;
     cssValue: string;
+    /** 网络字体的样式表（jsDelivr）。用到这一项时才加进页面；字体按字分片，只下载用到的字 */
+    webCss?: string;
     /** 旧 id：不再出现在下拉里，但老配置选中它时仍然显示、仍然按原字体渲染。 */
     legacy?: true;
 };
 
-/** 可选字体。每一项的首选字体都是 iOS / macOS 自带的中文字体——列表里出现的每个
- *  名字都必须在手机上真的存在，否则用户切过去屏幕上什么都不变，设置看着就像假的。
+const FONTSOURCE = "https://cdn.jsdelivr.net/npm/@fontsource";
+
+/** 可选字体。iPhone 上的网页只能用很少几个系统字体，「楷体」「圆体」这类名字写进 CSS
+ *  在手机上会静默回落成系统默认、选了也白选，所以除了系统默认和自定义，下拉里全是网络字体：
+ *  名字用字体本来的名字，CSS 里先写网络字体、后面跟同类的系统字体兜底（断网时不至于全变样）。
  *
- *  legacy 的两项是早期版本的遗留：
- *  - sans「黑体」首选 PingFang SC，而 PingFang SC 正是 --app-font-family 的第一顺位，
- *    所以它和「系统默认」在苹果设备上渲染完全一致，切换看不出区别；
- *  - serif「衬线」首选 Source Han Serif SC / Noto Serif SC，这两个 iOS 都没有，
- *    最后落到通用 serif，结果和「宋体」几乎一样。
- *  两个 id 保留下来只为让老配置读得出来，不再放进下拉菜单。 */
+ *  legacy 的都不再出现在下拉里，只为让老配置读得出来：
+ *  - yuan 到 lanting：只有 Mac 上才有的系统字体，iPhone 上一律没效果；
+ *  - sans「黑体」和系统默认在苹果设备上完全一样，serif「衬线」在 iOS 上落到通用 serif。 */
 export const READING_FONT_OPTIONS: ReadingFontOption[] = [
     { id: "system", label: "系统默认", cssValue: "var(--app-font-family)" },
-    { id: "song", label: "宋体", cssValue: "\"Songti SC\", \"STSong\", serif" },
-    { id: "kai", label: "楷体", cssValue: "\"Kaiti SC\", \"STKaiti\", serif" },
-    { id: "yuan", label: "圆体", cssValue: "\"Yuanti SC\", \"STYuanti\", sans-serif" },
-    { id: "hannotate", label: "手札体", cssValue: "\"Hannotate SC\", \"HannotateSC\", sans-serif" },
-    { id: "hanzipen", label: "翩翩体", cssValue: "\"HanziPen SC\", \"HanziPenSC\", sans-serif" },
-    { id: "baoli", label: "报隶", cssValue: "\"Baoli SC\", \"BaoliSC\", serif" },
-    { id: "libian", label: "隶变", cssValue: "\"Libian SC\", \"LibianSC\", serif" },
-    { id: "weibei", label: "魏碑", cssValue: "\"Weibei SC\", \"WeibeiSC\", serif" },
-    { id: "xingkai", label: "行楷", cssValue: "\"Xingkai SC\", \"XingkaiSC\", cursive" },
-    { id: "lanting", label: "兰亭黑", cssValue: "\"Lantinghei SC\", \"LantingheiSC\", sans-serif" },
+    {
+        id: "kai", label: "霞鹜文楷", cssValue: "\"LXGW WenKai\", \"Kaiti SC\", \"STKaiti\", serif",
+        webCss: "https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/lxgwwenkai-regular.css",
+    },
+    {
+        id: "song", label: "思源宋体", cssValue: "\"Noto Serif SC\", \"Songti SC\", \"STSong\", serif",
+        webCss: `${FONTSOURCE}/noto-serif-sc@5.2.5/index.css`,
+    },
+    { id: "mashanzheng", label: "马善政楷书", cssValue: "\"Ma Shan Zheng\", \"Kaiti SC\", serif", webCss: `${FONTSOURCE}/ma-shan-zheng@5.2.5/index.css` },
+    { id: "zcoolxiaowei", label: "站酷小薇", cssValue: "\"ZCOOL XiaoWei\", \"Songti SC\", serif", webCss: `${FONTSOURCE}/zcool-xiaowei@5.2.5/index.css` },
+    { id: "zcoolkuaile", label: "站酷快乐体", cssValue: "\"ZCOOL KuaiLe\", sans-serif", webCss: `${FONTSOURCE}/zcool-kuaile@5.2.5/index.css` },
+    { id: "longcang", label: "龙藏体", cssValue: "\"Long Cang\", cursive", webCss: `${FONTSOURCE}/long-cang@5.2.5/index.css` },
+    { id: "zhimangxing", label: "志莽行书", cssValue: "\"Zhi Mang Xing\", cursive", webCss: `${FONTSOURCE}/zhi-mang-xing@5.2.5/index.css` },
+    { id: "liujianmaocao", label: "刘建毛草", cssValue: "\"Liu Jian Mao Cao\", cursive", webCss: `${FONTSOURCE}/liu-jian-mao-cao@5.2.5/index.css` },
     { id: "custom", label: "自定义字体", cssValue: "var(--app-font-family)" },
+    { id: "yuan", label: "圆体（旧，只在 Mac 上有效）", cssValue: "\"Yuanti SC\", \"STYuanti\", sans-serif", legacy: true },
+    { id: "hannotate", label: "手札体（旧，只在 Mac 上有效）", cssValue: "\"Hannotate SC\", \"HannotateSC\", sans-serif", legacy: true },
+    { id: "hanzipen", label: "翩翩体（旧，只在 Mac 上有效）", cssValue: "\"HanziPen SC\", \"HanziPenSC\", sans-serif", legacy: true },
+    { id: "baoli", label: "报隶（旧，只在 Mac 上有效）", cssValue: "\"Baoli SC\", \"BaoliSC\", serif", legacy: true },
+    { id: "libian", label: "隶变（旧，只在 Mac 上有效）", cssValue: "\"Libian SC\", \"LibianSC\", serif", legacy: true },
+    { id: "weibei", label: "魏碑（旧，只在 Mac 上有效）", cssValue: "\"Weibei SC\", \"WeibeiSC\", serif", legacy: true },
+    { id: "xingkai", label: "行楷（旧，只在 Mac 上有效）", cssValue: "\"Xingkai SC\", \"XingkaiSC\", cursive", legacy: true },
+    { id: "lanting", label: "兰亭黑（旧，只在 Mac 上有效）", cssValue: "\"Lantinghei SC\", \"LantingheiSC\", sans-serif", legacy: true },
     { id: "sans", label: "黑体（旧）", cssValue: "\"PingFang SC\", \"Hiragino Sans GB\", \"Noto Sans SC\", sans-serif", legacy: true },
     { id: "serif", label: "衬线（旧）", cssValue: "\"Source Han Serif SC\", \"Noto Serif SC\", serif", legacy: true },
 ];
+
+/** 用到某个网络字体时把它的样式表加进页面（每个只加一次）。服务端渲染时什么都不做。 */
+export function ensureReadingWebFont(id: ReadingFontFamilyId | ReadingAnnotationFontFamilyId | undefined): void {
+    if (typeof document === "undefined" || !id) return;
+    const href = READING_FONT_OPTIONS.find((option) => option.id === id)?.webCss;
+    if (!href || document.querySelector(`link[data-reading-web-font="${id}"]`)) return;
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = href;
+    link.dataset.readingWebFont = id;
+    document.head.appendChild(link);
+}
 
 export const READING_ANNOTATION_FONT_OPTIONS: Array<{ id: ReadingAnnotationFontFamilyId; label: string; legacy?: true }> = [
     { id: "inherit", label: "跟随正文" },
@@ -276,6 +304,7 @@ function normalizeAppearance(raw: Partial<ReadingAppearance> | null | undefined)
 
 export function resolveReadingFontFamily(fontFamily: ReadingFontFamilyId, customFontFamily?: string): string {
     if (fontFamily === "custom" && customFontFamily) return customFontFamily;
+    ensureReadingWebFont(fontFamily);
     return READING_FONT_OPTIONS.find((option) => option.id === fontFamily)?.cssValue || READING_FONT_OPTIONS[0].cssValue;
 }
 
@@ -287,6 +316,7 @@ export function resolveReadingAnnotationFontFamily(
 ): string | undefined {
     if (!annotationFontFamily || annotationFontFamily === "inherit") return undefined;
     if (annotationFontFamily === "custom") return annotationCustomFontFamily || undefined;
+    ensureReadingWebFont(annotationFontFamily);
     return READING_FONT_OPTIONS.find((option) => option.id === annotationFontFamily)?.cssValue;
 }
 

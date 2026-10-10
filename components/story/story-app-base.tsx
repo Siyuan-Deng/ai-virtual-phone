@@ -40,19 +40,24 @@ import { Avatar } from "@/components/ui/primitives";
 import { StoryHtmlRenderer } from "@/components/ui/story-html-renderer";
 import { loadCharacters } from "@/lib/character-storage";
 import { maybeRunSummarization } from "@/lib/memory-summarizer";
-import { incrementEventCounter } from "@/lib/memory-storage";
+import { getLastSummarizedTimestamp, incrementEventCounter } from "@/lib/memory-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
+import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "@/lib/chat-asset-storage";
+import { getThemeAssetDataUrl, saveThemeAssetFromBlob } from "@/lib/theme-storage";
 import {
   generateStoryCompletion,
   getStoryRenderSignature,
   rebuildStorySessionRenderCache,
 } from "@/lib/story-engine";
 import {
+  attachOrphanStoryGroup,
   clearStoryMessages,
   createOrGetStorySession,
   findLastActiveStorySession,
   findMainStorySession,
   hydrateStoryStorage,
+  isStoryStorageHydrated,
+  listOrphanStoryGroups,
   loadStoryMessages,
   loadStorySessions,
   pushStoryMessage,
@@ -62,6 +67,7 @@ import {
   type StoryExtraConfig,
   type StoryExtraOrder,
   type StoryMessage,
+  type StoryOrphanGroup,
   type StorySession,
   updateStorySession,
 } from "@/lib/story-storage";
@@ -72,10 +78,13 @@ import {
   StoryExtraBindingsSection,
   StoryExtraOrderCard,
   StoryExtraPresetBar,
+  StoryCommandSettingsSection,
   StoryExtraTemplateSheet,
+  StoryInstructionCard,
   StoryMainBindingsSection,
   StoryNowCard,
   StoryRecentSection,
+  StoryRecoverSheet,
   loadStoryApiOverride,
   orderStoryCharacters,
   saveStoryApiOverride,
@@ -83,6 +92,12 @@ import {
   type StoryBindingKind,
 } from "@/components/story/story-extra-ui";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
+import {
+  loadStoryCommandButtonVisible,
+  loadStoryQuickCommands,
+  saveStoryCommandButtonVisible,
+  saveStoryQuickCommands,
+} from "@/lib/story-commands";
 import { STORY_CSS_EXAMPLE } from "@/lib/css-examples";
 import { applyEditOutputRegex } from "@/lib/llm-prompt-assembler";
 import { MacroEngine } from "@/lib/macro-engine";
@@ -171,13 +186,78 @@ function storyDisplaySettings(session: StorySession) {
     foldTags: session.foldTags ?? main?.foldTags,
     contextExcludedTags: session.contextExcludedTags ?? main?.contextExcludedTags,
     metaQuote: session.metaQuote ?? main?.metaQuote ?? DEFAULT_STORY_META_QUOTE,
+    backgroundImage: session.backgroundImage ?? main?.backgroundImage ?? "",
+    paperHidden: session.paperHidden ?? main?.paperHidden ?? false,
+    fontAsset: session.fontAsset ?? main?.fontAsset ?? "",
+    textColor: session.textColor ?? main?.textColor ?? "",
   };
 }
 
-type StoryDrawerSheet = { type: "characters" } | { type: "binding"; kind: StoryBindingKind } | { type: "mainApi" };
+/** 默认正文字体栈：上传的字体缺字时接着用这些 */
+const STORY_FONT_FALLBACK = '"Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", Georgia, serif';
+
+/** 上传的字体按资源 id 注册一次（FontFace），之后同一个字体不用再读 */
+const loadedStoryFonts = new Map<string, Promise<string | null>>();
+function storyFontFamilyName(assetId: string): string {
+  return `StoryUserFont-${assetId.replace(/[^\w-]/g, "")}`;
+}
+function loadStoryFont(assetId: string): Promise<string | null> {
+  const cached = loadedStoryFonts.get(assetId);
+  if (cached) return cached;
+  const task = (async () => {
+    const dataUrl = await getThemeAssetDataUrl(assetId);
+    if (!dataUrl || typeof FontFace === "undefined") return null;
+    const family = storyFontFamilyName(assetId);
+    const buffer = await (await fetch(dataUrl)).arrayBuffer();
+    const face = new FontFace(family, buffer);
+    await face.load();
+    document.fonts.add(face);
+    return family;
+  })().catch(() => null);
+  loadedStoryFonts.set(assetId, task);
+  return task;
+}
+
+/** 剧情背景存之前缩到长边 1600：手机原图好几兆，整张塞进页面背景会卡 */
+async function shrinkStoryBackground(file: File): Promise<Blob> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("这张图片打不开，换一张试试"));
+      img.src = url;
+    });
+    const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+    if (scale === 1 && file.size < 1.5 * 1024 * 1024) return file;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return await new Promise<Blob>((resolve) => canvas.toBlob((blob) => resolve(blob ?? file), "image/jpeg", 0.88));
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** 各角色记忆总结进度停在的时间（精确到毫秒）→ 角色 id；找回剧情时用它确定一段剧情是谁的 */
+function storyMemoryMarkers(): Map<string, string> {
+  const markers = new Map<string, string>();
+  for (const character of loadCharacters()) {
+    const timestamp = getLastSummarizedTimestamp(character.id);
+    if (timestamp) markers.set(timestamp, character.id);
+  }
+  return markers;
+}
+
+type StoryDrawerSheet = { type: "characters" } | { type: "binding"; kind: StoryBindingKind } | { type: "mainApi" } | { type: "recover" };
 
 function resizeStoryComposerTextarea(el: HTMLTextAreaElement) {
   el.style.height = "auto";
+  // 空着时不跟着占位提示换行长高（左边多了按钮，提示文字一长就会折成两行）
+  if (!el.value) return;
   el.style.height = Math.min(el.scrollHeight, 120) + "px";
 }
 
@@ -239,6 +319,9 @@ const StoryComposer = memo(function StoryComposer({
   onSend,
   onStop,
   onOpenTemplate,
+  showCommandButton,
+  quickCommands,
+  onSendInstruction,
 }: {
   characterName: string;
   isGenerating: boolean;
@@ -247,8 +330,15 @@ const StoryComposer = memo(function StoryComposer({
   onStop: () => void;
   /** 番外窗口：左边多一个「模板」 */
   onOpenTemplate?: () => void;
+  /** 左边的「指令」按钮；侧栏里关掉就完全不显示，也不留位置 */
+  showCommandButton: boolean;
+  quickCommands: string[];
+  /** 指令模式下发出去的是一条系统指令（system） */
+  onSendInstruction: (text: string) => void;
 }) {
   const [draft, setDraft] = useState("");
+  const [commandMode, setCommandMode] = useState(false);
+  const inCommand = commandMode && showCommandButton;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const lastAppendIdRef = useRef<number | null>(null);
 
@@ -276,13 +366,54 @@ const StoryComposer = memo(function StoryComposer({
       const textarea = textareaRef.current;
       if (textarea) resizeStoryComposerTextarea(textarea);
     });
+    if (inCommand) {
+      // 发完回到普通输入，下一句照常是你说的话
+      setCommandMode(false);
+      onSendInstruction(text);
+      return;
+    }
     onSend(text);
   };
 
+  const pickQuickCommand = (command: string) => {
+    setDraft(command);
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      resizeStoryComposerTextarea(textarea);
+      textarea.focus();
+    });
+  };
+
   return (
-    <div className="story-composer">
+    <div className="story-composer" data-command={inCommand ? "true" : undefined}>
+      {inCommand ? (
+        <div className="story-command-strip">
+          <span className="story-command-strip-title">系统指令</span>
+          {quickCommands.length > 0 ? (
+            <div className="story-command-chips">
+              {quickCommands.map((command) => (
+                <button key={command} type="button" onClick={() => pickQuickCommand(command)}>{command}</button>
+              ))}
+            </div>
+          ) : (
+            <span className="story-command-empty">快捷指令在右上角菜单里添加</span>
+          )}
+        </div>
+      ) : null}
       {onOpenTemplate ? (
         <button type="button" className="story-template-btn" onClick={onOpenTemplate}>模板</button>
+      ) : null}
+      {showCommandButton ? (
+        <button
+          type="button"
+          className="story-command-toggle"
+          data-on={inCommand ? "true" : undefined}
+          aria-pressed={inCommand}
+          onClick={() => setCommandMode((value) => !value)}
+        >
+          指令
+        </button>
       ) : null}
       <textarea
         ref={textareaRef}
@@ -299,7 +430,7 @@ const StoryComposer = memo(function StoryComposer({
             submit();
           }
         }}
-        placeholder={onOpenTemplate ? "继续写番外，或说想怎么改……" : `以你和“${characterName}”为主角继续这一段剧情……`}
+        placeholder={inCommand ? "输入系统指令" : onOpenTemplate ? "继续写番外，或说想怎么改……" : `以你和“${characterName}”为主角继续这一段剧情……`}
       />
       <button
         className={`story-send-btn${isGenerating ? " is-generating" : ""}`}
@@ -316,6 +447,9 @@ const StoryComposer = memo(function StoryComposer({
 
 export function StoryApp({ onClose }: StoryAppProps) {
   const [ready, setReady] = useState(false);
+  // 剧情库这次没读出来（iOS 偶尔会）：不新建会话，提示重试
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [, setStorageVersion] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   // 侧栏里再盖的一层：全部角色 / 番外绑定的选项
@@ -328,9 +462,24 @@ export function StoryApp({ onClose }: StoryAppProps) {
     return () => window.removeEventListener("settings-bindings-updated", bump);
   }, []);
   const [confirmingClearExtra, setConfirmingClearExtra] = useState(false);
+  // 消息还在、却没挂在任何角色上的剧情；有的话侧栏工具里出现「找回剧情」
+  const [orphanGroups, setOrphanGroups] = useState<StoryOrphanGroup[]>([]);
+  useEffect(() => {
+    if (!ready || !drawerOpen) return;
+    let cancelled = false;
+    listOrphanStoryGroups(storyMemoryMarkers()).then((groups) => {
+      if (!cancelled) setOrphanGroups(groups);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, drawerOpen]);
   // 正篇还是番外；换角色时回到正篇
   const [mode, setMode] = useState<"main" | "extra">("main");
   const [templateTop, setTemplateTop] = useState<number | null>(null);
+  // 系统指令：快捷指令和「指令」按钮显不显示，所有角色共用
+  const [quickCommands, setQuickCommands] = useState<string[]>([]);
+  const [commandButtonVisible, setCommandButtonVisible] = useState(true);
   // 顶部阅读卡的引言：点一下就地编辑
   const [editingQuote, setEditingQuote] = useState(false);
   const quoteCancelRef = useRef(false);
@@ -381,6 +530,41 @@ export function StoryApp({ onClose }: StoryAppProps) {
   );
   const display = currentSession ? storyDisplaySettings(currentSession) : null;
   const uiPrefs = display?.uiPrefs || {};
+  // 剧情背景：存的是图片库 id，读成地址后放进 --story-wallpaper（自定义 CSS 也用这个变量）
+  const backgroundImageId = display?.backgroundImage || "";
+  const [wallpaperUrl, setWallpaperUrl] = useState<string | null>(null);
+  const backgroundInputRef = useRef<HTMLInputElement | null>(null);
+  // 上传的字体、文字颜色：写成一条只有一个 class 权重的规则，放在自定义 CSS 前面——
+  // 主题默认值压得住，自定义 CSS 里写了同样的变量就以 CSS 为准
+  const fontAssetId = display?.fontAsset || "";
+  const customTextColor = display?.textColor || "";
+  const paperHidden = display?.paperHidden === true;
+  const [loadedFontFamily, setLoadedFontFamily] = useState<string | null>(null);
+  const fontInputRef = useRef<HTMLInputElement | null>(null);
+  // 折叠标签 / 不进上下文标签：平时只露一行，点开才是输入框
+  const [openTagRow, setOpenTagRow] = useState<"fold" | "context" | null>(null);
+  useEffect(() => {
+    if (!fontAssetId) {
+      setLoadedFontFamily(null);
+      return;
+    }
+    let cancelled = false;
+    void loadStoryFont(fontAssetId).then((family) => {
+      if (!cancelled) setLoadedFontFamily(family);
+    });
+    return () => { cancelled = true; };
+  }, [fontAssetId]);
+  useEffect(() => {
+    if (!backgroundImageId) {
+      setWallpaperUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void getChatImageFromIndexedDB(backgroundImageId).then((url) => {
+      if (!cancelled) setWallpaperUrl(url);
+    });
+    return () => { cancelled = true; };
+  }, [backgroundImageId]);
   const isGenerating = Boolean(activeSessionId) && generatingSessionIds.has(activeSessionId);
   // 番外：单独的绑定，历史只取当前这一篇，不写记忆区
   const isExtra = currentSession?.kind === "extra";
@@ -411,6 +595,12 @@ export function StoryApp({ onClose }: StoryAppProps) {
 
   useEffect(() => {
     hydrateStoryStorage().then(() => {
+      if (!isStoryStorageHydrated()) {
+        setLoadFailed(true);
+        setReady(true);
+        return;
+      }
+      setLoadFailed(false);
       const allCharacters = loadCharacters();
       // 回到最近一次聊过的那个窗口（正篇或番外）；角色删了或者还没聊过就第一个角色的正篇
       const last = findLastActiveStorySession();
@@ -431,9 +621,11 @@ export function StoryApp({ onClose }: StoryAppProps) {
         setContextExcludedTagsDraft(sessionDisplay.contextExcludedTags ?? "think,thinking");
         setStorageVersion((value) => value + 1);
       }
+      setQuickCommands(loadStoryQuickCommands());
+      setCommandButtonVisible(loadStoryCommandButtonVisible());
       setReady(true);
     });
-  }, []);
+  }, [loadAttempt]);
 
   useEffect(() => {
     if (!activeCharacterId) return;
@@ -687,6 +879,73 @@ export function StoryApp({ onClose }: StoryAppProps) {
     setStorageVersion((value) => value + 1);
   }
 
+  async function handleFontFile(file: File | undefined) {
+    if (!file || !currentSession) return;
+    try {
+      const id = await saveThemeAssetFromBlob(file, "font");
+      // 先试着加载，打不开的文件（不是字体、格式不支持）就不留着
+      if (!(await loadStoryFont(id))) {
+        alert("这个字体文件用不了，换一个 ttf / otf / woff 试试");
+        return;
+      }
+      applySessionUpdates({ fontAsset: id, updatedAt: currentSession.updatedAt });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "字体保存失败，请重试");
+    }
+  }
+
+  async function handleBackgroundFile(file: File | undefined) {
+    if (!file || !currentSession) return;
+    try {
+      const id = await saveChatImageToIndexedDB(await shrinkStoryBackground(file));
+      // 换背景不算一次阅读，不改「最近」的顺序
+      applySessionUpdates({ backgroundImage: id, updatedAt: currentSession.updatedAt });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "背景保存失败，请重试");
+    }
+  }
+
+  // 番外里清除 = 番外用默认（空字符串）；正篇清除就是去掉，跟着正篇的番外也一起回到默认
+  function clearFont() {
+    if (!currentSession) return;
+    applySessionUpdates({ fontAsset: isExtra ? "" : undefined, updatedAt: currentSession.updatedAt });
+  }
+
+  function clearTextColor() {
+    if (!currentSession) return;
+    applySessionUpdates({ textColor: isExtra ? "" : undefined, updatedAt: currentSession.updatedAt });
+  }
+
+  function clearBackground() {
+    if (!currentSession) return;
+    // 正篇清掉就没有了（跟着正篇的番外也一起没了）；番外清掉是「番外不要背景」，正篇不受影响
+    applySessionUpdates({ backgroundImage: isExtra ? "" : undefined, updatedAt: currentSession.updatedAt });
+  }
+
+  function storySlotMessageCount(characterId: string, kind: "main" | "extra"): number {
+    const session = loadStorySessions().find((item) => (
+      item.characterId === characterId && (item.kind === "extra" ? "extra" : "main") === kind
+    ));
+    return session ? loadStoryMessages(session.id).length : 0;
+  }
+
+  async function attachOrphan(sessionId: string, characterId: string, kind: "main" | "extra") {
+    const count = orphanGroups.find((group) => group.sessionId === sessionId)?.count ?? 0;
+    try {
+      const target = await attachOrphanStoryGroup(sessionId, characterId, kind);
+      if (target.id === activeSessionIdRef.current) {
+        setMessages(loadStoryMessages(target.id));
+        setVisibleMessageCount(STORY_INITIAL_LOAD);
+      }
+      setOrphanGroups(await listOrphanStoryGroups(storyMemoryMarkers()));
+      setStorageVersion((value) => value + 1);
+      const name = loadCharacters().find((character) => character.id === characterId)?.name ?? "";
+      alert(`已挂回${name}的${kind === "extra" ? "番外" : "正篇"}，${count} 条`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "没挂上，请重试");
+    }
+  }
+
   function updateExtraConfig(sessionId: string, patch: Partial<StoryExtraConfig>) {
     const session = loadStorySessions().find((item) => item.id === sessionId);
     if (!session || session.kind !== "extra") return;
@@ -726,7 +985,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
     setTemplateTop(shell && header ? header.getBoundingClientRect().bottom - shell.getBoundingClientRect().top : 96);
   }
 
-  async function handleSend(userTextInput: string, extraOrder?: StoryExtraOrder) {
+  /** asInstruction：系统指令，存成 system 消息、不马上生成；等下一次正常输入时一起发给模型（它是 system，你的输入是 user） */
+  async function handleSend(userTextInput: string, extraOrder?: StoryExtraOrder, asInstruction = false) {
     const userText = userTextInput.trim();
     if (!activeSessionId || !userText || isGenerating) return;
     const sessionId = activeSessionId;
@@ -736,13 +996,15 @@ export function StoryApp({ onClose }: StoryAppProps) {
 
     const userMessage = pushStoryMessage({
       sessionId,
-      role: "user",
+      role: asInstruction ? "system" : "user",
       rawContent: userText,
       renderedContent: userText,
       ...(extraOrder ? { extraOrder } : {}),
+      ...(asInstruction ? { instruction: true } : {}),
     });
     setMessages((prev) => [...prev, userMessage]);
     setStorageVersion((value) => value + 1);
+    if (asInstruction) return;
     markGenerating(sessionId, true);
     const generationRun = createStoryGenerationRun(sessionId);
     const generationRunId = generationRun.runId;
@@ -989,7 +1251,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
 
   if (!ready) return null;
 
-  if (characters.length === 0) {
+  if (loadFailed || characters.length === 0) {
     return (
       <div className="story-app-shell" data-story-theme="paper">
         <div className="story-shell-inner">
@@ -1011,12 +1273,20 @@ export function StoryApp({ onClose }: StoryAppProps) {
               <div className="story-empty story-empty-panel">
                 <BookOpenIcon width={30} height={30} opacity={0.45} />
                 <div>
-                  <div className="story-empty-title">还没有角色卡</div>
-                  <div className="story-empty-desc">请先创建或导入角色卡，再进入剧情 APP 开始故事。</div>
+                  <div className="story-empty-title">{loadFailed ? "剧情这次没读出来" : "还没有角色卡"}</div>
+                  <div className="story-empty-desc">
+                    {loadFailed ? "数据还在，只是手机这次没读出来。点重试，不行就关掉 App 再打开。" : "请先创建或导入角色卡，再进入剧情 APP 开始故事。"}
+                  </div>
                 </div>
-                <button className="story-empty-action" onClick={onClose}>
-                  返回
-                </button>
+                {loadFailed ? (
+                  <button className="story-empty-action" onClick={() => setLoadAttempt((value) => value + 1)}>
+                    重试
+                  </button>
+                ) : (
+                  <button className="story-empty-action" onClick={onClose}>
+                    返回
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1035,6 +1305,9 @@ export function StoryApp({ onClose }: StoryAppProps) {
     <div
       className={`story-app-shell story-session-${currentSession.id}`}
       data-story-theme={uiPrefs.theme || "paper"}
+      data-wallpaper={wallpaperUrl ? "" : undefined}
+      data-paper={paperHidden ? "off" : undefined}
+      style={wallpaperUrl ? ({ "--story-wallpaper": `url("${wallpaperUrl}")` } as React.CSSProperties) : undefined}
       onTouchStart={(event) => handleTouchStart(event.touches[0]?.clientX || 0)}
       onTouchMove={(event) => handleTouchMove(event.touches[0]?.clientX || 0)}
       onTouchEnd={handleTouchEnd}
@@ -1046,6 +1319,12 @@ export function StoryApp({ onClose }: StoryAppProps) {
       onMouseLeave={handleTouchEnd}
     >
       {/* Styles moved to styles/story.css */}
+      {loadedFontFamily || customTextColor ? (
+        <style>{`${sessionScope}{${[
+          loadedFontFamily ? `--story-user-font:"${loadedFontFamily}", ${STORY_FONT_FALLBACK};--story-font:var(--story-user-font);` : "",
+          customTextColor ? `--story-user-text-color:${customTextColor};--c-story-text:var(--story-user-text-color);` : "",
+        ].join("")}}`}</style>
+      ) : null}
       {display?.customCSS ? (
         <SessionCustomCSS css={display.customCSS} scope={sessionScope} />
       ) : null}
@@ -1079,43 +1358,6 @@ export function StoryApp({ onClose }: StoryAppProps) {
               config={extraConfig}
               onLoad={(config) => updateExtraConfig(currentSession.id, config)}
             />
-            <div className="story-drawer-section">
-              <div className="story-drawer-eyebrow">工具</div>
-              <button
-                type="button"
-                className={`story-tool-btn${confirmingClearExtra ? " is-danger" : ""}`}
-                onClick={() => {
-                  if (!confirmingClearExtra) {
-                    setConfirmingClearExtra(true);
-                    return;
-                  }
-                  cancelStoryGenerationRun(currentSession.id);
-                  markGenerating(currentSession.id, false);
-                  clearStoryMessages(currentSession.id);
-                  setMessages([]);
-                  setVisibleMessageCount(STORY_INITIAL_LOAD);
-                  setConfirmingClearExtra(false);
-                  setStorageVersion((value) => value + 1);
-                }}
-              >
-                {confirmingClearExtra ? "再点一次，清空这个番外窗口" : "清空番外"}
-              </button>
-              <button
-                className="story-tool-btn"
-                onClick={() => {
-                  try {
-                    const rebuilt = rebuildStorySessionRenderCache(activeCharacterId, currentSession.id, { sessionFoldTags: display?.foldTags, bindings: extraBindings });
-                    setMessages(rebuilt);
-                    setStorageVersion((value) => value + 1);
-                    alert(`缓存重建完成，${rebuilt.length} 条消息已更新`);
-                  } catch (error) {
-                    alert(error instanceof Error ? error.message : "缓存重建失败，请检查 API 绑定配置");
-                  }
-                }}
-              >
-                重建渲染缓存
-              </button>
-            </div>
           </>
         ) : (
           <StoryMainBindingsSection
@@ -1125,59 +1367,196 @@ export function StoryApp({ onClose }: StoryAppProps) {
           />
         )}
 
+        <StoryCommandSettingsSection
+          buttonVisible={commandButtonVisible}
+          onButtonVisibleChange={(visible) => {
+            saveStoryCommandButtonVisible(visible);
+            setCommandButtonVisible(visible);
+          }}
+          commands={quickCommands}
+          onCommandsChange={(commands) => setQuickCommands(saveStoryQuickCommands(commands))}
+          sending={isGenerating}
+          onSend={(text) => {
+            setDrawerOpen(false);
+            void handleSend(text, undefined, true);
+          }}
+        />
+
         <div className="story-drawer-section">
           <div className="story-drawer-eyebrow">显示选项</div>
-          <div style={{ padding: "10px 0", borderBottom: "1px solid var(--c-story-drawer-border, rgba(124, 104, 68, 0.08))" }}>
-            <label style={{ fontSize: "calc(13px*var(--app-text-scale,1))", color: "var(--c-story-sub, rgba(95, 82, 61, 0.72))", display: "block", marginBottom: 6 }}>
-              折叠标签
-            </label>
+          <div className="story-bg-row">
+            <span className="story-bg-row-label">纸张显示</span>
+            <button
+              type="button"
+              className="story-template-toggle story-bg-row-switch"
+              role="switch"
+              aria-checked={!paperHidden}
+              aria-label="纸张显示"
+              data-on={paperHidden ? undefined : "true"}
+              onClick={() => {
+                if (!currentSession) return;
+                applySessionUpdates({ paperHidden: !paperHidden, updatedAt: currentSession.updatedAt });
+              }}
+            >
+              <i aria-hidden="true" />
+            </button>
+          </div>
+          <div className="story-bg-row">
+            <span className="story-bg-row-label">剧情背景</span>
+            <span className="story-bg-row-actions">
+              <button type="button" onClick={() => backgroundInputRef.current?.click()}>更换</button>
+              {backgroundImageId ? <button type="button" onClick={clearBackground}>清除</button> : null}
+            </span>
             <input
-              type="text"
-              value={foldTagsDraft}
-              onChange={(e) => setFoldTagsDraft(e.target.value)}
-              onBlur={() => applySessionUpdates({ foldTags: foldTagsDraft.trim() || undefined })}
-              placeholder="think,thinking"
-              style={{
-                width: "100%", boxSizing: "border-box",
-                padding: "8px 12px", borderRadius: 0,
-                border: "none", boxShadow: "inset 0 1px 3px rgba(0,0,0,0.06)",
-                background: "var(--c-story-css-box-bg, rgba(255, 251, 246, 0.88))",
-                color: "var(--c-story-text, #4b4335)",
-                fontSize: "calc(13px*var(--app-text-scale,1))", lineHeight: 1.6, fontFamily: "inherit",
+              ref={backgroundInputRef}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(event) => {
+                void handleBackgroundFile(event.target.files?.[0]);
+                event.target.value = "";
               }}
             />
-            <div style={{ fontSize: "calc(11px*var(--app-text-scale,1))", marginTop: 4, color: "var(--c-story-sub, rgba(95, 82, 61, 0.72))" }}>
-              逗号分隔标签名，如 think,thinking,reasoning
-            </div>
           </div>
-          <div style={{ padding: "10px 0", borderBottom: "1px solid var(--c-story-drawer-border, rgba(124, 104, 68, 0.08))" }}>
-            <label style={{ fontSize: "calc(13px*var(--app-text-scale,1))", color: "var(--c-story-sub, rgba(95, 82, 61, 0.72))", display: "block", marginBottom: 6 }}>
-              不进上下文标签
-            </label>
+          <div className="story-bg-row">
+            <span className="story-bg-row-label">正文字体</span>
+            <span className="story-bg-row-actions">
+              <button type="button" onClick={() => fontInputRef.current?.click()}>更换</button>
+              {fontAssetId ? <button type="button" onClick={clearFont}>清除</button> : null}
+            </span>
             <input
-              type="text"
-              value={contextExcludedTagsDraft}
-              onChange={(e) => setContextExcludedTagsDraft(e.target.value)}
-              onBlur={() => applySessionUpdates({ contextExcludedTags: contextExcludedTagsDraft.trim() || undefined })}
-              placeholder="think,thinking"
-              style={{
-                width: "100%", boxSizing: "border-box",
-                padding: "8px 12px", borderRadius: 0,
-                border: "none", boxShadow: "inset 0 1px 3px rgba(0,0,0,0.06)",
-                background: "var(--c-story-css-box-bg, rgba(255, 251, 246, 0.88))",
-                color: "var(--c-story-text, #4b4335)",
-                fontSize: "calc(13px*var(--app-text-scale,1))", lineHeight: 1.6, fontFamily: "inherit",
+              ref={fontInputRef}
+              type="file"
+              accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2"
+              hidden
+              onChange={(event) => {
+                void handleFontFile(event.target.files?.[0]);
+                event.target.value = "";
               }}
             />
-            <div style={{ fontSize: "calc(11px*var(--app-text-scale,1))", marginTop: 4, color: "var(--c-story-sub, rgba(95, 82, 61, 0.72))" }}>
-              默认 think,thinking；影响后续生成上下文，不影响显示与保存
-            </div>
           </div>
+          <div className="story-bg-row">
+            <span className="story-bg-row-label">文字颜色</span>
+            <span className="story-bg-row-actions">
+              {customTextColor ? <i className="story-bg-row-swatch" style={{ background: customTextColor }} aria-hidden="true" /> : null}
+              {/* 取色器透明地盖在「更换」上：iPhone 上只能手指直接点到它才会弹出来，用代码 click() 打不开 */}
+              <span className="story-bg-row-color-btn">
+                更换
+                <input
+                  type="color"
+                  aria-label="更换文字颜色"
+                  value={customTextColor || "#3a3b3c"}
+                  onChange={(event) => {
+                    if (!currentSession) return;
+                    applySessionUpdates({ textColor: event.target.value, updatedAt: currentSession.updatedAt });
+                  }}
+                />
+              </span>
+              {customTextColor ? <button type="button" onClick={clearTextColor}>清除</button> : null}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="story-bg-row story-bg-row-fold"
+            aria-expanded={openTagRow === "fold"}
+            onClick={() => setOpenTagRow((value) => (value === "fold" ? null : "fold"))}
+          >
+            <span className="story-bg-row-label">折叠标签</span>
+            <span className="story-bg-row-value">
+              <span>{foldTagsDraft.trim() || "think,thinking"}</span>
+              <i aria-hidden="true">›</i>
+            </span>
+          </button>
+          {openTagRow === "fold" ? (
+            <div className="story-bg-row-panel">
+              <input
+                type="text"
+                value={foldTagsDraft}
+                onChange={(e) => setFoldTagsDraft(e.target.value)}
+                onBlur={() => applySessionUpdates({ foldTags: foldTagsDraft.trim() || undefined })}
+                placeholder="think,thinking"
+              />
+              <div className="story-bg-row-help">逗号分隔标签名，如 think,thinking,reasoning</div>
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className="story-bg-row story-bg-row-fold"
+            aria-expanded={openTagRow === "context"}
+            onClick={() => setOpenTagRow((value) => (value === "context" ? null : "context"))}
+          >
+            <span className="story-bg-row-label">不进上下文标签</span>
+            <span className="story-bg-row-value">
+              <span>{contextExcludedTagsDraft.trim() || "think,thinking"}</span>
+              <i aria-hidden="true">›</i>
+            </span>
+          </button>
+          {openTagRow === "context" ? (
+            <div className="story-bg-row-panel">
+              <input
+                type="text"
+                value={contextExcludedTagsDraft}
+                onChange={(e) => setContextExcludedTagsDraft(e.target.value)}
+                onBlur={() => applySessionUpdates({ contextExcludedTags: contextExcludedTagsDraft.trim() || undefined })}
+                placeholder="think,thinking"
+              />
+              <div className="story-bg-row-help">默认 think,thinking；影响后续生成上下文，不影响显示与保存</div>
+            </div>
+          ) : null}
         </div>
 
-        {isExtra ? null : (
+        {/* 工具放最下面：正篇只有重建缓存，番外多一个清空番外 */}
+        {isExtra ? (
           <div className="story-drawer-section">
             <div className="story-drawer-eyebrow">工具</div>
+            {orphanGroups.length > 0 ? (
+              <button type="button" className="story-tool-btn" onClick={() => setDrawerSheet({ type: "recover" })}>
+                找回剧情（{orphanGroups.length} 段）
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className={`story-tool-btn${confirmingClearExtra ? " is-danger" : ""}`}
+              onClick={() => {
+                if (!confirmingClearExtra) {
+                  setConfirmingClearExtra(true);
+                  return;
+                }
+                cancelStoryGenerationRun(currentSession.id);
+                markGenerating(currentSession.id, false);
+                clearStoryMessages(currentSession.id);
+                setMessages([]);
+                setVisibleMessageCount(STORY_INITIAL_LOAD);
+                setConfirmingClearExtra(false);
+                setStorageVersion((value) => value + 1);
+              }}
+            >
+              {confirmingClearExtra ? "再点一次，清空这个番外窗口" : "清空番外"}
+            </button>
+            <button
+              className="story-tool-btn"
+              onClick={() => {
+                try {
+                  const rebuilt = rebuildStorySessionRenderCache(activeCharacterId, currentSession.id, { sessionFoldTags: display?.foldTags, bindings: extraBindings });
+                  setMessages(rebuilt);
+                  setStorageVersion((value) => value + 1);
+                  alert(`缓存重建完成，${rebuilt.length} 条消息已更新`);
+                } catch (error) {
+                  alert(error instanceof Error ? error.message : "缓存重建失败，请检查 API 绑定配置");
+                }
+              }}
+            >
+              重建渲染缓存
+            </button>
+          </div>
+        ) : (
+          <div className="story-drawer-section">
+            <div className="story-drawer-eyebrow">工具</div>
+            {orphanGroups.length > 0 ? (
+              <button type="button" className="story-tool-btn" onClick={() => setDrawerSheet({ type: "recover" })}>
+                找回剧情（{orphanGroups.length} 段）
+              </button>
+            ) : null}
             <button
               className="story-tool-btn"
               onClick={() => {
@@ -1210,6 +1589,15 @@ export function StoryApp({ onClose }: StoryAppProps) {
           kind={drawerSheet.kind}
           bindings={extraConfig.bindings}
           onChange={(bindings) => updateExtraConfig(currentSession.id, { bindings })}
+          onClose={() => setDrawerSheet(null)}
+        />
+      ) : null}
+      {drawerOpen && drawerSheet?.type === "recover" ? (
+        <StoryRecoverSheet
+          groups={orphanGroups}
+          entries={characterEntries}
+          existingCount={storySlotMessageCount}
+          onAttach={attachOrphan}
           onClose={() => setDrawerSheet(null)}
         />
       ) : null}
@@ -1361,6 +1749,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
                       : undefined;
                   // 番外模板发出的指令折叠成一张卡；编辑时照常显示原文
                   const extraOrder = message.extraOrder && editingMessageId !== message.id ? message.extraOrder : null;
+                  // 系统指令也折叠成一张卡；编辑时照常显示原文
+                  const instructionCard = message.instruction === true && editingMessageId !== message.id;
                   return (
                     <article
                       key={message.id}
@@ -1395,6 +1785,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
                             userName={storyUserName}
                             charName={currentCharacter.name}
                           />
+                        ) : instructionCard ? (
+                          <StoryInstructionCard content={message.rawContent} />
                         ) : (
                         <div className="story-bubble">
                           {editingMessageId === message.id ? (
@@ -1476,6 +1868,9 @@ export function StoryApp({ onClose }: StoryAppProps) {
         onSend={(text) => { void handleSend(text); }}
         onStop={handleStopGeneration}
         onOpenTemplate={isExtra ? openTemplate : undefined}
+        showCommandButton={commandButtonVisible}
+        quickCommands={quickCommands}
+        onSendInstruction={(text) => { void handleSend(text, undefined, true); }}
       />
 
       {isExtra && extraConfig && templateTop != null ? (
@@ -1487,6 +1882,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
           charName={currentCharacter.name}
           top={templateTop}
           sending={isGenerating}
+          quickCommands={quickCommands}
           onSave={(template) => updateExtraConfig(currentSession.id, { template })}
           onBindingsChange={(bindings) => updateExtraConfig(currentSession.id, { bindings })}
           onSend={(template) => {
