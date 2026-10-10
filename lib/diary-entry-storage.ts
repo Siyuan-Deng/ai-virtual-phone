@@ -366,6 +366,42 @@ export function resolveDiaryReplyRule(rules: DiaryReplyRules, characterId: strin
   };
 }
 
+export function clampDiaryIntervalHours(value: unknown): number {
+  return Math.max(1, Math.min(720, Number(value) || 24));
+}
+
+/** 这个角色现在在不在定时里：总开关开着，且名单为空（= 全部）或名单里有它 */
+export function isDiaryCharacterScheduled(settings: DiaryEntryTimerSettings, characterId: string): boolean {
+  return settings.enabled && (settings.characterIds.length === 0 || settings.characterIds.includes(characterId));
+}
+
+export function diaryCharacterIntervalHours(settings: DiaryEntryTimerSettings, characterId: string): number {
+  return settings.intervalHoursByCharacter?.[characterId] ?? settings.intervalHours;
+}
+
+/**
+ * 在某个角色的日记本里开关定时，只动这一个角色。名单为空表示「全部角色」：
+ * 总开关关着时打开 = 只给它开；「全部」里关掉它要先展开成具体名单；关掉最后一个就关总开关（不能留空名单，空名单又成了全部）
+ */
+export function setDiaryCharacterScheduled(
+  settings: DiaryEntryTimerSettings,
+  characterId: string,
+  scheduled: boolean,
+  allCharacterIds: string[],
+): DiaryEntryTimerSettings {
+  if (scheduled) {
+    if (!settings.enabled) return { ...settings, enabled: true, characterIds: [characterId] };
+    if (settings.characterIds.length === 0 || settings.characterIds.includes(characterId)) return settings;
+    return { ...settings, characterIds: [...settings.characterIds, characterId] };
+  }
+  if (!isDiaryCharacterScheduled(settings, characterId)) return settings;
+  const current = settings.characterIds.length === 0 ? allCharacterIds : settings.characterIds;
+  const rest = current.filter(id => id !== characterId);
+  return rest.length === 0
+    ? { ...settings, enabled: false, characterIds: [] }
+    : { ...settings, characterIds: rest };
+}
+
 export function loadDiaryEntryTimerSettings(): DiaryEntryTimerSettings {
   if (typeof window === "undefined") return DEFAULT_DIARY_ENTRY_TIMER_SETTINGS;
   try {
@@ -375,11 +411,17 @@ export function loadDiaryEntryTimerSettings(): DiaryEntryTimerSettings {
     const lastRunAtByCharacter = parsed.lastRunAtByCharacter && typeof parsed.lastRunAtByCharacter === "object"
       ? Object.fromEntries(Object.entries(parsed.lastRunAtByCharacter).map(([key, value]) => [key, String(value)]))
       : {};
+    const intervalHoursByCharacter = parsed.intervalHoursByCharacter && typeof parsed.intervalHoursByCharacter === "object"
+      ? Object.fromEntries(Object.entries(parsed.intervalHoursByCharacter)
+        .filter(([, value]) => Number(value) > 0)
+        .map(([key, value]) => [key, clampDiaryIntervalHours(value)]))
+      : {};
     return {
       enabled: Boolean(parsed.enabled),
-      intervalHours: Math.max(1, Math.min(720, Number(parsed.intervalHours) || 24)),
+      intervalHours: clampDiaryIntervalHours(parsed.intervalHours),
       characterIds: Array.isArray(parsed.characterIds) ? parsed.characterIds.map(String).filter(Boolean) : [],
       lastRunAtByCharacter,
+      intervalHoursByCharacter,
     };
   } catch {
     return DEFAULT_DIARY_ENTRY_TIMER_SETTINGS;
@@ -390,8 +432,9 @@ export function saveDiaryEntryTimerSettings(settings: DiaryEntryTimerSettings): 
   if (typeof window === "undefined") return;
   kvSet(TIMER_KEY, JSON.stringify({
     enabled: Boolean(settings.enabled),
-    intervalHours: Math.max(1, Math.min(720, Number(settings.intervalHours) || 24)),
+    intervalHours: clampDiaryIntervalHours(settings.intervalHours),
     characterIds: settings.characterIds,
     lastRunAtByCharacter: settings.lastRunAtByCharacter,
+    intervalHoursByCharacter: settings.intervalHoursByCharacter ?? {},
   }));
 }
