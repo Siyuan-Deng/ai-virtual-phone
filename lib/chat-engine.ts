@@ -568,6 +568,7 @@ async function applyChatPluginLlmRequest<T extends { role: string }>(
     purpose: string,
     sessionId?: string,
     characterId?: string,
+    extra?: { appTags?: string[]; preview?: boolean },
 ): Promise<{ messages: T[]; preset: PresetConfig | null }> {
     if (typeof window === "undefined") return { messages, preset };
     const payload = await runChatPluginTransform("llm.request", {
@@ -575,6 +576,8 @@ async function applyChatPluginLlmRequest<T extends { role: string }>(
         purpose,
         sessionId,
         characterId,
+        appTags: extra?.appTags,
+        preview: extra?.preview,
     });
     let nextPreset = preset;
     if (preset && (payload.temperature !== undefined || payload.maxTokens !== undefined)) {
@@ -586,6 +589,19 @@ async function applyChatPluginLlmRequest<T extends { role: string }>(
         ? payload.messages as unknown as T[]
         : messages;
     return { messages: nextMessages, preset: nextPreset };
+}
+
+/**
+ * 提示词查看器用：和真正发请求时一样跑一遍 llm.request（日历、经期等都是这时才加进去的），
+ * 但标成预览，各 hook 只往提示词里加内容、不记账不排队
+ */
+export function applyLlmRequestHooksForPreview<T extends { role: string }>(
+    preset: PresetConfig | null,
+    messages: T[],
+    purpose: string,
+    target: { sessionId?: string; characterId?: string; appTags?: string[] },
+): Promise<{ messages: T[]; preset: PresetConfig | null }> {
+    return applyChatPluginLlmRequest(preset, messages, purpose, target.sessionId, target.characterId, { appTags: target.appTags, preview: true });
 }
 
 /** 聊天插件 llm.response 织入：模型原始回复在内置正则处理前交给插件改写 */
@@ -808,7 +824,7 @@ export async function sendLLMStreamRequest(
     callbacks?: ChatCompletionStreamCallbacks,
 ): Promise<ChatCompletionStreamResult> {
     const pluginPurpose = options?.appId ?? "chat";
-    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId, options?.characterId);
+    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId, options?.characterId, { appTags: options?.appTags });
     const effectivePreset = afterPlugins.preset;
     const originalOnDelta = callbacks?.onDelta;
     const pluginCallbacks: ChatCompletionStreamCallbacks | undefined = callbacks ? {
@@ -912,7 +928,7 @@ export async function sendLLMRequest(
     },
 ): Promise<string> {
     const pluginPurpose = options?.appId ?? "chat";
-    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId, options?.characterId);
+    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId, options?.characterId, { appTags: options?.appTags });
     const effectivePreset = afterPlugins.preset;
     const requestMessages = toLlmRequestMessages(afterPlugins.messages);
     const request = buildProviderRequest(config, effectivePreset, requestMessages);
@@ -1110,7 +1126,7 @@ export async function sendLLMToolStreamRequest(
 ): Promise<LLMToolRequestResult> {
     void regexes;
     const pluginPurpose = options?.appId ?? "chat";
-    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId, options?.characterId);
+    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId, options?.characterId, { appTags: options?.appTags });
     const effectivePreset = afterPlugins.preset;
     const request = buildProviderRequest(config, effectivePreset, afterPlugins.messages, { tools, stream: true, maxTokens: options?.maxTokens });
     publishDebugPromptSnapshot({ request, config, preset: effectivePreset, meta, options, requestKind: "native-tools-stream", tools });
@@ -1266,7 +1282,7 @@ export async function sendLLMToolRequest(
     },
 ): Promise<LLMToolRequestResult> {
     const pluginPurpose = options?.appId ?? "chat";
-    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId, options?.characterId);
+    const afterPlugins = await applyChatPluginLlmRequest(preset, messages, pluginPurpose, options?.debugSessionId, options?.characterId, { appTags: options?.appTags });
     const effectivePreset = afterPlugins.preset;
     const request = buildProviderRequest(config, effectivePreset, afterPlugins.messages, { tools });
     publishDebugPromptSnapshot({ request, config, preset: effectivePreset, meta, options, requestKind: "native-tools", tools });
@@ -3011,7 +3027,12 @@ export async function previewPromptRequestSnapshot(
         effectiveHistory = annotated;
     }
 
-    const { llmMessages, character, config, preset, userIdentity, toolsEnabled } = await buildChatPromptMessages(session, effectiveHistory, options);
+    const built = await buildChatPromptMessages(session, effectiveHistory, options);
+    const { character, config, userIdentity, toolsEnabled } = built;
+    const { messages: llmMessages, preset } = await applyLlmRequestHooksForPreview(built.preset, built.llmMessages, options?.appId ?? "chat", {
+        sessionId: session.id,
+        appTags: options?.appTags,
+    });
     const requestMessages = toLlmRequestMessages(llmMessages);
     const enabledTools = toolsEnabled ? getEnabledTools(options?.appId ?? "chat") : [];
     const meta = { characterName: character.name, userName: userIdentity?.name };

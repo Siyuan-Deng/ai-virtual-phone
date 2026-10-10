@@ -26,7 +26,8 @@ import { loadCharacters } from "@/lib/character-storage";
 import { getAllPosts } from "@/lib/moments-storage";
 import type { LLMMessage } from "@/lib/llm-prompt-assembler";
 import { getWeekStartIso } from "@/lib/calendar-utils";
-import { findMainStorySession, loadStoryMessages } from "@/lib/story-storage";
+import { findLastActiveStorySessionFor, findMainStorySession, loadStoryMessages } from "@/lib/story-storage";
+import { normalizeStoryExtraConfig, storyExtraHistory } from "@/lib/story-extra";
 import { previewStoryPromptPayload } from "@/lib/story-engine";
 import { loadVnSessions, loadVnMessages } from "@/lib/vn-storage";
 import { previewVnPromptPayload } from "@/lib/vn-engine";
@@ -439,12 +440,17 @@ export function DebugPromptPanel() {
         setError(null);
         setLoading(true);
         try {
-            const session = findMainStorySession(storyCharacterId);
-            const history = session ? loadStoryMessages(session.id) : [];
-            const result = await previewStoryPromptPayload(storyCharacterId, history, {
-                sessionContextExcludedTags: session?.contextExcludedTags,
+            // 预览这个角色最近在用的那个窗口：番外按番外自己的绑定和「带不带之前的番外」来
+            const session = findLastActiveStorySessionFor(storyCharacterId);
+            const isExtra = session?.kind === "extra";
+            const main = isExtra ? findMainStorySession(storyCharacterId) : session;
+            const messages = session ? loadStoryMessages(session.id) : [];
+            const result = await previewStoryPromptPayload(storyCharacterId, isExtra ? storyExtraHistory(messages) : messages, {
+                sessionContextExcludedTags: session?.contextExcludedTags ?? main?.contextExcludedTags,
+                bindings: isExtra ? normalizeStoryExtraConfig(session?.extraConfig).bindings : undefined,
+                extra: isExtra,
             });
-            setStoryResult(result);
+            setStoryResult(isExtra ? { ...result, characterName: `${result.characterName} · 番外` } : result);
             setExpandedIdx(new Set()); setBadgesShownIdx(new Set());
             requestAnimationFrame(() => { scrollRef.current?.scrollTo(0, 0); });
         } catch (e) {

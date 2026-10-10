@@ -2,7 +2,7 @@
 
 // 剧情侧栏（选角色）和番外用到的几块界面，版式照用户选定的方案 C。
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronLeft, ChevronRight, Eraser, Folder, Plus, Save, Trash2, X } from "lucide-react";
 import { Avatar } from "@/components/ui/primitives";
@@ -12,6 +12,7 @@ import { inheritedCharacterAppApiLabel, loadCharacterAppApiId, saveCharacterAppA
 import { loadWorldBookFolders, loadWorldBookRootOrder } from "@/lib/worldbook-folders";
 import { loadApiConfigFolders, loadApiConfigRootOrder } from "@/lib/api-config-folders";
 import { buildPickerEntries } from "@/lib/item-folders";
+import { appendStoryCommand } from "@/lib/story-commands";
 import type {
   StoryExtraBindings,
   StoryExtraConfig,
@@ -867,6 +868,11 @@ export function StoryInstructionCard({ content }: { content: string }) {
 }
 
 /** 侧栏里管系统指令：输入栏显不显示「指令」按钮，快捷指令的增删 */
+function fitCommandDraftHeight(el: HTMLTextAreaElement) {
+  el.style.height = "auto";
+  el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+}
+
 export function StoryCommandSettingsSection({
   buttonVisible,
   onButtonVisibleChange,
@@ -885,11 +891,39 @@ export function StoryCommandSettingsSection({
   onSend: (text: string) => void;
 }) {
   const [draft, setDraft] = useState("");
+  const draftRef = useRef<HTMLTextAreaElement>(null);
+  // 写长了自己换行、框跟着长高（保存 / 发送贴着框底）；侧栏宽度变了（转屏等）也重算
+  useLayoutEffect(() => {
+    if (draftRef.current) fitCommandDraftHeight(draftRef.current);
+  }, [draft]);
+  useEffect(() => {
+    const el = draftRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fitCommandDraftHeight(el);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   const add = () => {
     const text = draft.trim();
     if (!text) return;
     onCommandsChange([...commands, text]);
     setDraft("");
+  };
+  // 点一条存好的快捷指令：接到下面输入框已有内容后面，可以组合几条、改了再存或者直接发
+  const pick = (command: string) => {
+    const next = appendStoryCommand(draft, command);
+    setDraft(next);
+    requestAnimationFrame(() => {
+      const el = draftRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(next.length, next.length);
+    });
   };
   const send = () => {
     const text = draft.trim();
@@ -917,7 +951,7 @@ export function StoryCommandSettingsSection({
           <div className="story-command-list">
             {commands.map((command) => (
               <div key={command} className="story-command-item">
-                <span>{command}</span>
+                <button type="button" className="story-command-item-text" onClick={() => pick(command)}>{command}</button>
                 <button type="button" aria-label="删除这条快捷指令" onClick={() => onCommandsChange(commands.filter((item) => item !== command))}>
                   <X size={13} />
                 </button>
@@ -926,7 +960,9 @@ export function StoryCommandSettingsSection({
           </div>
         ) : null}
         <div className="story-command-add">
-          <input
+          <textarea
+            ref={draftRef}
+            rows={1}
             value={draft}
             placeholder="输入快捷指令"
             enterKeyHint="send"
@@ -999,7 +1035,7 @@ export function StoryExtraTemplateSheet({
     return () => document.removeEventListener("pointerdown", close);
   }, [quickMenuOpen]);
   const appendQuickCommand = (command: string) => {
-    setDraft((prev) => ({ ...prev, extra: prev.extra.trim() ? `${prev.extra.trim()}\n${command}` : command }));
+    setDraft((prev) => ({ ...prev, extra: appendStoryCommand(prev.extra, command) }));
     setQuickMenuOpen(false);
   };
   const personRows = [

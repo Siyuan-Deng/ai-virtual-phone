@@ -35,6 +35,7 @@ import {
     applyCustomPromptProfileToPreset,
     stripOnlineThinkingTag,
     stripPresetTexts,
+    applyLlmRequestHooksForPreview,
     type ChatCompletionCallbacks,
     type NativeChatToolBundle,
 } from "./chat-engine";
@@ -1254,7 +1255,13 @@ export async function previewGroupPromptRequestSnapshot(
     history: ChatMessage[],
     options?: GroupChatPromptBuildOptions,
 ): Promise<DebugPromptSnapshot> {
-    const { llmMessages, config, preset, memberNames, enabledTools, userName, appTags } = await buildGroupChatPromptMessages(session, history, { ...options });
+    const built = await buildGroupChatPromptMessages(session, history, { ...options });
+    const { config, memberNames, enabledTools, userName, appTags } = built;
+    // 日历、经期这些是真正发请求时由 llm.request 加进去的，预览也要跑一遍才看得到
+    const { messages: llmMessages, preset } = await applyLlmRequestHooksForPreview(built.preset, built.llmMessages, "group_chat", {
+        sessionId: session.id,
+        appTags,
+    });
     const requestMessages = toLlmRequestMessages(llmMessages);
     const meta = { characterName: `群聊:${session.groupName || "群聊"}`, userName };
 

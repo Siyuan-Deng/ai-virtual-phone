@@ -13,11 +13,13 @@ import {
     normalizeCalendarTodos,
     saveCalendarExtras,
     type CalendarEventDetails,
+    type CalendarExtras,
     type CalendarMemoPage,
     type CalendarRecurrenceFrequency,
     type CalendarTodo,
 } from "./calendar-extras";
 import { addDaysIso, createRecurringSeries, recurrenceDates, recurrenceRuleLabel, updateEntireSeries } from "./calendar-recurrence";
+import { resolveCalendarId } from "./calendar-ids";
 
 const USER = { ownerType: "user", ownerId: "self" } as const;
 const COLOR_KEYS: CalendarColorKey[] = ["blue", "green", "amber", "rose", "violet", "teal", "slate", "lilac"];
@@ -112,6 +114,39 @@ function findEvent(plans: CalendarWeekPlan[], eventId: string): { plan: Calendar
         if (index >= 0) return { plan, index, item: plan.items[index] };
     }
     return null;
+}
+
+/**
+ * 角色指的是哪一条日程：eventId（提示词里的短 ID、完整 ID 都认），或者重复日程的 seriesId + date（那一天的那一次）。
+ * 只给 seriesId、不给 date 时只能用在 scope:series（改整个系列），取今天及以后最近的那一次当代表
+ */
+function resolveEventRef(eventRef: unknown, args: Args, plans: CalendarWeekPlan[], extras: CalendarExtras): string {
+    const items = plans.flatMap((plan) => plan.items);
+    if (String(eventRef ?? "").trim()) {
+        const id = resolveCalendarId(eventRef, items.map((item) => item.id));
+        if (!id) throw new Error("找不到这个 ID 的日程");
+        return id;
+    }
+    const seriesIds = new Set([
+        ...Object.keys(extras.series),
+        ...Object.values(extras.eventDetails).map((details) => details.seriesId).filter((id): id is string => Boolean(id)),
+    ]);
+    const seriesId = resolveCalendarId(args.seriesId, seriesIds);
+    if (!seriesId) throw new Error(args.seriesId ? "找不到这个 seriesId 的重复日程" : "缺少 eventId（或重复日程的 seriesId + date）");
+    const occurrences = items
+        .filter((item) => extras.eventDetails[item.id]?.seriesId === seriesId)
+        .sort((a, b) => a.date.localeCompare(b.date));
+    if (args.date !== undefined && args.date !== "") {
+        const date = requireActionDate(args.date, "日期");
+        const hit = occurrences.find((item) => item.date === date);
+        if (!hit) throw new Error(`${date} 这天没有这个重复日程`);
+        return hit.id;
+    }
+    if (args.scope !== "series") throw new Error("改重复日程的某一天要给 date（YYYY-MM-DD）");
+    const today = toLocalIsoDate(new Date());
+    const representative = occurrences.find((item) => item.date >= today) ?? occurrences[occurrences.length - 1];
+    if (!representative) throw new Error("没有找到这个重复日程的任何一次");
+    return representative.id;
 }
 
 function weekPlanFor(plans: CalendarWeekPlan[], date: string, now: string): CalendarWeekPlan {
@@ -209,12 +244,11 @@ function createEvent(args: Args): string {
 }
 
 function updateEvent(args: Args): string {
-    const eventId = String(args.eventId || "");
-    if (!eventId) throw new Error("修改日程缺少 eventId");
     const patch = objectArg(args.patch);
     const plans = loadOwnerCalendarPlansRaw(USER.ownerType, USER.ownerId);
-    const record = findEvent(plans, eventId);
     const extras = loadCalendarExtras();
+    const eventId = resolveEventRef(args.eventId, args, plans, extras);
+    const record = findEvent(plans, eventId);
     const details: CalendarEventDetails = extras.eventDetails[eventId] ?? { note: "", allDay: false, todos: [], seriesId: null, updatedAt: "" };
 
     if (args.scope === "series") {
@@ -300,24 +334,28 @@ type TodoTarget =
     | { source: "memo"; memos: CalendarMemoPage[]; memo: CalendarMemoPage; todos: CalendarTodo[] }
     | { source: "event"; eventId: string; details: CalendarEventDetails; todos: CalendarTodo[] };
 
-function todoTarget(sourceValue: unknown, ownerIdValue: unknown): TodoTarget {
-    const source = String(sourceValue || "");
-    const ownerId = String(ownerIdValue || "");
+/** 待办挂在哪：备忘录（memoId）或日程（ownerId，或重复日程的 seriesId + date） */
+function todoTarget(args: Args): TodoTarget {
+    const source = String(args.source || "");
     const extras = loadCalendarExtras();
     if (source === "memo") {
-        const memo = extras.memos.find((item) => String(item.id) === ownerId);
+        const memoId = resolveCalendarId(args.ownerId, extras.memos.map((item) => item.id));
+        const memo = memoId ? extras.memos.find((item) => item.id === memoId) : undefined;
         if (!memo) throw new Error("找不到目标备忘录");
         return { source, memos: extras.memos, memo, todos: normalizeCalendarTodos(memo.checklist) };
     }
     if (source !== "event") throw new Error("待办来源必须是 event 或 memo");
-    let details = extras.eventDetails[ownerId];
-    if (!details) {
-        // 从没加过备注 / 待办的日程还没有附加信息，日程本身在就补一份空的
-        const exists = findEvent(loadOwnerCalendarPlansRaw(USER.ownerType, USER.ownerId), ownerId);
-        if (!exists) throw new Error("找不到目标日程待办清单");
-        details = { note: "", allDay: false, todos: [], seriesId: null, updatedAt: "" };
-    }
+    const ownerId = resolveEventRef(args.ownerId, args, loadOwnerCalendarPlansRaw(USER.ownerType, USER.ownerId), extras);
+    // 从没加过备注 / 待办的日程还没有附加信息，日程本身在就补一份空的
+    const details = extras.eventDetails[ownerId] ?? { note: "", allDay: false, todos: [], seriesId: null, updatedAt: "" };
     return { source, eventId: ownerId, details, todos: normalizeCalendarTodos(details.todos) };
+}
+
+function findTodo(todos: CalendarTodo[], todoRef: unknown): CalendarTodo {
+    const todoId = resolveCalendarId(todoRef, todos.map((todo) => todo.id));
+    const todo = todoId ? todos.find((item) => item.id === todoId) : undefined;
+    if (!todo) throw new Error("找不到目标待办");
+    return todo;
 }
 
 /** 存回去；故意不走 setEventTodoDone / reportEventTodosChanged，免得角色自己勾的待办又触发「完成后回应」 */
@@ -336,9 +374,8 @@ function saveTodoTarget(target: TodoTarget): void {
 }
 
 function setTodoState(args: Args): string {
-    const target = todoTarget(args.source, args.ownerId);
-    const todo = target.todos.find((item) => item.id === String(args.todoId || ""));
-    if (!todo) throw new Error("找不到目标待办");
+    const target = todoTarget(args);
+    const todo = findTodo(target.todos, args.todoId);
     todo.done = args.done === true;
     saveTodoTarget(target);
     return `${todo.done ? "勾选完成" : "取消完成"}待办“${todo.text}”`;
@@ -372,9 +409,10 @@ function addTodoToSeries(ownerId: string, text: string): string {
     return `为重复日程“${title}”的全部实例新增待办“${text}”（现有及以后每次重复均生效）`;
 }
 
-function updateTodoAcrossSeries(ownerId: string, todoId: string, patch: Args): string {
+function updateTodoAcrossSeries(ownerId: string, todoRef: unknown, patch: Args): string {
     const { title, ids, details } = seriesInstances(ownerId);
     const sourceTodos = normalizeCalendarTodos(details[ownerId]?.todos);
+    const todoId = resolveCalendarId(todoRef, sourceTodos.map((todo) => todo.id));
     const sourceIndex = sourceTodos.findIndex((todo) => todo.id === todoId);
     if (sourceIndex < 0) throw new Error("找不到目标待办");
     const nextText = patch.text !== undefined ? oneLine(patch.text, "", 240) : sourceTodos[sourceIndex].text;
@@ -394,11 +432,16 @@ function updateTodoAcrossSeries(ownerId: string, todoId: string, patch: Args): s
     return `修改重复日程“${title}”全部实例中的待办“${nextText}”（以后每次重复均生效）`;
 }
 
+/** 日程上的待办挂在哪一条（ownerId，或重复日程的 seriesId + date） */
+function eventOwnerId(args: Args): string {
+    return resolveEventRef(args.ownerId, args, loadOwnerCalendarPlansRaw(USER.ownerType, USER.ownerId), loadCalendarExtras());
+}
+
 function addTodo(args: Args): string {
     const text = oneLine(args.text, "", 240);
     if (!text) throw new Error("新增待办缺少内容");
-    if (args.source === "event" && args.scope === "series") return addTodoToSeries(String(args.ownerId || ""), text);
-    const target = todoTarget(args.source, args.ownerId);
+    if (args.source === "event" && args.scope === "series") return addTodoToSeries(eventOwnerId(args), text);
+    const target = todoTarget(args);
     const dueDate = target.source === "memo" && args.dueDate ? requireActionDate(args.dueDate, "待办截止日期") : "";
     const dueTime = dueDate && args.dueTime ? requireActionTime(args.dueTime, "待办截止时间") : "";
     target.todos.push({ id: makeId("todo"), text, done: false, dueDate, dueTime, createdAt: new Date().toISOString() });
@@ -408,11 +451,9 @@ function addTodo(args: Args): string {
 
 function updateTodo(args: Args): string {
     const patch = objectArg(args.patch);
-    const todoId = String(args.todoId || "");
-    if (args.source === "event" && args.scope === "series") return updateTodoAcrossSeries(String(args.ownerId || ""), todoId, patch);
-    const target = todoTarget(args.source, args.ownerId);
-    const todo = target.todos.find((item) => item.id === todoId);
-    if (!todo) throw new Error("找不到目标待办");
+    if (args.source === "event" && args.scope === "series") return updateTodoAcrossSeries(eventOwnerId(args), args.todoId, patch);
+    const target = todoTarget(args);
+    const todo = findTodo(target.todos, args.todoId);
     if (patch.text !== undefined) {
         const text = oneLine(patch.text, "", 240);
         if (!text) throw new Error("待办内容不能为空，也不能用空文字删除");
@@ -449,10 +490,10 @@ function createMemo(args: Args): string {
 }
 
 function updateMemo(args: Args): string {
-    const memoId = String(args.memoId || "");
     const patch = objectArg(args.patch);
     const extras = loadCalendarExtras();
-    const current = extras.memos.find((item) => String(item.id) === memoId);
+    const memoId = resolveCalendarId(args.memoId, extras.memos.map((item) => item.id));
+    const current = memoId ? extras.memos.find((item) => item.id === memoId) : undefined;
     if (!current) throw new Error("找不到要修改的备忘录");
     const memo: CalendarMemoPage = {
         ...current,

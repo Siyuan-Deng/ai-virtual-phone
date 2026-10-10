@@ -72,7 +72,14 @@ export type CalendarMemoPage = {
     checklist: CalendarTodo[];
     createdAt: string;
     updatedAt: string;
+    /** 归档：收起来，用户还能看、能移出；不进提示词、不提醒、日历上也不显示它的截止 */
+    archived?: boolean;
 };
+
+/** 没归档的备忘录（进提示词、提醒、日历上的截止都只看这些） */
+export function activeCalendarMemos(memos: CalendarMemoPage[]): CalendarMemoPage[] {
+    return memos.filter((memo) => !memo.archived);
+}
 
 /** sending：正在发；sent：发出去了；failed：生成报错了（隔一会儿再试，最多试 3 次） */
 export type CalendarReminderSentRecord = { at: number; status: "sending" | "sent" | "failed"; attempts?: number };
@@ -198,6 +205,7 @@ function normalizeMemo(value: unknown): CalendarMemoPage | null {
         checklist: normalizeCalendarTodos(raw.checklist),
         createdAt: typeof raw.createdAt === "string" ? raw.createdAt : "",
         updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
+        ...(raw.archived === true ? { archived: true } : {}),
     };
 }
 

@@ -1,7 +1,7 @@
 // lib/llm-prompt-assembler.ts
 
 import { Character } from "./character-types";
-import { ChatMessage } from "./chat-storage";
+import { ChatMessage, isSystemInstructionMessage } from "./chat-storage";
 import type { StateValue } from "./chat-storage";
 import { PresetConfig, Prompt, PromptOrderEntry, WorldBookConfig, RegexConfig, WorldBookEntry } from "./settings-types";
 import type { UserIdentity } from "@/components/settings/user-identity";
@@ -38,6 +38,8 @@ export type LLMMessage = {
         depth?: number;
         order?: number;
         _fromHistory?: boolean;
+        /** 系统指令：单独一条，不和前后同角色的消息合并 */
+        _standalone?: boolean;
     };
 };
 
@@ -143,6 +145,8 @@ type PromptBlock = {
     order: number;
     marker: string;
     fromHistory?: boolean;
+    /** 系统指令：单独成一条消息，不和相邻的同角色消息合并 */
+    standalone?: boolean;
     imageUrl?: string;      // vision: image URL/data URL attached to this prompt block
     reasoning?: string;
     openRouterReasoningDetails?: unknown[];
@@ -559,6 +563,7 @@ function pushChronologicalShortTermBlocks(params: {
             order: 999,
             marker: `History [${item.historyIndex}]`,
             fromHistory: true,
+            standalone: isSystemInstructionMessage(msg),
             imageUrl,
         });
 
@@ -1019,6 +1024,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
                 order: 999,
                 marker: `History [${distFromBottom}]`,
                 fromHistory: true,
+                standalone: isSystemInstructionMessage(msg),
                 imageUrl,
             });
 
@@ -1054,7 +1060,8 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
         const processedText = b.role === "tool" ? b.text : applyInputRegex(b.text, regexes, inputCtx);
         const carriesNativeToolData = b.role === "tool" || Boolean(b.toolCalls?.length);
 
-        const canMerge = preset
+        const last = finalPayload[finalPayload.length - 1];
+        const canMerge = !b.standalone && !last?._debugMeta?._standalone && (preset
             ? (b.fromHistory && finalPayload.length > 0 &&
                finalPayload[finalPayload.length - 1].role === b.role &&
                finalPayload[finalPayload.length - 1]._debugMeta?._fromHistory === true &&
@@ -1065,7 +1072,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
                finalPayload[finalPayload.length - 1].role === b.role &&
                !carriesNativeToolData &&
                !finalPayload[finalPayload.length - 1].toolCalls?.length &&
-               finalPayload[finalPayload.length - 1].role !== "tool");
+               finalPayload[finalPayload.length - 1].role !== "tool"));
 
         if (b.imageUrl) {
             // Vision message: build multi-part content with image (never merged)
@@ -1080,7 +1087,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
                 toolCalls: b.toolCalls,
                 toolCallId: b.toolCallId,
                 name: b.toolName,
-                _debugMeta: { marker: b.marker, depth: b.depth, order: b.order, _fromHistory: b.fromHistory },
+                _debugMeta: { marker: b.marker, depth: b.depth, order: b.order, _fromHistory: b.fromHistory, _standalone: b.standalone },
             });
         } else if (canMerge && typeof finalPayload[finalPayload.length - 1].content === "string") {
             (finalPayload[finalPayload.length - 1].content as string) += "\n\n" + processedText;
@@ -1097,7 +1104,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
                 toolCalls: b.toolCalls,
                 toolCallId: b.toolCallId,
                 name: b.toolName,
-                _debugMeta: { marker: b.marker, depth: b.depth, order: b.order, _fromHistory: b.fromHistory },
+                _debugMeta: { marker: b.marker, depth: b.depth, order: b.order, _fromHistory: b.fromHistory, _standalone: b.standalone },
             });
         }
     });
@@ -1109,6 +1116,8 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
         const cur = finalPayload[i];
         const prev = finalPayload[i - 1];
         const canMerge = cur.role === prev.role
+            && !cur._debugMeta?._standalone
+            && !prev._debugMeta?._standalone
             && cur.role !== "tool"
             && !cur.toolCalls?.length
             && !prev.toolCalls?.length
@@ -1737,6 +1746,7 @@ function pushGroupChronologicalShortTermBlocks(params: {
             order: 999,
             marker: `History [${item.historyIndex}]`,
             fromHistory: true,
+            standalone: isSystemInstructionMessage(msg),
             imageUrl,
         });
     });
@@ -2218,6 +2228,7 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
                 order: 999,
                 marker: `History [${distFromBottom}]`,
                 fromHistory: true,
+                standalone: isSystemInstructionMessage(msg),
                 imageUrl,
             });
         });
@@ -2238,7 +2249,8 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
         const processedText = b.role === "tool" ? b.text : applyInputRegex(b.text, regexes, inputCtx);
         const carriesNativeToolData = b.role === "tool" || Boolean(b.toolCalls?.length);
 
-        const canMerge = b.fromHistory && finalPayload.length > 0 &&
+        const canMerge = b.fromHistory && !b.standalone && finalPayload.length > 0 &&
+            !finalPayload[finalPayload.length - 1]._debugMeta?._standalone &&
             finalPayload[finalPayload.length - 1].role === b.role &&
             finalPayload[finalPayload.length - 1]._debugMeta?._fromHistory === true &&
             !carriesNativeToolData &&
@@ -2258,7 +2270,7 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
                 toolCalls: b.toolCalls,
                 toolCallId: b.toolCallId,
                 name: b.toolName,
-                _debugMeta: { marker: b.marker, depth: b.depth, order: b.order, _fromHistory: b.fromHistory },
+                _debugMeta: { marker: b.marker, depth: b.depth, order: b.order, _fromHistory: b.fromHistory, _standalone: b.standalone },
             });
         } else if (canMerge && typeof finalPayload[finalPayload.length - 1].content === "string") {
             (finalPayload[finalPayload.length - 1].content as string) += "\n\n" + processedText;
@@ -2275,7 +2287,7 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
                 toolCalls: b.toolCalls,
                 toolCallId: b.toolCallId,
                 name: b.toolName,
-                _debugMeta: { marker: b.marker, depth: b.depth, order: b.order, _fromHistory: b.fromHistory },
+                _debugMeta: { marker: b.marker, depth: b.depth, order: b.order, _fromHistory: b.fromHistory, _standalone: b.standalone },
             });
         }
     });
@@ -2285,6 +2297,8 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
         const cur = finalPayload[i];
         const prev = finalPayload[i - 1];
         const canMerge = cur.role === prev.role
+            && !cur._debugMeta?._standalone
+            && !prev._debugMeta?._standalone
             && cur.role !== "tool"
             && !cur.toolCalls?.length
             && !prev.toolCalls?.length

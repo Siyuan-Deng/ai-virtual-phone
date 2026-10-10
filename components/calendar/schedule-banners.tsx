@@ -7,7 +7,7 @@
 import type { CSSProperties } from "react";
 import type { CalendarColorKey, CalendarScheduleItem } from "@/lib/calendar-types";
 import type { CalendarConfig } from "@/lib/calendar-storage";
-import { normalizeCalendarTodos, type CalendarExtras, type CalendarTodo } from "@/lib/calendar-extras";
+import { activeCalendarMemos, normalizeCalendarTodos, type CalendarExtras, type CalendarTodo } from "@/lib/calendar-extras";
 import { DEFAULT_CHINA_HOLIDAY_COLOR, DEFAULT_ONTARIO_HOLIDAY_COLOR, holidaysForDate } from "@/lib/calendar-holidays";
 import { pickScheduleColorKey } from "@/lib/calendar-utils";
 
@@ -125,7 +125,7 @@ export function buildBannerGroups(
     }
 
     let memoOrder = 0;
-    for (const memo of extras.memos) {
+    for (const memo of activeCalendarMemos(extras.memos)) {
         for (const todo of normalizeCalendarTodos(memo.checklist)) {
             if (todo.dueDate !== date) continue;
             todos.push({

@@ -10,7 +10,7 @@ import {
 } from "./settings-storage";
 import type { ApiConfig, PresetConfig, RegexConfig, WorldBookConfig } from "./settings-types";
 import { assemblePromptPayload, type LLMMessage } from "./llm-prompt-assembler";
-import { previewMessagesForApi, sendLLMRequest, ChatEngineError } from "./chat-engine";
+import { applyLlmRequestHooksForPreview, previewMessagesForApi, sendLLMRequest, ChatEngineError } from "./chat-engine";
 import { loadMemoryConfig } from "./memory-storage";
 import { retrieveCoreMemoriesForPrompt, retrieveMemoriesForPrompt } from "./memory-service";
 import { formatCoreMemories, formatLongTermMemories } from "./memory-injector";
@@ -65,7 +65,14 @@ function toHistoryMessage(message: StoryMessage, contextExcludedTags?: string): 
     content: stripContextExcludedTags(message.rawContent, contextExcludedTags),
     status: "sent",
     createdAt: message.createdAt,
+    // 剧情里的 system 消息就是「指令」发的系统指令：和聊天的系统指令一样单独成一条 system，不和前后合并
+    ...(message.role === "system" ? { mediaType: "system_instruction" as const } : {}),
   };
+}
+
+/** 番外多一个 story_extra 标签：日历、经期这些只进正篇，不进番外 */
+function storyAppTags(extra?: boolean): string[] {
+  return extra ? ["story", "story_extra"] : ["story"];
 }
 
 /** overrides：番外单独的绑定。哪项没填（或绑的东西已经删了）就跟随剧情 */
@@ -141,7 +148,7 @@ export function getStoryRenderSignature(characterId: string, overrides?: StoryEx
 export async function generateStoryCompletion(
   characterId: string,
   history: StoryMessage[],
-  options?: { sessionFoldTags?: string; sessionContextExcludedTags?: string; signal?: AbortSignal; bindings?: StoryExtraBindings },
+  options?: { sessionFoldTags?: string; sessionContextExcludedTags?: string; signal?: AbortSignal; bindings?: StoryExtraBindings; extra?: boolean },
 ): Promise<StoryGenerationResult> {
   const character = loadCharacters().find((item) => item.id === characterId);
   if (!character) {
@@ -158,7 +165,7 @@ export async function generateStoryCompletion(
 
   const rawOutput = await sendLLMRequest(apiConfig, preset, llmMessages, regexes, {
     characterName: character.name,
-  }, { skipOutputRegex: true, includeReasoning: true, appId: "story", appTags: ["story"], characterId, signal: options?.signal });
+  }, { skipOutputRegex: true, includeReasoning: true, appId: "story", appTags: storyAppTags(options?.extra), characterId, signal: options?.signal });
 
   const parsed = parseStoryResponse(rawOutput, regexes, {
     summaryTag,
@@ -227,17 +234,19 @@ async function buildStoryPromptMessages(
 export async function previewStoryPromptPayload(
   characterId: string,
   history: StoryMessage[],
-  options?: { sessionContextExcludedTags?: string },
+  options?: { sessionContextExcludedTags?: string; bindings?: StoryExtraBindings; extra?: boolean },
 ): Promise<StoryPreviewResult> {
   const character = loadCharacters().find((item) => item.id === characterId);
   if (!character) {
     throw new ChatEngineError(`Character not found: ${characterId}`);
   }
-  const { apiConfig, preset, regexes, worldBooks } = resolveStoryConfigs(characterId);
+  const { apiConfig, preset, regexes, worldBooks } = resolveStoryConfigs(characterId, options?.bindings);
   const effectiveContextExcludedTags = options?.sessionContextExcludedTags?.trim() || DEFAULT_STORY_CONTEXT_EXCLUDED_TAGS;
-  const llmMessages = await buildStoryPromptMessages(characterId, history, preset, regexes, worldBooks, effectiveContextExcludedTags);
+  const built = await buildStoryPromptMessages(characterId, history, preset, regexes, worldBooks, effectiveContextExcludedTags);
+  // 日历、备忘录、经期是真正发请求时由 llm.request 加进去的，预览也跑一遍才和实际一致
+  const hooked = await applyLlmRequestHooksForPreview(preset, built, "story", { characterId, appTags: storyAppTags(options?.extra) });
   return {
-    messages: previewMessagesForApi(apiConfig, preset, llmMessages),
+    messages: previewMessagesForApi(apiConfig, hooked.preset, hooked.messages),
     characterName: character.name,
     model: apiConfig.defaultModel,
     presetName: preset?.name || "默认预设",

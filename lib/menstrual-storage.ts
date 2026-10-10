@@ -577,7 +577,11 @@ export function describeMenstrualStatus(
     return day <= config.periodLength ? `${userName} 正在经期，第${day}天。` : `${userName} 经期第${day}天，还没记录结束。`;
   }
   const recorded = records.find(record => record.startDate <= today && today <= record.endDate);
-  if (recorded) return `${userName} 正在经期，第${daysBetween(recorded.startDate, today) + 1}天。`;
+  if (recorded) {
+    // 今天点了「经期走了」：日历上今天还算经期那几天里的一天，但人已经不在经期了
+    if (recorded.endDate === today) return `${userName} 的经期今天结束了。`;
+    return `${userName} 正在经期，第${daysBetween(recorded.startDate, today) + 1}天。`;
+  }
   if (!start && records.length === 0) return null;
   if (buildMenstrualDayMap(today, today, records, config).get(today)?.type === "predicted_period") {
     return `${userName} 不在经期，按预测这几天可能会来。`;

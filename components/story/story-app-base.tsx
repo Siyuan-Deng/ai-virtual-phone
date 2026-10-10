@@ -93,6 +93,7 @@ import {
 } from "@/components/story/story-extra-ui";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import {
+  appendStoryCommand,
   loadStoryCommandButtonVisible,
   loadStoryQuickCommands,
   saveStoryCommandButtonVisible,
@@ -187,6 +188,7 @@ function storyDisplaySettings(session: StorySession) {
     contextExcludedTags: session.contextExcludedTags ?? main?.contextExcludedTags,
     metaQuote: session.metaQuote ?? main?.metaQuote ?? DEFAULT_STORY_META_QUOTE,
     backgroundImage: session.backgroundImage ?? main?.backgroundImage ?? "",
+    backgroundBrightness: session.backgroundBrightness ?? main?.backgroundBrightness ?? 100,
     paperHidden: session.paperHidden ?? main?.paperHidden ?? false,
     fontAsset: session.fontAsset ?? main?.fontAsset ?? "",
     textColor: session.textColor ?? main?.textColor ?? "",
@@ -376,12 +378,14 @@ const StoryComposer = memo(function StoryComposer({
   };
 
   const pickQuickCommand = (command: string) => {
-    setDraft(command);
+    const next = appendStoryCommand(draft, command);
+    setDraft(next);
     requestAnimationFrame(() => {
       const textarea = textareaRef.current;
       if (!textarea) return;
       resizeStoryComposerTextarea(textarea);
       textarea.focus();
+      textarea.setSelectionRange(next.length, next.length);
     });
   };
 
@@ -534,6 +538,12 @@ export function StoryApp({ onClose }: StoryAppProps) {
   const backgroundImageId = display?.backgroundImage || "";
   const [wallpaperUrl, setWallpaperUrl] = useState<string | null>(null);
   const backgroundInputRef = useRef<HTMLInputElement | null>(null);
+  // 背景亮度：拖的时候先只改页面，停手一会儿再存，免得每挪一格都写一次库
+  const [brightnessOpen, setBrightnessOpen] = useState(false);
+  const [brightnessDraft, setBrightnessDraft] = useState<number | null>(null);
+  const brightnessSaveRef = useRef<number | null>(null);
+  const backgroundBrightness = brightnessDraft ?? display?.backgroundBrightness ?? 100;
+  const wallpaperDim = (100 - backgroundBrightness) / 100;
   // 上传的字体、文字颜色：写成一条只有一个 class 权重的规则，放在自定义 CSS 前面——
   // 主题默认值压得住，自定义 CSS 里写了同样的变量就以 CSS 为准
   const fontAssetId = display?.fontAsset || "";
@@ -916,8 +926,21 @@ export function StoryApp({ onClose }: StoryAppProps) {
     applySessionUpdates({ textColor: isExtra ? "" : undefined, updatedAt: currentSession.updatedAt });
   }
 
+  function changeBackgroundBrightness(value: number) {
+    setBrightnessDraft(value);
+    if (brightnessSaveRef.current) window.clearTimeout(brightnessSaveRef.current);
+    const session = currentSession;
+    brightnessSaveRef.current = window.setTimeout(() => {
+      brightnessSaveRef.current = null;
+      // 和换背景一样不算一次阅读，不改「最近」的顺序
+      if (session) applySessionUpdates({ backgroundBrightness: value, updatedAt: session.updatedAt });
+      setBrightnessDraft(null);
+    }, 300);
+  }
+
   function clearBackground() {
     if (!currentSession) return;
+    setBrightnessOpen(false);
     // 正篇清掉就没有了（跟着正篇的番外也一起没了）；番外清掉是「番外不要背景」，正篇不受影响
     applySessionUpdates({ backgroundImage: isExtra ? "" : undefined, updatedAt: currentSession.updatedAt });
   }
@@ -1018,6 +1041,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
         sessionContextExcludedTags: display?.contextExcludedTags,
         signal: generationRun.controller.signal,
         bindings,
+        extra,
       });
       if (!isCurrentGeneration()) return;
       const assistantMessage = pushStoryMessage({
@@ -1227,6 +1251,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
         sessionContextExcludedTags: display?.contextExcludedTags,
         signal: generationRun.controller.signal,
         bindings: extraBindings,
+        extra: isExtra,
       });
       if (!isCurrentGeneration()) return;
       const assistantMessage = pushStoryMessage({
@@ -1307,7 +1332,12 @@ export function StoryApp({ onClose }: StoryAppProps) {
       data-story-theme={uiPrefs.theme || "paper"}
       data-wallpaper={wallpaperUrl ? "" : undefined}
       data-paper={paperHidden ? "off" : undefined}
-      style={wallpaperUrl ? ({ "--story-wallpaper": `url("${wallpaperUrl}")` } as React.CSSProperties) : undefined}
+      style={wallpaperUrl ? ({
+        // 调暗就在图上面叠一层黑：变量里多一层，用 var(--story-wallpaper) 的地方（含自定义 CSS）都跟着暗
+        "--story-wallpaper": wallpaperDim > 0
+          ? `linear-gradient(rgba(0, 0, 0, ${wallpaperDim}), rgba(0, 0, 0, ${wallpaperDim})), url("${wallpaperUrl}")`
+          : `url("${wallpaperUrl}")`,
+      } as React.CSSProperties) : undefined}
       onTouchStart={(event) => handleTouchStart(event.touches[0]?.clientX || 0)}
       onTouchMove={(event) => handleTouchMove(event.touches[0]?.clientX || 0)}
       onTouchEnd={handleTouchEnd}
@@ -1404,6 +1434,17 @@ export function StoryApp({ onClose }: StoryAppProps) {
           <div className="story-bg-row">
             <span className="story-bg-row-label">剧情背景</span>
             <span className="story-bg-row-actions">
+              {backgroundImageId ? (
+                <button
+                  type="button"
+                  className="story-bg-brightness-toggle"
+                  data-open={brightnessOpen ? "true" : undefined}
+                  aria-expanded={brightnessOpen}
+                  onClick={() => setBrightnessOpen((open) => !open)}
+                >
+                  亮度
+                </button>
+              ) : null}
               <button type="button" onClick={() => backgroundInputRef.current?.click()}>更换</button>
               {backgroundImageId ? <button type="button" onClick={clearBackground}>清除</button> : null}
             </span>
@@ -1418,6 +1459,23 @@ export function StoryApp({ onClose }: StoryAppProps) {
               }}
             />
           </div>
+          {backgroundImageId && brightnessOpen ? (
+            <div className="story-bg-row-panel story-bg-brightness">
+              <span>暗</span>
+              <input
+                type="range"
+                min={20}
+                max={100}
+                step={1}
+                value={backgroundBrightness}
+                style={{ "--story-range-fill": `${((backgroundBrightness - 20) / 80) * 100}%` } as React.CSSProperties}
+                aria-label="剧情背景亮度"
+                onChange={(event) => changeBackgroundBrightness(Number(event.target.value))}
+              />
+              <span>亮</span>
+              <b>{backgroundBrightness}%</b>
+            </div>
+          ) : null}
           <div className="story-bg-row">
             <span className="story-bg-row-label">正文字体</span>
             <span className="story-bg-row-actions">
