@@ -35,6 +35,12 @@ export function saveStoryQuickCommands(commands: string[]): string[] {
     return next;
 }
 
+/** 点快捷指令：接在已经写的后面（另起一行），不替换；可以把几条组合起来发 */
+export function appendStoryCommand(current: string, command: string): string {
+    const head = current.trimEnd();
+    return head ? `${head}\n${command}` : command;
+}
+
 /** 输入栏的「指令」按钮显不显示（默认显示） */
 export function loadStoryCommandButtonVisible(): boolean {
     if (typeof window === "undefined") return true;

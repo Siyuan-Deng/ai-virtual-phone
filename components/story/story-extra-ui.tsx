@@ -12,6 +12,7 @@ import { inheritedCharacterAppApiLabel, loadCharacterAppApiId, saveCharacterAppA
 import { loadWorldBookFolders, loadWorldBookRootOrder } from "@/lib/worldbook-folders";
 import { loadApiConfigFolders, loadApiConfigRootOrder } from "@/lib/api-config-folders";
 import { buildPickerEntries } from "@/lib/item-folders";
+import { appendStoryCommand } from "@/lib/story-commands";
 import type {
   StoryExtraBindings,
   StoryExtraConfig,
@@ -913,14 +914,15 @@ export function StoryCommandSettingsSection({
     onCommandsChange([...commands, text]);
     setDraft("");
   };
-  // 点一条存好的快捷指令：放进下面的输入框，可以改了再存、或者直接发
+  // 点一条存好的快捷指令：接到下面输入框已有内容后面，可以组合几条、改了再存或者直接发
   const pick = (command: string) => {
-    setDraft(command);
+    const next = appendStoryCommand(draft, command);
+    setDraft(next);
     requestAnimationFrame(() => {
       const el = draftRef.current;
       if (!el) return;
       el.focus();
-      el.setSelectionRange(command.length, command.length);
+      el.setSelectionRange(next.length, next.length);
     });
   };
   const send = () => {
@@ -1033,7 +1035,7 @@ export function StoryExtraTemplateSheet({
     return () => document.removeEventListener("pointerdown", close);
   }, [quickMenuOpen]);
   const appendQuickCommand = (command: string) => {
-    setDraft((prev) => ({ ...prev, extra: prev.extra.trim() ? `${prev.extra.trim()}\n${command}` : command }));
+    setDraft((prev) => ({ ...prev, extra: appendStoryCommand(prev.extra, command) }));
     setQuickMenuOpen(false);
   };
   const personRows = [

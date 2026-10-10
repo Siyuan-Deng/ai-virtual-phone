@@ -93,6 +93,7 @@ import {
 } from "@/components/story/story-extra-ui";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import {
+  appendStoryCommand,
   loadStoryCommandButtonVisible,
   loadStoryQuickCommands,
   saveStoryCommandButtonVisible,
@@ -376,12 +377,14 @@ const StoryComposer = memo(function StoryComposer({
   };
 
   const pickQuickCommand = (command: string) => {
-    setDraft(command);
+    const next = appendStoryCommand(draft, command);
+    setDraft(next);
     requestAnimationFrame(() => {
       const textarea = textareaRef.current;
       if (!textarea) return;
       resizeStoryComposerTextarea(textarea);
       textarea.focus();
+      textarea.setSelectionRange(next.length, next.length);
     });
   };
 
