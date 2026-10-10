@@ -300,8 +300,10 @@ function formatRoutineLines(
             const todayDetails = extras.eventDetails[todayEntry.item.id];
             const state = eventStateLabel(todayEntry, now, config.nearMinutes, todayDetails?.allDay === true);
             const todos = normalizeCalendarTodos(todayDetails?.todos);
-            const parts = [state ? `今天${state}` : "", todos.length ? `待办：${formatTodosForContext(todos, labels)}` : ""].filter(Boolean);
-            if (parts.length) todayPart = `｜${parts.join("，")}`;
+            const parts = [state, todos.length ? `待办：${formatTodosForContext(todos, labels)}` : ""].filter(Boolean);
+            // 今天这一次的 eventId 也写上：勾今天的待办、改今天这一次都直接用它
+            const todayId = labels ? `[eventId=${idLabel(labels.event, todayEntry.item.id)}]` : "";
+            if (parts.length) todayPart = `｜今天${todayId}${parts.join("，")}`;
         }
         const lines = [`- ${id}${timeLabel} ${eventTitleWithLocation(template.item)}${notes.length ? `（${notes.join("；")}）` : ""}${todayPart}`];
         const note = (extras.eventDetails[todayEntry?.item.id ?? template.item.id] ?? templateDetails)?.note;
