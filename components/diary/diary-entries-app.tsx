@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent, type PointerEvent } from "react";
-import { Bot, ChevronLeft, Clock3, NotebookPen, Trash2, WandSparkles, X } from "lucide-react";
+import { Bot, ChevronLeft, ChevronRight, Clock3, Globe, NotebookPen, Trash2, WandSparkles, X } from "lucide-react";
 import { DotsThree } from "@phosphor-icons/react";
 
 import { loadCharacters } from "@/lib/character-storage";
@@ -13,6 +13,10 @@ import {
   DIARY_ENTRY_TIMER_SETTINGS_UPDATED_EVENT,
 } from "@/lib/diary-entry-timer-service";
 import {
+  clampDiaryIntervalHours,
+  diaryCharacterIntervalHours,
+  isDiaryCharacterScheduled,
+  setDiaryCharacterScheduled,
   createDiaryEntry,
   deleteDiaryEntry,
   loadDiaryEntries,
@@ -37,6 +41,9 @@ import type {
   DiaryReplyRules,
 } from "@/lib/diary-entry-types";
 import { cancelDiaryReply, scheduleDiaryReply } from "@/lib/diary-reply-service";
+import { inheritedCharacterAppApiLabel, loadCharacterAppApiId } from "@/lib/app-api-binding";
+import { loadApiConfigs } from "@/lib/settings-storage";
+import { AppApiPickerDialog } from "@/components/settings/app-api-picker-dialog";
 import { getThemeAssetDataUrl, saveThemeAssetFromBlob } from "@/lib/theme-storage";
 
 // TA的日记和我的日记各自独立一套字体，互不影响，跟以前双日记插件的行为一致。
@@ -150,6 +157,8 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
   const [settings, setSettings] = useState<DiaryEntryTimerSettings>(() => loadDiaryEntryTimerSettings());
   const [replyRules, setReplyRules] = useState<DiaryReplyRules>(() => loadDiaryReplyRules());
   const [timerSettingsOpen, setTimerSettingsOpen] = useState(false);
+  // 点进某个角色的日记本后，右上角只管这一本：它的定时和手记 API
+  const [bookSettingsOpen, setBookSettingsOpen] = useState(false);
   const [replySettingsOpen, setReplySettingsOpen] = useState(false);
   const [writePanelOpen, setWritePanelOpen] = useState(false);
   const [composeTarget, setComposeTarget] = useState<ComposeTarget | null>(null);
@@ -722,7 +731,11 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
           <button
             type="button"
             className="note-wall-menu-btn"
-            onClick={() => (kind === "user" ? setReplySettingsOpen(true) : setTimerSettingsOpen(true))}
+            onClick={() => {
+              if (kind === "user") setReplySettingsOpen(true);
+              else if (activeBook) setBookSettingsOpen(true);
+              else setTimerSettingsOpen(true);
+            }}
             aria-label={kind === "user" ? "聊天回应设置" : "日记设置"}
           >
             <DotsThree size={28} weight="bold" />
@@ -815,6 +828,17 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
             <span>让TA写</span>
           </button>
         )
+      ) : null}
+
+      {bookSettingsOpen && activeBook && kind === "character" ? (
+        <DiaryBookSettingsPanel
+          characterId={activeBook.characterId}
+          characterName={activeBook.characterName}
+          characters={characters}
+          settings={settings}
+          onChange={setSettings}
+          onClose={() => setBookSettingsOpen(false)}
+        />
       ) : null}
 
       {timerSettingsOpen ? (
@@ -1082,6 +1106,97 @@ function DiaryEntryFontPanel({
           恢复默认
         </button>
       </section>
+    </div>
+  );
+}
+
+/** TA的日记 → 某个角色的日记本 → 右上角：只管这一本的定时写日记和手记 API */
+function DiaryBookSettingsPanel({ characterId, characterName, characters, settings, onChange, onClose }: {
+  characterId: string;
+  characterName: string;
+  characters: Character[];
+  settings: DiaryEntryTimerSettings;
+  onChange: (settings: DiaryEntryTimerSettings) => void;
+  onClose: () => void;
+}) {
+  const [apiPickerOpen, setApiPickerOpen] = useState(false);
+  const [apiRevision, setApiRevision] = useState(0);
+  // 和设置 → 绑定里这个角色的「日记」API 是同一份
+  const apiLabel = useMemo(() => {
+    void apiRevision;
+    const ownId = loadCharacterAppApiId(characterId, "diary");
+    const own = ownId ? loadApiConfigs().find(config => config.id === ownId) : undefined;
+    return own ? own.name || own.provider : inheritedCharacterAppApiLabel(characterId, "diary");
+  }, [characterId, apiRevision]);
+
+  return (
+    <div className="nw-modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <section className="diary-entry-settings" onClick={event => event.stopPropagation()}>
+        <header>
+          <h2>{characterName} 的日记</h2>
+          <button type="button" className="diary-icon-btn" onClick={onClose} aria-label="关闭">
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="diary-entry-setting-grid">
+          <label className="diary-entry-toggle-row">
+            <span>
+              <Clock3 size={17} />
+              定时写日记
+            </span>
+            <input
+              type="checkbox"
+              checked={isDiaryCharacterScheduled(settings, characterId)}
+              onChange={event => onChange(setDiaryCharacterScheduled(
+                settings,
+                characterId,
+                event.target.checked,
+                characters.map(character => character.id),
+              ))}
+            />
+          </label>
+          <label className="diary-entry-number-field">
+            <span>间隔小时</span>
+            <input
+              type="number"
+              min={1}
+              max={720}
+              value={diaryCharacterIntervalHours(settings, characterId)}
+              onChange={event => onChange({
+                ...settings,
+                intervalHoursByCharacter: {
+                  ...settings.intervalHoursByCharacter,
+                  [characterId]: clampDiaryIntervalHours(event.target.value),
+                },
+              })}
+            />
+          </label>
+          <button type="button" className="diary-entry-toggle-row diary-entry-api-row" onClick={() => setApiPickerOpen(true)}>
+            <span>
+              <Globe size={17} />
+              手记 API
+            </span>
+            <span className="diary-entry-api-value">
+              <em>{apiLabel}</em>
+              <ChevronRight size={16} />
+            </span>
+          </button>
+        </div>
+      </section>
+      {apiPickerOpen ? (
+        <div onClick={event => event.stopPropagation()}>
+          <AppApiPickerDialog
+            characterId={characterId}
+            appId="diary"
+            title="选择手记 API"
+            onClose={() => {
+              setApiPickerOpen(false);
+              setApiRevision(value => value + 1);
+            }}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

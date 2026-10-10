@@ -57,6 +57,8 @@ export type DiaryEntryTimerSettings = {
   intervalHours: number;
   characterIds: string[];
   lastRunAtByCharacter: Record<string, string>;
+  /** 在某个角色的日记本里单独设的间隔；没设的用 intervalHours */
+  intervalHoursByCharacter: Record<string, number>;
 };
 
 export const DEFAULT_DIARY_ENTRY_TIMER_SETTINGS: DiaryEntryTimerSettings = {
@@ -64,6 +66,7 @@ export const DEFAULT_DIARY_ENTRY_TIMER_SETTINGS: DiaryEntryTimerSettings = {
   intervalHours: 24,
   characterIds: [],
   lastRunAtByCharacter: {},
+  intervalHoursByCharacter: {},
 };
 
 // ── 用户写日记后，角色如何回应（手记 App「我的日记」专用） ──────────

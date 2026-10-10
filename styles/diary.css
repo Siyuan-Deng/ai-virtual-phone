@@ -937,6 +937,32 @@
   accent-color: #2b241c;
 }
 
+/* 日记本设置那张卡片只有这一格，底下不再留空 */
+.diary-entry-settings > .diary-entry-setting-grid:last-child {
+  margin-bottom: 0;
+}
+
+/* 日记本设置里那一整行「手记 API」 */
+.diary-entry-api-row {
+  grid-column: 1 / -1;
+  width: 100%;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diary-entry-api-row .diary-entry-api-value {
+  min-width: 0;
+  gap: 2px;
+  color: rgba(52, 39, 29, 0.6);
+}
+
+.diary-entry-api-value em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-style: normal;
+}
+
 .diary-entry-number-field input {
   width: 56px;
   border: 0;

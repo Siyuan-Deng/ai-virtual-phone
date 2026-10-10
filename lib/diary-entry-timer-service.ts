@@ -4,6 +4,7 @@ import type { Character } from "./character-types";
 import { generateDiaryEntryForCharacter } from "./diary-entry-engine";
 import {
   createDiaryEntry,
+  diaryCharacterIntervalHours,
   loadDiaryEntries,
   loadDiaryEntryTimerSettings,
   saveDiaryEntryTimerSettings,
@@ -47,8 +48,9 @@ function getDueTargets(settings: DiaryEntryTimerSettings): Character[] {
   if (targets.length === 0) return [];
 
   const now = Date.now();
-  const intervalMs = Math.max(1, settings.intervalHours) * 60 * 60 * 1000;
   return targets.filter(character => {
+    // 日记本里单独设过间隔的按它自己的
+    const intervalMs = diaryCharacterIntervalHours(settings, character.id) * 60 * 60 * 1000;
     const last = settings.lastRunAtByCharacter[character.id];
     const lastTime = last ? new Date(last).getTime() : 0;
     return !lastTime || now - lastTime >= intervalMs;
