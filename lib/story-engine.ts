@@ -65,6 +65,8 @@ function toHistoryMessage(message: StoryMessage, contextExcludedTags?: string): 
     content: stripContextExcludedTags(message.rawContent, contextExcludedTags),
     status: "sent",
     createdAt: message.createdAt,
+    // 剧情里的 system 消息就是「指令」发的系统指令：和聊天的系统指令一样单独成一条 system，不和前后合并
+    ...(message.role === "system" ? { mediaType: "system_instruction" as const } : {}),
   };
 }
 
@@ -227,13 +229,13 @@ async function buildStoryPromptMessages(
 export async function previewStoryPromptPayload(
   characterId: string,
   history: StoryMessage[],
-  options?: { sessionContextExcludedTags?: string },
+  options?: { sessionContextExcludedTags?: string; bindings?: StoryExtraBindings },
 ): Promise<StoryPreviewResult> {
   const character = loadCharacters().find((item) => item.id === characterId);
   if (!character) {
     throw new ChatEngineError(`Character not found: ${characterId}`);
   }
-  const { apiConfig, preset, regexes, worldBooks } = resolveStoryConfigs(characterId);
+  const { apiConfig, preset, regexes, worldBooks } = resolveStoryConfigs(characterId, options?.bindings);
   const effectiveContextExcludedTags = options?.sessionContextExcludedTags?.trim() || DEFAULT_STORY_CONTEXT_EXCLUDED_TAGS;
   const llmMessages = await buildStoryPromptMessages(characterId, history, preset, regexes, worldBooks, effectiveContextExcludedTags);
   return {

@@ -368,6 +368,17 @@ export function findLastActiveStorySession(): StorySession | undefined {
   return latest ? _sessionsCache.find((session) => session.id === latest.sessionId) : undefined;
 }
 
+/** 这个角色最近有消息的那个窗口（正篇或番外）；都没聊过就是正篇 */
+export function findLastActiveStorySessionFor(characterId: string): StorySession | undefined {
+  const own = _sessionsCache.filter((session) => session.characterId === characterId);
+  let latest: StoryMessage | undefined;
+  for (const message of _messagesCache) {
+    if (!own.some((session) => session.id === message.sessionId)) continue;
+    if (!latest || (message.createdAt || "") > (latest.createdAt || "")) latest = message;
+  }
+  return (latest && own.find((session) => session.id === latest.sessionId)) || findMainStorySession(characterId);
+}
+
 /** 这个角色的正篇会话（不会拿到番外那个） */
 export function findMainStorySession(characterId: string): StorySession | undefined {
   return _sessionsCache.find((session) => session.characterId === characterId && session.kind !== "extra");
