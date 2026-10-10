@@ -48,6 +48,7 @@ import { CalendarEventEditModal, type CalendarEventDraft } from "./calendar/even
 import {
   CALENDAR_EXTRAS_UPDATED_EVENT,
   loadCalendarExtras,
+  activeCalendarMemos,
   normalizeCalendarTodos,
   reportEventTodosChanged,
   setEventTodoDone,
@@ -226,7 +227,7 @@ export function PhoneCalendarApp({
   const memoDotsByDate = useMemo(() => {
     const map = new Map<string, string[]>();
     if (selectedOwner?.ownerType !== "user") return map;
-    for (const memo of extras.memos) {
+    for (const memo of activeCalendarMemos(extras.memos)) {
       for (const todo of normalizeCalendarTodos(memo.checklist)) {
         if (!todo.dueDate) continue;
         const colors = map.get(todo.dueDate) || [];

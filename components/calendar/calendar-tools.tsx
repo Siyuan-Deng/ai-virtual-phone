@@ -256,8 +256,26 @@ function BannerColorPicker({ value, onChange }: { value: string; onChange: (key:
 
 // ── 备忘录 ──
 
+function MemoCard({ memo, nav }: { memo: CalendarMemoPage; nav: CalendarToolNav }) {
+    const preview = oneLine(memo.body, memo.checklist.map((item) => item.text).filter(Boolean).join(" · ") || "空白备忘录", 120);
+    const date = memo.updatedAt
+        ? new Date(memo.updatedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+        : "";
+    return (
+        <button type="button" className="caltool-memo-card" onClick={() => nav.go({ kind: "memoView", memoId: memo.id })}>
+            <b>{memo.title || "无标题备忘录"}</b>
+            <span>{preview}</span>
+            <small>{date}</small>
+        </button>
+    );
+}
+
 function MemoList({ nav, close }: { nav: CalendarToolNav; close: () => void }) {
-    const memos = [...loadCalendarExtras().memos].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    const all = [...loadCalendarExtras().memos].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    const memos = all.filter((memo) => !memo.archived);
+    const archived = all.filter((memo) => memo.archived);
+    // 归档的收在最下面，默认折着
+    const [archivedOpen, setArchivedOpen] = useState(false);
     return (
         <ToolSheet
             title="备忘录"
@@ -267,28 +285,35 @@ function MemoList({ nav, close }: { nav: CalendarToolNav; close: () => void }) {
             onDismiss={close}
             onAction={() => nav.go({ kind: "memoEdit", memoId: null })}
         >
-            {memos.length === 0 ? (
+            {all.length === 0 ? (
                 <div className="caltool-empty">
                     <b>还没有备忘录</b>
                     <span>点右上角＋新建一页，可以写文字或清单。</span>
                 </div>
-            ) : (
+            ) : memos.length ? (
                 <div className="caltool-memo-list">
-                    {memos.map((memo) => {
-                        const preview = oneLine(memo.body, memo.checklist.map((item) => item.text).filter(Boolean).join(" · ") || "空白备忘录", 120);
-                        const date = memo.updatedAt
-                            ? new Date(memo.updatedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
-                            : "";
-                        return (
-                            <button key={memo.id} type="button" className="caltool-memo-card" onClick={() => nav.go({ kind: "memoView", memoId: memo.id })}>
-                                <b>{memo.title || "无标题备忘录"}</b>
-                                <span>{preview}</span>
-                                <small>{date}</small>
-                            </button>
-                        );
-                    })}
+                    {memos.map((memo) => <MemoCard key={memo.id} memo={memo} nav={nav} />)}
                 </div>
-            )}
+            ) : null}
+            {archived.length ? (
+                <>
+                    <button
+                        type="button"
+                        className="caltool-memo-archive-fold"
+                        data-open={archivedOpen ? "true" : undefined}
+                        aria-expanded={archivedOpen}
+                        onClick={() => setArchivedOpen((open) => !open)}
+                    >
+                        <span>已归档 · {archived.length}</span>
+                        <i aria-hidden="true" />
+                    </button>
+                    {archivedOpen ? (
+                        <div className="caltool-memo-list caltool-memo-list-archived">
+                            {archived.map((memo) => <MemoCard key={memo.id} memo={memo} nav={nav} />)}
+                        </div>
+                    ) : null}
+                </>
+            ) : null}
         </ToolSheet>
     );
 }
@@ -353,7 +378,8 @@ function MemoEditor({ memoId, nav, close }: { memoId: string | null; nav: Calend
     );
     const back = () => nav.go(source ? { kind: "memoView", memoId: source.id } : { kind: "memoList" });
 
-    const save = () => {
+    /** 存这页（改了一半就点归档 / 移出归档也一起存下） */
+    const persist = (archived: boolean) => {
         const now = new Date().toISOString();
         const memo: CalendarMemoPage = {
             id: source?.id ?? makeId("memo"),
@@ -363,14 +389,24 @@ function MemoEditor({ memoId, nav, close }: { memoId: string | null; nav: Calend
             checklist: normalizeCalendarTodos(checklist),
             createdAt: source?.createdAt || now,
             updatedAt: now,
+            ...(archived ? { archived: true } : {}),
         };
         const memos = loadCalendarExtras().memos.filter((item) => item.id !== memo.id);
         memos.push(memo);
         updateCalendarExtras({ memos });
         // 编辑时顺手勾掉的待办，也算完成（和插件一样，只看原来就有的那几条）
         if (source) reportMemoTodosChanged(memo, source.checklist);
+    };
+    const save = () => {
+        persist(source?.archived === true);
         nav.notify("备忘录已保存");
         back();
+    };
+    const toggleArchived = () => {
+        const archived = source?.archived !== true;
+        persist(archived);
+        nav.notify(archived ? "已归档，不再进提示词" : "已移出归档");
+        nav.go({ kind: "memoList" });
     };
 
     return (
@@ -390,6 +426,17 @@ function MemoEditor({ memoId, nav, close }: { memoId: string | null; nav: Calend
                     <TodoListEditor todos={checklist} onChange={setChecklist} allowDeadline />
                 </div>
             </section>
+            {source ? (
+                <button type="button" className="caltool-archive-button" onClick={toggleArchived}>
+                    {/* 收纳盒：盖子 + 盒身 + 把手 */}
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <rect x="3" y="4" width="18" height="4" rx="1" />
+                        <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
+                        <path d="M10 12h4" />
+                    </svg>
+                    <span>{source.archived ? "移出归档" : "归档备忘录"}</span>
+                </button>
+            ) : null}
             {source ? (
                 <button
                     type="button"

@@ -2134,6 +2134,61 @@
   clip-path: polygon(0 0,100% 0,50% 100%);
 }
 
+/* 备忘录归档：列表最下面的折叠栏、归档的那几页淡一点；编辑页「删除」上面那颗灰色的归档按钮 */
+.calendar-app-shell .caltool-memo-archive-fold {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 14px;
+  padding: 12px 4px;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--c-calendar-ink) 8%, transparent);
+  background: none;
+  color: var(--c-calendar-sub);
+  font: inherit;
+  font-size: 13px;
+}
+
+.calendar-app-shell .caltool-memo-archive-fold i {
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.2s ease;
+}
+
+.calendar-app-shell .caltool-memo-archive-fold[data-open="true"] i {
+  transform: rotate(45deg);
+}
+
+.calendar-app-shell .caltool-memo-list-archived {
+  margin-top: 4px;
+}
+
+.calendar-app-shell .caltool-memo-list-archived .caltool-memo-card {
+  opacity: 0.55;
+}
+
+.calendar-app-shell .caltool-archive-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 12px;
+  color: var(--c-calendar-sub);
+  background: color-mix(in srgb, var(--c-calendar-ink) 4%, var(--c-calendar-surface));
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+}
+
 .calendar-app-shell .caltool-danger-button {
   display: flex;
   align-items: center;
