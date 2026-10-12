@@ -2604,7 +2604,9 @@ function CharArchiveView({
                 />
                 <button className="char-archive-btn" onClick={onExportPng}>EXPORT IMG</button>
                 <button className="char-archive-btn" onClick={onExportJson}>EXPORT JSON</button>
-                <button className="char-archive-btn char-archive-btn-danger" onClick={() => setConfirmDelete(true)}>DELETE</button>
+                <button className="char-archive-btn char-archive-btn-danger char-archive-btn-icon" onClick={() => setConfirmDelete(true)} aria-label="删除角色卡" title="删除">
+                  <span className="char-trash-icon" aria-hidden="true" />
+                </button>
               </>
             ) : null
           )}
