@@ -929,6 +929,7 @@
 
 .char-archive-actions {
   display: flex;
+  flex-wrap: wrap;
   padding: 12px;
   gap: 8px;
   background: var(--c-input);
@@ -951,6 +952,8 @@
   cursor: pointer;
   transition: all 0.2s;
   border-radius: 4px;
+  /* 四个按钮挤一行：字不折行，窄屏按钮宽度按字长微调；字号调大放不下才换到第二行 */
+  white-space: nowrap;
 }
 
 .char-archive-btn-danger {
