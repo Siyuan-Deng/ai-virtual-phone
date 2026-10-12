@@ -9,6 +9,7 @@ import {
   loadCharacters,
   parseCharacterFromJson,
   parseCharacterFromPng,
+  parseCharacterOverwriteFromJson,
   saveCharacters,
   loadBackgroundItems,
   saveBackgroundItems,
@@ -306,11 +307,11 @@ export function PhoneCharacterApp({ onClose, onNotice }: PhoneCharacterAppProps)
                 setView({ type: "list", id: null, isEditing: false });
               }
             }}
-            onSave={(data, createVersion) => {
+            onSave={(data, createVersion, backupLabel) => {
               const existing = view.id ? characters.find((c) => c.id === view.id) : null;
               if (existing) {
                 const nextVersion = createVersion
-                  ? backupCharacterVersion(existing, "manual", "手动编辑前备份")
+                  ? backupCharacterVersion(existing, "manual", backupLabel ?? "手动编辑前备份")
                   : overwriteCharacterVersion(existing.id);
                 const updated: Character = {
                   ...existing,
@@ -1857,7 +1858,7 @@ function CharArchiveView({
   onBack: () => void;
   onEdit: () => void;
   onCancelEdit?: () => void;
-  onSave?: (data: CharacterImportData, createVersion: boolean) => void;
+  onSave?: (data: CharacterImportData, createVersion: boolean, backupLabel?: string) => void;
   onRestoreVersion?: (version: CharacterVersion) => void;
   onDelete: () => void | Promise<void>;
   onExportJson: () => void;
@@ -1869,6 +1870,9 @@ function CharArchiveView({
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [showUnsavedConfirm, setShowUnsavedConfirm] = useState<"back" | "cancel" | null>(null);
   const [showSaveVersionConfirm, setShowSaveVersionConfirm] = useState(false);
+  // 导入 JSON 覆盖：读好的字段先放这儿，走和保存一样的「备份旧卡 / 覆盖当前版本」
+  const [pendingImport, setPendingImport] = useState<CharacterImportData | null>(null);
+  const importJsonRef = useRef<HTMLInputElement>(null);
   const [showVersions, setShowVersions] = useState(false);
   const [versions, setVersions] = useState<CharacterVersion[]>([]);
   const [restoreTarget, setRestoreTarget] = useState<CharacterVersion | null>(null);
@@ -2082,6 +2086,28 @@ function CharArchiveView({
       setShowSaveVersionConfirm(true);
     } else {
       commitSave(false);
+    }
+  }
+
+  async function handleImportJsonFile(file: File) {
+    try {
+      const data = parseCharacterOverwriteFromJson(await file.text(), char);
+      if (!data) return onNotice("解析失败，请检查文件格式");
+      setPendingImport(data);
+    } catch (e) {
+      onNotice(e instanceof Error && e.message === CHAR_BLOCKED_FIELDS
+        ? "不支持包含开场白、场景或示例对话的角色卡"
+        : "解析失败，请检查文件格式");
+    }
+  }
+
+  function chooseSaveVersion(createVersion: boolean) {
+    setShowSaveVersionConfirm(false);
+    if (pendingImport) {
+      onSave?.(pendingImport, createVersion, "导入 JSON 前备份");
+      setPendingImport(null);
+    } else {
+      commitSave(createVersion);
     }
   }
 
@@ -2567,6 +2593,15 @@ function CharArchiveView({
               </>
             ) : !dummy && !isEditing ? (
               <>
+                <button className="char-archive-btn" onClick={() => importJsonRef.current?.click()}>IMPORT JSON</button>
+                <input
+                  ref={importJsonRef} type="file" accept=".json,application/json" className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (file) await handleImportJsonFile(file);
+                    e.target.value = "";
+                  }}
+                />
                 <button className="char-archive-btn" onClick={onExportPng}>EXPORT IMG</button>
                 <button className="char-archive-btn" onClick={onExportJson}>EXPORT JSON</button>
                 <button className="char-archive-btn char-archive-btn-danger" onClick={() => setConfirmDelete(true)}>DELETE</button>
@@ -2610,38 +2645,34 @@ function CharArchiveView({
     >
       {archiveFrame}
 
-      {showSaveVersionConfirm && (
-        <div className="fixed inset-0 z-[10020] flex items-center justify-center bg-black/45 px-5" role="dialog" aria-modal="true" aria-label="保存角色卡">
+      {(showSaveVersionConfirm || pendingImport) && (
+        <div className="fixed inset-0 z-[10020] flex items-center justify-center bg-black/45 px-5" role="dialog" aria-modal="true" aria-label={pendingImport ? "导入 JSON 覆盖角色卡" : "保存角色卡"}>
           <div className="w-full max-w-sm rounded-2xl border border-[var(--c-panel-border)] bg-[var(--c-page-body-bg)] p-5 text-[var(--c-text)] shadow-2xl">
-            <div className="text-base font-bold">保存角色卡</div>
+            <div className="text-base font-bold">{pendingImport ? "导入 JSON 覆盖角色卡" : "保存角色卡"}</div>
             <p className="mt-2 ts-12 leading-relaxed opacity-75">
-              当前是 V{getCharacterCurrentVersion(char.id)}。你可以先保存修改前的旧卡，也可以覆盖当前版本。
+              {pendingImport
+                ? <>用文件里的设定覆盖这张卡，记忆、聊天和剧情都还在。当前是 V{getCharacterCurrentVersion(char.id)}，你可以先保存导入前的旧卡，也可以覆盖当前版本。</>
+                : <>当前是 V{getCharacterCurrentVersion(char.id)}。你可以先保存修改前的旧卡，也可以覆盖当前版本。</>}
             </p>
             <div className="mt-4 flex flex-col gap-2">
               <button
                 type="button"
                 className="rounded-xl bg-[var(--c-text)] px-4 py-3 font-semibold text-[var(--c-page-body-bg)]"
-                onClick={() => {
-                  setShowSaveVersionConfirm(false);
-                  commitSave(true);
-                }}
+                onClick={() => chooseSaveVersion(true)}
               >
                 备份旧卡并保存为 V{getCharacterNextVersion(char.id)}
               </button>
               <button
                 type="button"
                 className="rounded-xl border border-[var(--c-panel-border)] px-4 py-3 font-semibold"
-                onClick={() => {
-                  setShowSaveVersionConfirm(false);
-                  commitSave(false);
-                }}
+                onClick={() => chooseSaveVersion(false)}
               >
                 覆盖当前版本
               </button>
               <button
                 type="button"
                 className="px-4 py-2 opacity-65"
-                onClick={() => setShowSaveVersionConfirm(false)}
+                onClick={() => { setShowSaveVersionConfirm(false); setPendingImport(null); }}
               >
                 取消
               </button>

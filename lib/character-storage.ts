@@ -165,6 +165,12 @@ export type CharacterImportData = Omit<
   "id" | "createdAt" | "updatedAt"
 >;
 
+function characterJsonSource(obj: Record<string, unknown>): Record<string, unknown> {
+  return (obj.schema === "ai_phone_character" && typeof obj.data === "object" && obj.data !== null)
+    ? obj.data as Record<string, unknown>
+    : obj;
+}
+
 export function parseCharacterFromJson(
   text: string
 ): CharacterImportData | null {
@@ -180,9 +186,7 @@ export function parseCharacterFromJson(
       return null;
     }
 
-    const src = (obj.schema === "ai_phone_character" && typeof obj.data === "object" && obj.data !== null)
-      ? obj.data as Record<string, unknown>
-      : obj;
+    const src = characterJsonSource(obj);
 
     if (UNSUPPORTED_CHARACTER_IMPORT_FIELDS.some((field) => field in src || field in obj)) {
       throw new Error(CHAR_BLOCKED_FIELDS);
@@ -222,6 +226,34 @@ export function parseCharacterFromJson(
     if (e instanceof Error && e.message === CHAR_BLOCKED_FIELDS) throw e;
     return null;
   }
+}
+
+/**
+ * 用 JSON 覆盖一张已有的角色卡。只返回要改的字段，id 不动，所以记忆、聊天、剧情都还挂在这个角色上。
+ * 文件里写了的照文件来；没写的、以及微信号、简介、拍立得样式和画布位置这些本机的东西，保留原卡。
+ * 文件里既没名字也没人设，返回 null；含开场白等字段的照旧抛 CHAR_BLOCKED_FIELDS。
+ */
+export function parseCharacterOverwriteFromJson(
+  text: string,
+  existing: Character
+): CharacterImportData | null {
+  const data = parseCharacterFromJson(text);
+  if (!data) return null;
+  const src = characterJsonSource(JSON.parse(text) as Record<string, unknown>);
+  const has = (...keys: string[]) => keys.some((key) => key in src);
+  if (!data.name.trim() && !has("description", "persona")) return null;
+  return {
+    name: data.name.trim() || existing.name,
+    persona: has("description", "persona") ? data.persona : existing.persona,
+    personality: has("personality") ? data.personality : existing.personality,
+    tags: has("tags") ? data.tags : existing.tags,
+    timeZone: has("timeZone", "timezone", "time_zone") ? data.timeZone : existing.timeZone,
+    // 文件带了头像就连裁剪一起换；没带就留着原来的头像和裁剪
+    avatar: data.avatar ?? existing.avatar,
+    polaroidImageX: data.avatar ? data.polaroidImageX ?? 50 : existing.polaroidImageX,
+    polaroidImageY: data.avatar ? data.polaroidImageY ?? 50 : existing.polaroidImageY,
+    polaroidImageZoom: data.avatar ? data.polaroidImageZoom ?? 1 : existing.polaroidImageZoom,
+  };
 }
 
 // ── PNG import/export ────────────────────────────────
