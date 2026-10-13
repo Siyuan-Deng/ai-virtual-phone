@@ -3257,7 +3257,9 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     };
 
     return (
-        <div ref={surfaceRef} className="reading-app-surface absolute inset-0 z-[100] flex flex-col bg-[var(--c-page-body-bg)]" data-immersive={immersive} style={{
+        {/* data-reading-fonts：注入的三档字体规则挂在这个属性上，权重才不会和
+            主题/插件那种 `.xxx *` 规则打平、被后注入的一方接管（见 reading-app.tsx） */}
+        <div ref={surfaceRef} className="reading-app-surface absolute inset-0 z-[100] flex flex-col bg-[var(--c-page-body-bg)]" data-reading-fonts="" data-immersive={immersive} style={{
             paddingTop: "var(--page-header-safe-top, 48px)",
             // 插图最高不超过一页能放下的高度，和分页算出来的那个数是同一个
             ...(imageMaxHeight > 0 ? { ["--reading-image-max-height" as "--reading-image-max-height"]: `${imageMaxHeight}px` } : {}),

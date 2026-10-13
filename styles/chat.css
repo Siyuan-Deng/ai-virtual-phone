@@ -4735,9 +4735,18 @@
 }
 
 .reading-line {
-  font-size: calc(var(--reading-font-size,16px)*0.9*var(--app-text-scale,1));
+  /* 正文字号只跟阅读自己的设置走，不再乘系统文字缩放（--app-text-scale）：
+     原来乘了以后，系统字号一调大，阅读里的字号就压不过它，想调小也调不回去。
+     阅读外观里有自己的字号/行距滑杆，正文以它为准；界面按钮那些仍跟随系统字号。 */
+  font-size: calc(var(--reading-font-size,16px)*0.9);
   line-height: var(--reading-line-height, 1.9);
   color: var(--reading-text-color, var(--reading-warm-ink, #111));
+  /* 字体主要由运行时注入的 <style> 下发（权重更高，见 reading-app.tsx）。
+     这里再读一次变量，兜住「JS 与 CSS 缓存版本不一致」：PWA 的 Service Worker
+     可能留着旧版 JS（只设变量、不注入声明）而 CSS 已是新版——那种混搭下字体
+     会整档失效，看着像设置坏了。变量在旧版 JS 里照样会设，读到就能正常显示；
+     新版 JS 下这条被更高权重的注入规则盖住，对结果没有影响。 */
+  font-family: var(--reading-font-family, inherit);
   margin: 0;
   /* 左对齐。这里原来是两端对齐（text-align: justify + text-align-last: justify
      + text-justify: inter-character），中文下会把**每一行**都按字撑满整行宽：

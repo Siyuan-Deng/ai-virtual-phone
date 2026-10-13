@@ -64,12 +64,14 @@ function annotationCardCss(suffix: string, style: AnnotationCardStyle): string {
         "}",
         `${card} .reading-annotation-text,`,
         `${card} .reading-annotation-translation {`,
-        `  font-size: calc(${style.fontSize}px * var(--app-text-scale, 1));`,
+        // 批注字号同样只认阅读里的设置，不乘系统文字缩放：
+        // 乘了以后系统字号一调大，这里就压不过它，想调小也调不回去（与正文一致）
+        `  font-size: ${style.fontSize}px;`,
         `  line-height: ${style.lineHeight};`,
         `  color: ${style.textColor};`,
         "}",
         `${card} .reading-annotation-name {`,
-        `  font-size: calc(${Math.round(style.fontSize * 0.85 * 10) / 10}px * var(--app-text-scale, 1));`,
+        `  font-size: ${Math.round(style.fontSize * 0.85 * 10) / 10}px;`,
         `  color: ${style.textColor};`,
         "}",
     ].join("\n");
@@ -306,29 +308,43 @@ export default function ReadingApp({ onClose }: Props) {
     // 真正的声明、并且带上一点选择器权重，别再把它挂在最弱的继承上。
     // 这里刻意不用 !important：用户想用自定义 CSS 精细覆盖阅读样式时还能盖得动。
     //
-    // 排除项：设置里的字体样张和诊断报告要保留自己的字体，否则预览就没意义了。
-    // :where() 本身不带权重，所以整条规则只有「一个 class」那么重：
-    // 足以压过 p{} / body *{} 这类全局规则，又不至于让用户没法再覆盖它。
-    const FONT_EXCLUDES = ":not(:where(.reading-font-preview, .reading-font-diag-report,"
-        + " .reading-annotation-name, .reading-annotation-text, .reading-annotation-translation))";
+    // 排除项：设置里的字体样张和诊断报告要保留自己的字体，否则预览就没意义了
+    //（这两类元素本来就在 surface 之外，这里是兜底）。
+    //
+    // 三档字体怎么落到元素上：
+    //  · 正文一条通吃（surface 的全部后代）；
+    //  · 批注/我的批注**按卡片容器 + 后代通配**覆盖，而不是只点名
+    //    .reading-annotation-text 那几个类。
+    //    点名式选择器有个实打实的漏洞：批注卡片里还有别的节点——双语内容那层
+    //    原文 div、切换中文的按钮——它们不在点名列表里，于是被正文那条通吃规则
+    //    直接命中；而父级 .reading-annotation-text 上的字体只是「继承」，
+    //    继承永远输给元素自己的声明。结果就是批注字体改了，那几行不跟着变。
+    //    改成容器通配后，卡片里的一切（含以后新加的节点）都跟着该档字体。
+    //
+    // 选择器都带上了 data-reading-fonts 属性，权重从「一个 class」抬到
+    // 「一个 class + 一个属性」：主题、插件、全局自定义 CSS 里那种 `.xxx * { font-family }`
+    // 规则和原来的权重正好打平，谁后注入谁赢——字体就会在某些设备上被悄悄接管，
+    // 表现正是「设置里改了没反应」。抬一档之后它们压不过；用户仍可用自定义 CSS
+    // 加 !important、或同样重量的选择器覆盖（刻意不自己上 !important）。
+    const FONT_SCOPE = ".reading-app-surface[data-reading-fonts]";
+    const FONT_EXCLUDES = ":not(:where(.reading-font-preview, .reading-font-diag-report))";
+    const annotationFamily = resolvedAnnotationFont || resolvedBodyFont;
     const readingFontCss = [
         [
-            ".reading-app-surface,",
-            `.reading-app-surface *${FONT_EXCLUDES} {`,
+            `${FONT_SCOPE},`,
+            `${FONT_SCOPE} *${FONT_EXCLUDES} {`,
             `  font-family: ${resolvedBodyFont};`,
             "}",
         ].join("\n"),
         [
-            ".reading-app-surface .reading-annotation-name,",
-            ".reading-app-surface .reading-annotation-text,",
-            ".reading-app-surface .reading-annotation-translation {",
-            `  font-family: ${resolvedAnnotationFont || resolvedBodyFont};`,
+            `${FONT_SCOPE} .reading-annotation,`,
+            `${FONT_SCOPE} .reading-annotation * {`,
+            `  font-family: ${annotationFamily};`,
             "}",
         ].join("\n"),
         resolvedUserAnnotationFont && [
-            '.reading-app-surface .reading-annotation[data-author="user"] .reading-annotation-name,',
-            '.reading-app-surface .reading-annotation[data-author="user"] .reading-annotation-text,',
-            '.reading-app-surface .reading-annotation[data-author="user"] .reading-annotation-translation {',
+            `${FONT_SCOPE} .reading-annotation[data-author="user"],`,
+            `${FONT_SCOPE} .reading-annotation[data-author="user"] * {`,
             `  font-family: ${resolvedUserAnnotationFont};`,
             "}",
         ].join("\n"),
