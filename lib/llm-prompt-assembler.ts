@@ -382,6 +382,69 @@ function isPromptEnabled(prompt: Prompt, promptOrder?: PromptOrderEntry[]): bool
     return prompt.enabled;
 }
 
+export type PresetInstructionBlocks = {
+    /** 聊天记录标记之前的相对条目：放在提示词最前面 */
+    before: LLMMessage[];
+    /** 聊天记录标记之后的相对条目：放在历史之后 */
+    after: LLMMessage[];
+    /** 绝对位置条目：插在倒数第 depth 条消息之前（0 = 历史末尾） */
+    atDepth: { depth: number; message: LLMMessage }[];
+};
+
+/**
+ * 只取预设自己写的指令条目（主提示、破限之类），标记条目一律跳过——人设、世界书、记忆、
+ * 聊天记录由调用方自己的装配提供。启用、排序、标签筛选、宏展开、相对/绝对位置与
+ * assemblePromptPayload 同一套规则。给自带装配的 App（独家特调）带上全局预设用。
+ */
+export function collectPresetInstructions(
+    preset: PresetConfig,
+    options: { activeTags: string[]; charName: string; userName: string; lastUserMessage?: string; lastCharMessage?: string },
+): PresetInstructionBlocks {
+    const engine = new MacroEngine(options.charName, options.userName);
+    applyTimeContextToMacroEngine(engine, buildCharacterTimeContext(undefined));
+    engine.lastUserMessage = options.lastUserMessage ?? "";
+    engine.lastCharMessage = options.lastCharMessage ?? "";
+    engine.lastMessage = options.lastCharMessage ?? options.lastUserMessage ?? "";
+
+    const blocks: PresetInstructionBlocks = { before: [], after: [], atDepth: [] };
+    const absolute: { prompt: Prompt; content: string; promptIndex: number }[] = [];
+    let afterChatHistory = false;
+    const order = buildProcessingOrder(preset);
+    for (let promptIndex = 0; promptIndex < order.length; promptIndex += 1) {
+        const p = order[promptIndex];
+        if (p.marker && (p.identifier === "shortTermMemory" || p.identifier === "chatHistory")) {
+            afterChatHistory = true;
+            continue;
+        }
+        if (p.marker || !isPromptEnabled(p, preset.prompt_order)) continue;
+        const entryTags = getPromptTags(p);
+        if (entryTags && !entryTags.every(t => options.activeTags.includes(t))) continue;
+        const content = postProcessTrim(engine.expand(p.content)).trim();
+        if (!content) continue;
+        if ((p.injection_position ?? 0) !== 0) {
+            absolute.push({ prompt: p, content, promptIndex });
+            continue;
+        }
+        const message: LLMMessage = { role: normalizeRole(p.role), content, _debugMeta: { marker: p.name || p.identifier } };
+        (afterChatHistory ? blocks.after : blocks.before).push(message);
+    }
+    const rolePriority: Record<string, number> = { system: 0, user: 1, assistant: 2 };
+    absolute.sort((a, b) => {
+        const da = a.prompt.injection_depth ?? 0;
+        const db = b.prompt.injection_depth ?? 0;
+        if (da !== db) return da - db;
+        if (a.promptIndex !== b.promptIndex) return a.promptIndex - b.promptIndex;
+        return (rolePriority[normalizeRole(a.prompt.role)] ?? 9) - (rolePriority[normalizeRole(b.prompt.role)] ?? 9);
+    });
+    for (const entry of absolute) {
+        blocks.atDepth.push({
+            depth: Math.max(0, entry.prompt.injection_depth ?? 0),
+            message: { role: normalizeRole(entry.prompt.role), content: entry.content, _debugMeta: { marker: entry.prompt.name || entry.prompt.identifier } },
+        });
+    }
+    return blocks;
+}
+
 
 // ── Helper: sanitize identifier into valid XML tag name ──
 function toXmlTag(identifier: string): string {
