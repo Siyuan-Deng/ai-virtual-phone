@@ -36,8 +36,10 @@ function RichFrame({ html, inert }: { html: string; inert?: boolean }) {
             : `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><style>body{margin:0;color:#f2f0f7;font:14px/1.8 system-ui,-apple-system,sans-serif;background:transparent;word-break:break-word}</style></head><body>${html}</body></html>`;
         const bridge = `<script>(function(){
   var frameId=${JSON.stringify(frameId)};
-  function measure(){var b=document.body;if(!b)return ${FRAME_MIN_HEIGHT};var r=b.getBoundingClientRect();var h=r.height;
-    for(var i=0;i<b.children.length;i++){var c=b.children[i].getBoundingClientRect();if(c.width||c.height)h=Math.max(h,c.bottom-r.top);}
+  // 从文档顶上量到最低那块的下外边距：整页 HTML 的 body 默认 8px 外边距、外框自带的 margin 都算进来，不然底下会被裁掉一截
+  function mb(el){return parseFloat(getComputedStyle(el).marginBottom)||0;}
+  function measure(){var b=document.body;if(!b)return ${FRAME_MIN_HEIGHT};var y=window.scrollY||0;var h=b.getBoundingClientRect().bottom+y+mb(b);
+    for(var i=0;i<b.children.length;i++){var el=b.children[i];var c=el.getBoundingClientRect();if(c.width||c.height)h=Math.max(h,c.bottom+y+mb(el));}
     return Math.max(Math.ceil(h),${FRAME_MIN_HEIGHT});}
   function send(){parent.postMessage({source:'mix-rich-frame',type:'resize',id:frameId,height:measure()},'*');}
   function sched(){requestAnimationFrame(function(){send();requestAnimationFrame(send);});}
