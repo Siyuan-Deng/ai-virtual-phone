@@ -52,7 +52,7 @@ import {
     readingImageAssetKey,
     type ReadingImageRef,
 } from "@/lib/reading-inline-image";
-import { loadReadingAsset } from "@/lib/reading-appearance";
+import { loadReadingAsset, loadReadingAssets } from "@/lib/reading-appearance";
 
 /** 一行要用的原书排版信息；只在「还原原书排版」开着、且这本书带样式数据时才有值。 */
 type LineBlockStyle = {
@@ -197,22 +197,46 @@ function trimTrailingGaps(items: TxtPageItem[]): TxtPageItem[] {
     return items.slice(0, end);
 }
 
+/** 逐字宽度缓存。分页要为整章每个字量一次宽，而 canvas 量一次宽要走完整套字体
+ *  shaping；同一个字在书里会反复出现，缓存能把分页开销压掉一大截。
+ *  键用「度量时的 ctx.font 规范化结果 + 字符」——直接取 ctx.font，调用方传进来的
+ *  字体串写法和浏览器规范化后的写法不一致时也不会让缓存串味。
+ *  上限只是防失控：几种字重 × 几千个常用汉字，正常远到不了。 */
+const CHAR_WIDTH_CACHE_LIMIT = 24000;
+const charWidthCache = new Map<string, number>();
+
+function measureCharWidth(ctx: CanvasRenderingContext2D, char: string): number {
+    const key = `${ctx.font}\u0000${char}`;
+    const cached = charWidthCache.get(key);
+    if (cached !== undefined) return cached;
+    const width = ctx.measureText(char).width;
+    if (charWidthCache.size >= CHAR_WIDTH_CACHE_LIMIT) charWidthCache.clear();
+    charWidthCache.set(key, width);
+    return width;
+}
+
+/** 逐字折行（单一字体）。调用前必须先把 ctx.font 设成要用的字体——量宽走缓存，
+ *  字体没设对会一路量错。不丢字符：各行拼接严格等于原文，
+ *  字符游标（荧光笔/划线的定位）就建立在「拼接等于原文」这个前提上。 */
 function wrapTextToLines(text: string, maxWidth: number, ctx: CanvasRenderingContext2D, firstLineOffset = 0): string[] {
     if (!text) return [""];
 
     const lines: string[] = [];
     let current = "";
     let lineIndex = 0;
+    let width = 0;
 
     for (const char of Array.from(text)) {
-        const candidate = current + char;
+        const charWidth = measureCharWidth(ctx, char);
         const lineLimit = lineIndex === 0 ? Math.max(1, maxWidth - firstLineOffset) : maxWidth;
-        if (current && ctx.measureText(candidate).width > lineLimit) {
+        if (current && width + charWidth > lineLimit) {
             lines.push(current);
             current = char;
+            width = charWidth;
             lineIndex += 1;
         } else {
-            current = candidate;
+            current += char;
+            width += charWidth;
         }
     }
 
@@ -227,42 +251,98 @@ export const QUOTE_INSET_PX = 21;
 /** 中文书的首行缩进档位：原书没给缩进信息时，沿用改动前的「缩进两个字」。 */
 const DEFAULT_BLOCK_INDENT = 2;
 
-/** 逐字字体折行：原书排版下同一行里可能有加粗/斜体片段，
- *  按每个字符自己的字体量宽度，行内强调才会被算进行长，
- *  否则加粗的那几行会溢出容器或者提前折行，整页都会错位。 */
-function wrapTextToLinesRuns(
-    text: string,
+/** 字体一致的一段文字。行内加粗/斜体让同一行里出现多种字体。
+ *
+ *  为什么按片段而不是逐字换字体：`ctx.font` 赋值是 canvas 里最贵的操作之一
+ *  （每次都要重新解析字体简写并切换 shaping 上下文），逐字改会把整章分页
+ *  拖慢一个数量级。切成片段后，字体只在片段边界变一次。 */
+type FontRun = { text: string; font: string };
+
+/** 按片段折行：ctx.font 只在片段变化时设置，逐字量宽走缓存。
+ *  同样保证不丢字符——各行拼接等于所有片段文本拼接。 */
+function wrapFontRunsToLines(
+    runs: FontRun[],
     maxWidth: number,
     ctx: CanvasRenderingContext2D,
     firstLineOffset: number,
-    baseFont: string,
-    fontAt: (index: number) => string,
 ): string[] {
-    if (!text) return [""];
-
     const lines: string[] = [];
     let current = "";
     let lineIndex = 0;
     let width = 0;
 
-    Array.from(text).forEach((char, index) => {
-        const font = fontAt(index) || baseFont;
-        ctx.font = font;
-        const charWidth = ctx.measureText(char).width;
-        const limit = lineIndex === 0 ? Math.max(1, maxWidth - firstLineOffset) : maxWidth;
-        if (current && width + charWidth > limit) {
-            lines.push(current);
-            current = char;
-            width = charWidth;
-            lineIndex += 1;
-        } else {
-            current += char;
-            width += charWidth;
+    for (const run of runs) {
+        ctx.font = run.font;
+        for (const char of Array.from(run.text)) {
+            const charWidth = measureCharWidth(ctx, char);
+            const limit = lineIndex === 0 ? Math.max(1, maxWidth - firstLineOffset) : maxWidth;
+            if (current && width + charWidth > limit) {
+                lines.push(current);
+                current = char;
+                width = charWidth;
+                lineIndex += 1;
+            } else {
+                current += char;
+                width += charWidth;
+            }
         }
-    });
+    }
 
     if (current) lines.push(current);
     return lines.length > 0 ? lines : [""];
+}
+
+/** 把一段文字切成「字体一致的片段」。
+ *  @param offset 这一段在整段文字里的起始位置（段落被 \n 拆开后的第 n 段）；
+ *                spans 是按整段文字的下标存的，要减掉它才对得上。
+ *  只用于量宽，不参与渲染：片段不改动任何字符。 */
+function buildEmphasisRuns(
+    text: string,
+    spans: ReadingInlineSpan[] | null,
+    offset: number,
+    baseFont: string,
+    parts: { style: string; variant: string; weight: string; family: string },
+    metrics: Pick<BlockMetrics, "fontSize" | "bold" | "italic">,
+): FontRun[] {
+    const length = text.length;
+    if (length === 0) return [];
+
+    // 1 = 加粗，2 = 斜体，可叠加。先铺一张逐字符标记表，
+    // 免得后面每走一个字都把整份 spans 扫一遍（那是 O(字数 × 片段数)）。
+    let flags: Uint8Array | null = null;
+    if (spans && spans.length > 0) {
+        for (const span of spans) {
+            if (!span.bold && !span.italic) continue;
+            const from = Math.max(0, span.start - offset);
+            const to = Math.min(length, span.end - offset);
+            if (to <= from) continue;
+            if (!flags) flags = new Uint8Array(length);
+            for (let i = from; i < to; i += 1) {
+                flags[i] |= (span.bold ? 1 : 0) | (span.italic ? 2 : 0);
+            }
+        }
+    }
+
+    const fontForFlags = (value: number) => {
+        const bold = metrics.bold || (value & 1) !== 0;
+        const italic = metrics.italic || (value & 2) !== 0;
+        // 这一段的基准字体（含整段加粗/斜体）就是 baseFont，没有额外强调时直接复用
+        if (!bold && !italic) return baseFont;
+        return canvasFontFor({ fontSize: metrics.fontSize, bold, italic }, parts);
+    };
+
+    const runs: FontRun[] = [];
+    let runStart = 0;
+    let runFlags = flags ? flags[0] : 0;
+    for (let i = 1; i < length; i += 1) {
+        const next = flags ? flags[i] : 0;
+        if (next === runFlags) continue;
+        runs.push({ text: text.slice(runStart, i), font: fontForFlags(runFlags) });
+        runStart = i;
+        runFlags = next;
+    }
+    runs.push({ text: text.slice(runStart), font: fontForFlags(runFlags) });
+    return runs;
 }
 
 /** 一行的排版参数（px 全部按当前字号/行距算好，分页与渲染共用同一套数）。 */
@@ -340,24 +420,6 @@ function canvasFontFor(
         `${metrics.fontSize}px`,
         parts.family,
     ].join(" ");
-}
-
-/** 段落内某个字符位置是否落在加粗/斜体的行内区间里（多处叠加取并集）。 */
-function inlineEmphasisAt(
-    spans: ReadingInlineSpan[] | null | undefined,
-    index: number,
-): { bold: boolean; italic: boolean } | null {
-    if (!spans || spans.length === 0) return null;
-    let bold = false;
-    let italic = false;
-    let hit = false;
-    for (const span of spans) {
-        if (index < span.start || index >= span.end) continue;
-        hit = true;
-        if (span.bold) bold = true;
-        if (span.italic) italic = true;
-    }
-    return hit ? { bold, italic } : null;
 }
 
 function ReadingLoadingView({
@@ -463,6 +525,10 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     const [marks, setMarks] = useState<ReadingMark[]>([]);
     /** 插图序号 → objectURL。只为当前正在显示的章节加载，读到哪加载到哪 */
     const [inlineImageUrls, setInlineImageUrls] = useState<Record<number, string>>({});
+    /** 与 inlineImageUrls 同步的镜像：插图加载是异步的，判定「这张已经取过了」
+     *  要读当下的值，闭包里拿 state 会读到过期的那一份，导致重复取库。 */
+    const inlineImageUrlsRef = useRef<Record<number, string>>({});
+    useEffect(() => { inlineImageUrlsRef.current = inlineImageUrls; }, [inlineImageUrls]);
     const [selectionInfo, setSelectionInfo] = useState<
         {
             text: string;
@@ -678,17 +744,29 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             return changed ? next : prev;
         });
         void (async () => {
-            for (const index of visibleImageIndices) {
-                if (cancelled) return;
-                // 串行：这几张图和封面/字体共用一个 IndexedDB，并发打开会互相 block
-                const blob = await loadReadingAsset(readingImageAssetKey(book.id, index)).catch(() => null);
-                if (cancelled) return;
+            // 已经在手里的不再取；剩下的用一次事务批量拿回来。
+            // 原来逐张 loadReadingAsset（每张开关一次 IndexedDB），插图书翻页时很拖。
+            const missing = [...wanted].filter((index) => !inlineImageUrlsRef.current[index]).sort((a, b) => a - b);
+            if (missing.length === 0) return;
+            const loaded = await loadReadingAssets(missing.map((index) => readingImageAssetKey(book.id, index)));
+            if (cancelled) return;
+            const created: Record<number, string> = {};
+            for (const index of missing) {
+                const blob = loaded.get(readingImageAssetKey(book.id, index));
                 if (!blob || blob.size === 0) continue;
-                setInlineImageUrls((prev) => {
-                    if (prev[index]) return prev;
-                    return { ...prev, [index]: URL.createObjectURL(blob) };
-                });
+                created[index] = URL.createObjectURL(blob);
             }
+            if (Object.keys(created).length === 0) return;
+            setInlineImageUrls((prev) => {
+                const merged: Record<number, string> = {};
+                for (const [key, url] of Object.entries(created)) {
+                    const index = Number(key);
+                    // 期间别处已经建过同一张图的 URL：丢掉这份新的，别让它泄漏
+                    if (prev[index]) { URL.revokeObjectURL(url); continue; }
+                    merged[index] = url;
+                }
+                return Object.keys(merged).length > 0 ? { ...prev, ...merged } : prev;
+            });
         })();
         return () => { cancelled = true; };
     }, [book.id, visibleImageIndices]);
@@ -1053,31 +1131,32 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
 
         // 有行内强调：逐字算出「强调位 + 是否有荧光笔/划线」，同一种组合的连续字符合成一个
         // 节点。强调只加样式、不增删字符，所以按码元下标走的字符锚点仍然准确。
-        type EmphasisFlags = { bold: boolean; italic: boolean; underline: boolean; strike: boolean; sup: boolean; sub: boolean };
-        type StyledRun = { text: string; emphasis: EmphasisFlags | null; mark: ReadingMark | null };
+        //
+        // 强调位先摊成一张逐字符标记表（1=加粗 2=斜体 4=下划线 8=删除线 16=上标 32=下标），
+        // 再按「标记相同」合并节点。原来每个字都要扫一遍 spans、为每个字各建一个对象、
+        // 再 JSON.stringify 两次来比较——这条路径每次重绘都要整页走一遍，很吃性能。
+        type StyledRun = { text: string; flags: number; mark: ReadingMark | null };
+        const flagOf = new Uint8Array(item.text.length);
+        for (const span of spans!) {
+            const bits = (span.bold ? 1 : 0) | (span.italic ? 2 : 0) | (span.underline ? 4 : 0)
+                | (span.strike ? 8 : 0) | (span.sup ? 16 : 0) | (span.sub ? 32 : 0);
+            if (bits === 0) continue;
+            const from = Math.max(0, span.start - lineStart);
+            const to = Math.min(item.text.length, span.end - lineStart);
+            for (let i = from; i < to; i += 1) flagOf[i] |= bits;
+        }
+
         const runs: StyledRun[] = [];
         let current: StyledRun | null = null;
         let charIndex = 0;
         for (const ch of Array.from(item.text)) {
             const absolute = lineStart + charIndex;
-            let emphasis: EmphasisFlags | null = null;
-            for (const span of spans!) {
-                if (absolute < span.start || absolute >= span.end) continue;
-                if (!emphasis) emphasis = { bold: false, italic: false, underline: false, strike: false, sup: false, sub: false };
-                if (span.bold) emphasis.bold = true;
-                if (span.italic) emphasis.italic = true;
-                if (span.underline) emphasis.underline = true;
-                if (span.strike) emphasis.strike = true;
-                if (span.sup) emphasis.sup = true;
-                if (span.sub) emphasis.sub = true;
-            }
-            const mark = hits.find(item2 => item2.start <= absolute && item2.end > absolute) || null;
-            const sameAsCurrent = current
-                && JSON.stringify(current.emphasis) === JSON.stringify(emphasis)
-                && (current.mark?.id ?? "") === (mark?.id ?? "");
-            if (sameAsCurrent) current!.text += ch;
-            else {
-                current = { text: ch, emphasis, mark };
+            const flags = flagOf[charIndex] || 0;
+            const mark = hits.find(candidate => candidate.start <= absolute && candidate.end > absolute) || null;
+            if (current && current.flags === flags && (current.mark?.id ?? "") === (mark?.id ?? "")) {
+                current.text += ch;
+            } else {
+                current = { text: ch, flags, mark };
                 runs.push(current);
             }
             charIndex += ch.length;
@@ -1085,17 +1164,18 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
 
         return runs.map((node, index) => {
             const style: CSSProperties = {};
-            if (node.emphasis) {
-                if (node.emphasis.bold) style.fontWeight = 700;
-                if (node.emphasis.italic) style.fontStyle = "italic";
-                if (node.emphasis.underline) style.textDecoration = "underline";
-                if (node.emphasis.strike) {
-                    // 同时有下划线和删除线时合并成一条声明，别让后写的把先写的盖掉
-                    style.textDecoration = `${node.emphasis.underline ? "underline " : ""}line-through`;
-                }
+            if (node.flags !== 0) {
+                if (node.flags & 1) style.fontWeight = 700;
+                if (node.flags & 2) style.fontStyle = "italic";
+                const underline = (node.flags & 4) !== 0;
+                const strike = (node.flags & 8) !== 0;
+                // 下划线和删除线同时存在时合并成一条声明，否则后写的会把先写的盖掉
+                if (underline && strike) style.textDecoration = "underline line-through";
+                else if (underline) style.textDecoration = "underline";
+                else if (strike) style.textDecoration = "line-through";
                 // 上下标用 em 相对字号，跟着这一行的字号走（标题里的脚注编号也不会错位）
-                if (node.emphasis.sup) { style.fontSize = "0.7em"; style.verticalAlign = "super"; }
-                if (node.emphasis.sub) { style.fontSize = "0.7em"; style.verticalAlign = "sub"; }
+                if (node.flags & 16) { style.fontSize = "0.7em"; style.verticalAlign = "super"; }
+                if (node.flags & 32) { style.fontSize = "0.7em"; style.verticalAlign = "sub"; }
             }
             if (!node.mark) {
                 return Object.keys(style).length > 0
@@ -1158,26 +1238,36 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     };
 
     /** 滚动模式用的行样式：滚动模式下由浏览器自己排版，不需要量高度，
-     *  只要把倍率、对齐、缩进和行内样式交给 CSS 就够了。 */
-    const blockStyleAt = useCallback((chapter: BookChapter, index: number): LineBlockStyle | null => {
-        if (readingConfig.restoreOriginalLayout === false) return null;
-        const styles = chapter.paragraphStyles;
-        // 长度对不上说明这份数据不完整（老数据 / 被裁错过），宁可不还原
-        if (!Array.isArray(styles) || styles.length !== chapter.paragraphs.length) return null;
-        const style = styles[index] ?? null;
-        const align = style?.align ?? (style?.epigraph ? "center" : undefined);
-        const noIndent = Boolean(style?.align || style?.heading || style?.quote || style?.epigraph || style?.footnote);
-        return {
-            scale: blockScaleFor(style),
-            bold: style?.bold ?? Boolean(style?.heading),
-            italic: style?.italic ?? false,
-            quote: Boolean(style?.quote),
-            footnote: Boolean(style?.footnote),
-            indentChars: noIndent ? 0 : (style?.indent ?? DEFAULT_BLOCK_INDENT),
-            ...(align ? { align } : {}),
-            spans: chapter.paragraphSpans?.[index] ?? null,
-        };
-    }, [readingConfig.restoreOriginalLayout]);
+     *  只要把倍率、对齐、缩进和行内样式交给 CSS 就够了。
+     *
+     *  按章整表算好缓存起来：滚动时每个滚动帧都会把窗口内所有段落重渲染一遍，
+     *  逐段现算的话每帧要为上百个段落重建对象（滚动卡顿的一大来源）。 */
+    const scrollBlockStyles = useMemo(() => {
+        const map = new Map<number, (LineBlockStyle | null)[]>();
+        if (!isScrollMode || readingConfig.restoreOriginalLayout === false) return map;
+        for (const chapter of windowChapters) {
+            const styles = chapter.paragraphStyles;
+            // 长度对不上说明这份数据不完整（老数据 / 被裁错过），宁可不还原
+            if (!Array.isArray(styles) || styles.length !== chapter.paragraphs.length) continue;
+            const spansList = chapter.paragraphSpans;
+            map.set(chapter.index, chapter.paragraphs.map((_, index) => {
+                const style = styles[index] ?? null;
+                const align = style?.align ?? (style?.epigraph ? "center" : undefined);
+                const noIndent = Boolean(style?.align || style?.heading || style?.quote || style?.epigraph || style?.footnote);
+                return {
+                    scale: blockScaleFor(style),
+                    bold: style?.bold ?? Boolean(style?.heading),
+                    italic: style?.italic ?? false,
+                    quote: Boolean(style?.quote),
+                    footnote: Boolean(style?.footnote),
+                    indentChars: noIndent ? 0 : (style?.indent ?? DEFAULT_BLOCK_INDENT),
+                    ...(align ? { align } : {}),
+                    spans: spansList?.[index] ?? null,
+                } satisfies LineBlockStyle;
+            }));
+        }
+        return map;
+    }, [isScrollMode, readingConfig.restoreOriginalLayout, windowChapters]);
 
     /** 一张正文插图。图还没读出来时先占住位置（有原始尺寸就按比例占），
      *  否则图片加载完会把正文顶得一跳一跳。 */
@@ -2717,19 +2807,15 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                 const shouldIndent = segmentIndex === 0 && metrics.indentChars > 0;
                 const firstLineOffset = shouldIndent ? metrics.indentChars * metrics.fontSize : 0;
                 ctx.font = blockFont;
+                // 有行内强调时按「字体一致的片段」折行（charCursor = 这一段在整段里的起点）；
+                // 纯正文走单字体快路径。
                 const wrappedLines = mixedEmphasis
-                    ? wrapTextToLinesRuns(segment, blockWidth, ctx, firstLineOffset, blockFont, (charIndex) => {
-                        const emphasis = inlineEmphasisAt(spans, charCursor + charIndex);
-                        if (!emphasis || (!emphasis.bold && !emphasis.italic)) return blockFont;
-                        return canvasFontFor(
-                            {
-                                fontSize: metrics.fontSize,
-                                bold: metrics.bold || emphasis.bold,
-                                italic: metrics.italic || emphasis.italic,
-                            },
-                            fontParts,
-                        );
-                    })
+                    ? wrapFontRunsToLines(
+                        buildEmphasisRuns(segment, spans, charCursor, blockFont, fontParts, metrics),
+                        blockWidth,
+                        ctx,
+                        firstLineOffset,
+                    )
                     : wrapTextToLines(segment, blockWidth, ctx, firstLineOffset);
                 wrappedLines.forEach((line, lineIndex) => {
                     tokens.push({
@@ -3323,7 +3409,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                                     }
                                     const segmentCount = paragraph.split("\n").length;
                                     // 还原原书排版时，首行缩进跟随这一段自己的档位（居中/引用/标题不缩进）
-                                    const block = blockStyleAt(chapter, pIndex);
+                                    const block = scrollBlockStyles.get(chapter.index)?.[pIndex] ?? null;
                                     const shouldIndent = block ? block.indentChars > 0 : true;
                                     const paragraphAnnotations = annotations.filter(
                                         (annotation) => annotation.chapterIndex === chapter.index && annotation.paragraphIndex === pIndex

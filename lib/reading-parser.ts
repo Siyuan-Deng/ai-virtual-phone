@@ -1,7 +1,7 @@
 // lib/reading-parser.ts — File parsing for TXT, EPUB, PDF.
 
 import { buildReadingImageMarker, parseReadingImageMarker } from "./reading-inline-image";
-import { READING_INLINE_IMAGE_MAX_SIZE, compressReadingImage } from "./reading-image";
+import { READING_INLINE_IMAGE_MAX_SIZE, measureAndCompressReadingImage } from "./reading-image";
 import type { ReadingBlockStyle, ReadingInlineSpan } from "./reading-types";
 
 // ── PDF.js CDN loader ──
@@ -383,17 +383,30 @@ function splitParagraphs(lines: string[], mode: TxtParagraphMode = "auto"): stri
  * Parse EPUB file into chapters and paragraphs.
  * EPUB is a ZIP containing XHTML files.
  */
-/** 量一张图的原始像素尺寸。解码不了（SVG、老浏览器）就返回 null，按未知处理。 */
-async function measureImageBlob(blob: Blob): Promise<{ width: number; height: number } | null> {
-    if (typeof createImageBitmap === "undefined") return null;
-    try {
-        const bitmap = await createImageBitmap(blob);
-        const size = { width: bitmap.width, height: bitmap.height };
-        bitmap.close();
-        return size;
-    } catch {
-        return null;
-    }
+/** 有限并发跑一批任务，保持结果顺序。
+ *
+ *  图片处理（解码 + webp 编码）是导入过程中最重的一段，原来是纯串行：一张图
+ *  解码完才轮到下一张。解码和编码本身在浏览器里是异步的（不占主线程），
+ *  并发跑能把这段墙钟时间压到接近 1/并发数。但并发数不能大——每张图解码后
+ *  都占一份像素内存，一本画册全放开会直接触发内存告警，所以固定小并发。
+ */
+async function mapWithConcurrency<T, R>(
+    items: T[],
+    limit: number,
+    worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+    const results = new Array<R>(items.length);
+    let cursor = 0;
+    const runners = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+        for (;;) {
+            const index = cursor;
+            cursor += 1;
+            if (index >= items.length) return;
+            results[index] = await worker(items[index], index);
+        }
+    });
+    await Promise.all(runners);
+    return results;
 }
 
 type TocEntry = { label: string; path: string; level: number };
@@ -659,17 +672,32 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
         });
     }
 
-    // 7. 取出插图的字节，顺便量一下原图尺寸（翻页分页要用它算这张图占多高）
+    // 7. 取出插图的字节，量原图尺寸（翻页分页要用它算这张图占多高）并压一道。
+    //    解码 + 编码合并成一次（见 measureAndCompressReadingImage），有限并发跑。
     const images: ReadingParsedImage[] = [];
     const droppedImages = new Set<number>();
-    for (let index = 0; index < imagePaths.length; index += 1) {
-        const data = await zip.file(imagePaths[index])?.async("blob");
-        if (!data || data.size === 0) { droppedImages.add(index); continue; }
-        const measured = await measureImageBlob(data);
+    const processed = await mapWithConcurrency(imagePaths, 3, async (imagePath, index) => {
+        const data = await zip.file(imagePath)?.async("blob");
+        if (!data || data.size === 0) return { index, dropped: true as const };
+        const measured = await measureAndCompressReadingImage(data, READING_INLINE_IMAGE_MAX_SIZE);
         // 1x1 透明占位、分隔线之类的小图没有阅读价值，只会在正文里留一行空白
-        if (measured && (measured.width < 40 || measured.height < 40)) { droppedImages.add(index); continue; }
-        const blob = await compressReadingImage(data, READING_INLINE_IMAGE_MAX_SIZE);
-        images.push({ index, blob, width: measured?.width ?? 0, height: measured?.height ?? 0 });
+        if (measured.width > 0 && measured.height > 0 && (measured.width < 40 || measured.height < 40)) {
+            return { index, dropped: true as const };
+        }
+        return {
+            index,
+            dropped: false as const,
+            image: {
+                index,
+                blob: measured.blob,
+                width: measured.width,
+                height: measured.height,
+            } satisfies ReadingParsedImage,
+        };
+    });
+    for (const item of processed) {
+        if (item.dropped) droppedImages.add(item.index);
+        else images.push(item.image);
     }
 
     if (images.length > 0 || droppedImages.size > 0) {

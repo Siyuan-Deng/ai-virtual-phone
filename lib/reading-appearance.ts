@@ -421,6 +421,52 @@ export async function loadReadingAsset(key: string): Promise<Blob | null> {
     return loadAsset(key);
 }
 
+/** 批量读取资源库：一个连接、一个事务取完一批。
+ *  阅读器打开一屏要拿若干张插图，逐张 loadReadingAsset 就是逐次开关库；
+ *  缺的键返回 null（调用方按「没有这张图」处理，不会整批失败）。 */
+export async function loadReadingAssets(keys: string[]): Promise<Map<string, Blob | null>> {
+    const out = new Map<string, Blob | null>();
+    if (keys.length === 0) return out;
+    try {
+        await withBackgroundDb((db) => new Promise<void>((resolve, reject) => {
+            const tx = db.transaction(BG_STORE_NAME, "readonly");
+            const store = tx.objectStore(BG_STORE_NAME);
+            let remaining = keys.length;
+            const settle = () => { remaining -= 1; if (remaining === 0) resolve(); };
+            for (const key of keys) {
+                const request = store.get(key);
+                request.onsuccess = () => { out.set(key, (request.result as Blob) || null); settle(); };
+                request.onerror = () => { out.set(key, null); settle(); };
+            }
+            tx.onerror = () => reject(tx.error);
+        }));
+    } catch {
+        // 整个库读不出来时按「一张都没有」处理，正文里显示占位即可
+    }
+    for (const key of keys) if (!out.has(key)) out.set(key, null);
+    return out;
+}
+
+/** 批量写入资源库：一个连接、一个事务写完整批。
+ *
+ *  逐个调用 saveReadingAsset 时，每次都要重新 open 一次 IndexedDB 再关掉，
+ *  一本插图多的书就是上百次「开库 → 事务 → 关库」，导入时这一项开销很容易和
+ *  图片解码同量级。整批走一个事务既快，也不会在中途留下半批数据。 */
+export async function saveReadingAssets(entries: Array<{ key: string; blob: Blob | null }>): Promise<void> {
+    if (entries.length === 0) return;
+    await withBackgroundDb((db) => new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(BG_STORE_NAME, "readwrite");
+        const store = tx.objectStore(BG_STORE_NAME);
+        for (const entry of entries) {
+            if (entry.blob) store.put(entry.blob, entry.key);
+            else store.delete(entry.key);
+        }
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error("批量写入阅读资源库被中断"));
+    }));
+}
+
 /** 按前缀批量删：删书时要把这本书的插图一起清掉，
  *  否则图片会永远留在资源库里，用户也看不见、删不掉。 */
 export async function deleteReadingAssetsByPrefix(prefix: string): Promise<void> {

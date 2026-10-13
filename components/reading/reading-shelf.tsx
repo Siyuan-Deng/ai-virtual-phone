@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { ChevronLeft, Palette, Pin, Settings, UserRound } from "lucide-react";
 import { loadBooks, addBook, updateBook, deleteBook, deleteBookmarksByBook, saveChapters, loadProgress, saveRawFile, countAnnotationsByBook } from "@/lib/reading-storage";
 import { loadCharacters } from "@/lib/character-storage";
-import { deleteReadingAssetsByPrefix, loadReadingCover, saveReadingAsset, saveReadingCover } from "@/lib/reading-appearance";
+import { deleteReadingAssetsByPrefix, loadReadingCover, saveReadingAsset, saveReadingAssets, saveReadingCover } from "@/lib/reading-appearance";
 import { readingImageAssetKey, readingImageAssetPrefix } from "@/lib/reading-inline-image";
 import { decodeTxtArrayBuffer, parseTxtContent, parseEpubFile, parseMobiFile, PDF_PAGES_PER_CHAPTER } from "@/lib/reading-parser";
 import { loadReadingInteractionConfig } from "@/lib/reading-storage";
@@ -506,10 +506,13 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
             if (parsedImages && parsedImages.length > 0) {
                 importStage = "保存正文插图";
                 setImportStatus(`正在保存 ${parsedImages.length} 张插图…`);
-                for (const image of parsedImages) {
-                    // 单张图存不下不该让整本书导入失败，正文里那一格会显示成「插图加载失败」
-                    await saveReadingAsset(readingImageAssetKey(bookId, image.index), image.blob).catch(() => {});
-                }
+                // 整批一个事务写完：逐张 saveReadingAsset 的话，每张都要重新开一次
+                // IndexedDB 再关掉，插图一多这段开销就和图片解码同量级了。
+                // 单张图存不下不该让整本书导入失败（正文里那一格会显示「插图加载失败」）。
+                await saveReadingAssets(parsedImages.map((image) => ({
+                    key: readingImageAssetKey(bookId, image.index),
+                    blob: image.blob,
+                }))).catch(() => {});
             }
             if (rawFile) {
                 try {

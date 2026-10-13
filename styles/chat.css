@@ -4739,15 +4739,21 @@
   line-height: var(--reading-line-height, 1.9);
   color: var(--reading-text-color, var(--reading-warm-ink, #111));
   margin: 0;
-  text-align: justify;
-  text-align-last: justify;
-  text-justify: inter-character;
+  /* 左对齐。这里原来是两端对齐（text-align: justify + text-align-last: justify
+     + text-justify: inter-character），中文下会把**每一行**都按字撑满整行宽：
+     对话、单句成段的短行会被拉开成「每个字均匀分布」，读起来非常别扭。
+     它还会放大另一个问题——canvas 算出的折行位置和浏览器实际排版有细微差异
+     （标点禁则、字距微调），浏览器少放一个字时那一行本来只短一点点，
+     被强行撑满后缝隙格外显眼。改成左对齐两点一起解决，行尾参差也更接近纸质书。 */
+  text-align: left;
 }
 .reading-line-indent {
   text-indent: 2em;
 }
+/* .reading-line-seg-end 原本是「末行不撑满」的补丁，基础规则改成左对齐后
+   它已无事可做；类名仍由渲染层发出，这里保留选择器以免别处还有引用。 */
 .reading-line-seg-end {
-  text-align-last: left;
+  text-align-last: auto;
 }
 .reading-line-gap {
   height: 20px;
