@@ -11,6 +11,44 @@ export type Book = {
     pinnedAt?: string;
 };
 
+/** EPUB 原书排版：一个块（段落）的块级语义样式。
+ *  只有用它解析过的书（EPUB / MOBI）才有；TXT、PDF 与老书没有，渲染时按原来的统一排版走。
+ *
+ *  这里刻意不存原书的任意 CSS，只保留能跨设备稳定复现的语义档位：
+ *  原书 CSS 里的多列、浮动、伪元素会让「段落序号 + 段内字符区间」这套批注锚点失效，
+ *  而批注要精确到字。详见 reading-parser.ts 里 EPUB 解析段的说明。 */
+export type ReadingBlockStyle = {
+    /** 标题级别 1-6（对应原书 h1-h6）。缺省 = 正文 */
+    heading?: number;
+    /** 块级对齐。缺省 = 跟随全局左对齐 */
+    align?: "center" | "right";
+    /** 首行缩进档位（字符数）。0 = 不缩进；缺省 = 用全局默认（中文首行缩进两字） */
+    indent?: number;
+    /** 整块加粗 / 斜体（原书整段用 <b> 包住、或 CSS 指定的情况） */
+    bold?: boolean;
+    italic?: boolean;
+    /** 引用块：左侧竖线 + 缩进 + 略小字号 */
+    quote?: boolean;
+    /** 题记 / 献词：居中且略小 */
+    epigraph?: boolean;
+    /** 脚注 / 尾注块：小而淡，和正文区分开 */
+    footnote?: boolean;
+};
+
+/** 段内字符区间的行内样式。区间是 [start, end)，针对已存下来的段落文字，
+ *  所以加粗/斜体不新增也不删掉任何字符，批注/划线的字符锚点不受影响。 */
+export type ReadingInlineSpan = {
+    start: number;
+    end: number;
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    strike?: boolean;
+    /** 上标（脚注编号）/ 下标 */
+    sup?: boolean;
+    sub?: boolean;
+};
+
 export type BookChapter = {
     id: string;
     bookId: string;
@@ -19,6 +57,10 @@ export type BookChapter = {
     paragraphs: string[];
     /** EPUB 自带目录里的层级：0 = 顶层，1 = 它的子条目。没有目录的书不给。 */
     tocLevel?: number;
+    /** EPUB 原书排版：与 paragraphs 一一对应的块级样式；null / 缺省 = 这段按统一排版渲染 */
+    paragraphStyles?: (ReadingBlockStyle | null)[];
+    /** EPUB 原书排版：与 paragraphs 一一对应的行内样式区间 */
+    paragraphSpans?: (ReadingInlineSpan[] | null)[];
     /** PDF only: synthetic page chunk start (1-based) */
     pageStart?: number;
     /** PDF only: synthetic page chunk end (1-based) */

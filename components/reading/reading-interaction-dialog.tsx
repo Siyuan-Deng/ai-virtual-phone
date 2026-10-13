@@ -161,6 +161,27 @@ export function ReadingInteractionDialog({ onClose }: Props) {
                     </p>
                 </ReadingSettingsSection>
 
+                <ReadingSettingsSection icon={<BookOpenText size={15} />} title="原书排版">
+                    <div className="reading-settings-toggle-row">
+                        <span className="reading-settings-toggle-label">
+                            还原 EPUB 原书排版
+                        </span>
+                        <Toggle
+                            checked={config.restoreOriginalLayout !== false}
+                            onChange={(next) => setConfig((prev) => ({ ...prev, restoreOriginalLayout: next }))}
+                        />
+                    </div>
+                    <p className="reading-settings-inline-note">
+                        <span>按书里自带的语义样式排版：标题字号层级、居中、首行缩进、引用、题记、脚注，
+                        以及段内的加粗 / 斜体 / 下划线 / 上下标。只还原这些语义样式，不执行原书的任意 CSS——
+                        原书的多列、浮动、伪元素会让「第几段第几个字」这套批注锚点错位，而批注要精确到字。</span>
+                    </p>
+                    <p className="reading-settings-inline-note">
+                        <span>对重新导入的 EPUB / MOBI 生效（老书里没有存过样式数据，重导一次即可）；TXT、PDF 不受影响。
+                        关掉它就回到全书统一排版。</span>
+                    </p>
+                </ReadingSettingsSection>
+
                 <ReadingSettingsSection icon={<Repeat2 size={15} />} title="自动批注失败重试">
                     <p className="reading-settings-inline-note">
                         <span>生成失败时静默重试的次数，全部失败后才提示错误。</span>

@@ -102,6 +102,10 @@ export type ReadingInteractionConfig = {
     pdfPreloadRadius: number;
     /** PDF 预加载：开启后阅读时提前渲染后续页，滚动更平滑 */
     pdfPreloadEnabled: boolean;
+    /** 还原原书排版：EPUB/MOBI 按书里自带的语义样式渲染（标题字号层级、居中、缩进、
+     *  引用、题记、脚注、行内加粗斜体），而不是全书统一排版。
+     *  缺省即开启；没有样式数据的书（TXT / PDF / 老书）不受影响，照旧渲染。 */
+    restoreOriginalLayout?: boolean;
 };
 
 export const DEFAULT_READING_INTERACTION_CONFIG: ReadingInteractionConfig = {

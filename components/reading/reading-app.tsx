@@ -5,7 +5,7 @@ import { hydrateKvDb } from "@/lib/kv-db";
 import { loadReadingCustomCss, saveReadingCustomCss } from "@/lib/reading-custom-css";
 import { hydrateReadingStorage } from "@/lib/reading-storage";
 import { ReadingShelf } from "./reading-shelf";
-import { ReadingViewer } from "./reading-viewer";
+import { ReadingViewer, QUOTE_INSET_PX } from "./reading-viewer";
 import type { Book } from "@/lib/reading-types";
 import {
     DEFAULT_READING_APPEARANCE,
@@ -71,6 +71,54 @@ function annotationCardCss(suffix: string, style: AnnotationCardStyle): string {
         `${card} .reading-annotation-name {`,
         `  font-size: calc(${Math.round(style.fontSize * 0.85 * 10) / 10}px * var(--app-text-scale, 1));`,
         `  color: ${style.textColor};`,
+        "}",
+    ].join("\n");
+}
+
+/** 原书排版的块级样式（标题、居中、缩进、引用、题记、脚注）。
+ *
+ *  放在这里而不是 styles/*.css：和阅读区其它样式一样走注入的 <style>，
+ *  一条规则只带一个 class + 一个祖先，足以压过全局的 p{} / .reading-line 规则，
+ *  又不带 !important——用户自己的阅读自定义 CSS 仍然盖得动。
+ *
+ *  这些数必须和 reading-viewer.tsx 里的排版计算严格对应（QUOTE_INSET_PX、
+ *  缩进档位、字号倍率）：翻页模式是按那套数算出每页放多少行的，
+ *  这里一改，分页就会算错页。scroll 作用域的少数几条只影响连续滚动模式。 */
+function blockLayoutCss(): string {
+    return [
+        // 首行缩进：档位由行内变量给；没给就是两字，和改动前一致。
+        // 注意 2em 里那个 2 要与 reading-viewer.tsx 的 DEFAULT_BLOCK_INDENT 一致。
+        ".reading-app-surface .reading-line-indent {",
+        "  text-indent: var(--reading-block-indent, 2em);",
+        "}",
+        // 居中 / 右对齐（原书的题记、版权页、署名常用）
+        ".reading-app-surface .reading-line-center {",
+        "  text-align: center;",
+        "}",
+        ".reading-app-surface .reading-line-right {",
+        "  text-align: right;",
+        "}",
+        // 引用块：左侧竖线 + 内缩。padding-left + border-left 必须等于 QUOTE_INSET_PX，
+        // 折行宽度也是按这个数收窄的。
+        ".reading-app-surface .reading-line-quote {",
+        `  padding-left: ${QUOTE_INSET_PX - 3}px;`,
+        "  border-left: 3px solid rgba(128, 128, 128, 0.45);",
+        "  line-height: calc(var(--reading-line-height, 2) * 0.96);",
+        "}",
+        // 脚注 / 尾注：小一号、淡一点，和正文分得开
+        ".reading-app-surface .reading-line-footnote {",
+        "  line-height: calc(var(--reading-line-height, 2) * 0.82);",
+        "  opacity: 0.82;",
+        "}",
+        // 连续滚动模式：段落间距由 CSS 出（翻页模式是分页算出的 gap 段，
+        // 这里不能加 margin，否则高度对不上会导致每页溢出）。
+        ".reading-scroll-content .reading-line-quote,",
+        ".reading-scroll-content .reading-line-footnote {",
+        "  margin: 0.35em 0;",
+        "}",
+        ".reading-scroll-content .reading-line-center,",
+        ".reading-scroll-content .reading-line-right {",
+        "  margin: 0.3em 0;",
         "}",
     ].join("\n");
 }
@@ -295,6 +343,8 @@ export default function ReadingApp({ onClose }: Props) {
         // 否则把批注字号调大以后，署名还是原来那么小，看着像没跟上。
         annotationCardCss("", annotationStyle),
         annotationCardCss('[data-author="user"]', userAnnotationStyle),
+        // 原书排版的块级样式（标题/居中/缩进/引用/题记/脚注）
+        blockLayoutCss(),
         // 高亮 / 划线的颜色。自己划的和角色划的分开配，默认也不是一个色系，
         // 一眼看得出这道线是谁划的。没有 data-author 的老数据算自己划的。
         markColorCss("", appearance.highlightColor, appearance.underlineColor),

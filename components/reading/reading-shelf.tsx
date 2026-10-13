@@ -471,6 +471,9 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                 }
                 // PDF 那条分支给的是个占位章节，没有 tocLevel，取值要容错
                 const tocLevel = (ch as { tocLevel?: number }).tocLevel;
+                // EPUB/MOBI 解析出来的原书排版：与 paragraphs 一一对应，缺省则整章按统一排版渲染
+                const paragraphStyles = (ch as { paragraphStyles?: BookChapter["paragraphStyles"] }).paragraphStyles;
+                const paragraphSpans = (ch as { paragraphSpans?: BookChapter["paragraphSpans"] }).paragraphSpans;
                 return {
                     id: `${bookId}_ch${i}`,
                     bookId,
@@ -478,6 +481,8 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                     title: ch.title,
                     paragraphs: ch.paragraphs,
                     ...(typeof tocLevel === "number" ? { tocLevel } : {}),
+                    ...(Array.isArray(paragraphStyles) ? { paragraphStyles } : {}),
+                    ...(Array.isArray(paragraphSpans) ? { paragraphSpans } : {}),
                 };
             });
 

@@ -2,6 +2,7 @@
 
 import { buildReadingImageMarker, parseReadingImageMarker } from "./reading-inline-image";
 import { READING_INLINE_IMAGE_MAX_SIZE, compressReadingImage } from "./reading-image";
+import type { ReadingBlockStyle, ReadingInlineSpan } from "./reading-types";
 
 // ── PDF.js CDN loader ──
 const PDFJS_VERSION = "3.11.174"; // stable version available on cdnjs
@@ -40,6 +41,10 @@ export type ParsedChapter = {
     paragraphs: string[];
     /** 目录层级：0 = 顶层。来自 EPUB 自带的目录（nav / NCX），没有目录时不给。 */
     tocLevel?: number;
+    /** 原书排版：与 paragraphs 一一对应的块级样式（只有 EPUB/MOBI 且书里确实带了样式时才有） */
+    paragraphStyles?: (ReadingBlockStyle | null)[];
+    /** 原书排版：与 paragraphs 一一对应的行内样式区间 */
+    paragraphSpans?: (ReadingInlineSpan[] | null)[];
 };
 
 export type ParsedBook = {
@@ -610,14 +615,16 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
         if (!html) continue;
 
         // Extract text from HTML
-        const { title, paragraphs, imageSrcs } = extractTextFromHtml(html);
-        if (paragraphs.length === 0) continue;
+        const extracted = extractTextFromHtml(html);
+        if (extracted.paragraphs.length === 0) continue;
 
-        let finalParagraphs = paragraphs;
-        if (imageSrcs && imageSrcs.length > 0) {
+        let finalParagraphs = extracted.paragraphs;
+        let paragraphStyles = extracted.paragraphStyles;
+        let paragraphSpans = extracted.paragraphSpans;
+        if (extracted.imageSrcs && extracted.imageSrcs.length > 0) {
             const chapterDir = filePath.includes("/") ? filePath.substring(0, filePath.lastIndexOf("/") + 1) : "";
             const localToGlobal = new Map<number, number>();
-            imageSrcs.forEach((src, localIndex) => {
+            extracted.imageSrcs.forEach((src, localIndex) => {
                 const resolved = normalizeTocHref(src, chapterDir);
                 if (!resolved) return;
                 let globalIndex = imagePathToIndex.get(resolved);
@@ -628,20 +635,27 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
                 }
                 localToGlobal.set(localIndex, globalIndex);
             });
-            finalParagraphs = paragraphs.map((paragraph) => {
+            const mapped = extracted.paragraphs.map((paragraph) => {
                 const marker = parseReadingImageMarker(paragraph);
                 if (!marker) return paragraph;
                 const globalIndex = localToGlobal.get(marker.index);
                 return globalIndex === undefined ? "" : buildReadingImageMarker(globalIndex);
-            }).filter((paragraph) => paragraph !== "");
+            });
+            // 样式/行内数组和 paragraphs 是按下标对齐的，段落被剔掉时必须用同一张掩码一起裁
+            const keepMask = mapped.map((paragraph) => paragraph !== "");
+            finalParagraphs = mapped.filter((paragraph) => paragraph !== "");
+            paragraphStyles = maskParagraphList(paragraphStyles, keepMask);
+            paragraphSpans = maskParagraphList(paragraphSpans, keepMask);
             if (finalParagraphs.length === 0) continue;
         }
 
         const fromToc = tocByPath.get(normalizeTocHref(href, rootDir));
         chapters.push({
-            title: fromToc?.label || title || `第${chapters.length + 1}章`,
+            title: fromToc?.label || extracted.title || `第${chapters.length + 1}章`,
             paragraphs: finalParagraphs,
             ...(fromToc ? { tocLevel: fromToc.level } : {}),
+            ...(paragraphStyles ? { paragraphStyles } : {}),
+            ...(paragraphSpans ? { paragraphSpans } : {}),
         });
     }
 
@@ -661,13 +675,22 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
     if (images.length > 0 || droppedImages.size > 0) {
         const sizeByIndex = new Map(images.map((image) => [image.index, image]));
         for (const chapter of chapters) {
-            chapter.paragraphs = chapter.paragraphs.map((paragraph) => {
+            const mapped = chapter.paragraphs.map((paragraph) => {
                 const marker = parseReadingImageMarker(paragraph);
                 if (!marker) return paragraph;
                 if (droppedImages.has(marker.index)) return "";
                 const image = sizeByIndex.get(marker.index);
                 return buildReadingImageMarker(marker.index, image?.width ?? 0, image?.height ?? 0);
-            }).filter((paragraph) => paragraph !== "");
+            });
+            // 被丢掉的插图段落会把后面的下标整体前移，样式数组必须跟着裁
+            const keepMask = mapped.map((paragraph) => paragraph !== "");
+            chapter.paragraphs = mapped.filter((paragraph) => paragraph !== "");
+            if (chapter.paragraphStyles) {
+                chapter.paragraphStyles = maskParagraphList(chapter.paragraphStyles, keepMask);
+            }
+            if (chapter.paragraphSpans) {
+                chapter.paragraphSpans = maskParagraphList(chapter.paragraphSpans, keepMask);
+            }
         }
     }
 
@@ -691,9 +714,14 @@ export async function parseMobiFile(arrayBuffer: ArrayBuffer, fileName?: string)
 
     const chapters: ParsedChapter[] = [];
     for (const piece of pieces) {
-        const { title: pieceTitle, paragraphs } = extractTextFromHtml(piece);
-        if (paragraphs.length === 0) continue;
-        chapters.push({ title: pieceTitle || `第${chapters.length + 1}章`, paragraphs });
+        const extracted = extractTextFromHtml(piece);
+        if (extracted.paragraphs.length === 0) continue;
+        chapters.push({
+            title: extracted.title || `第${chapters.length + 1}章`,
+            paragraphs: extracted.paragraphs,
+            ...(extracted.paragraphStyles ? { paragraphStyles: extracted.paragraphStyles } : {}),
+            ...(extracted.paragraphSpans ? { paragraphSpans: extracted.paragraphSpans } : {}),
+        });
     }
 
     // 没有分页符（或只切出一块）时退回 TXT 那套标题启发式，别让整本书挤成一章
@@ -716,23 +744,240 @@ const BLOCK_TAGS = new Set([
     "H1", "H2", "H3", "H4", "H5", "H6",
 ]);
 
-/** 插图标记可能和文字挤在同一个块里（典型是 <figure> 里图配图注）。
- *  把标记切出来单独成段，图和文字都不会丢；顺带保证标记绝不会混进正文文字里
- *  ——那样既会显示成一个怪符号，也会被当成正文送进模型。 */
-function pushParagraphWithImages(paragraphs: string[], text: string): void {
+// ── 原书排版提取（EPUB / MOBI） ──
+//
+// 为什么只取「语义档位」而不是原书 CSS：
+// 批注、划线、双语、书签全部按「章序号 + 段序号 + 段内字符区间」定位文字，
+// 行元素还要带 data-charstart 供选区换算（见 reading-selection.ts）。
+// 若把原书 CSS 交给浏览器自由执行，多列布局会让同一个文本节点横跨两栏、
+// 浮动/绝对定位会让视觉顺序偏离 DOM 顺序、伪元素的 content 会在选中区里混进
+// 幽灵字符——三种情况都会让字符偏移算错，批注就会指到别处。
+// 所以这里和微信读书同一套思路：只取标题层级、对齐、缩进、引用、题记、脚注、
+// 行内强调这些语义样式，而且一律不新增/删除字符，字符锚点因此始终稳定。
+
+const HEADING_LEVEL_BY_TAG: Record<string, number> = { H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6 };
+
+/** 把 style="..." 拆成声明表。只认下面会用到的几个属性，不做完整 CSS 解析——
+ *  原书真正的样式表（CSS 文件 / class）我们一概不执行，理由见上面那段注释。 */
+function readStyleDeclarations(el: Element): Record<string, string> {
+    const raw = el.getAttribute("style");
+    if (!raw) return {};
+    const out: Record<string, string> = {};
+    for (const piece of raw.split(";")) {
+        const sep = piece.indexOf(":");
+        if (sep <= 0) continue;
+        const key = piece.slice(0, sep).trim().toLowerCase();
+        const value = piece.slice(sep + 1).trim().toLowerCase();
+        if (key && value) out[key] = value;
+    }
+    return out;
+}
+
+/** 行内标签 / 行内 style → 强调位。返回 null 表示这个标签不改样式。 */
+function inlineStyleForTag(tag: string, decls: Record<string, string>): Omit<ReadingInlineSpan, "start" | "end"> | null {
+    const style: Omit<ReadingInlineSpan, "start" | "end"> = {};
+    if (tag === "B" || tag === "STRONG") style.bold = true;
+    else if (tag === "I" || tag === "EM" || tag === "CITE" || tag === "DFN" || tag === "VAR") style.italic = true;
+    else if (tag === "U" || tag === "INS") style.underline = true;
+    else if (tag === "S" || tag === "STRIKE" || tag === "DEL") style.strike = true;
+    else if (tag === "SUP") style.sup = true;
+    else if (tag === "SUB") style.sub = true;
+
+    const weight = decls["font-weight"] || "";
+    if (/(bold|bolder|[6-9]00)/.test(weight)) style.bold = true;
+    const fontStyle = decls["font-style"] || "";
+    if (fontStyle === "italic" || fontStyle === "oblique") style.italic = true;
+    const decoration = `${decls["text-decoration"] || ""} ${decls["text-decoration-line"] || ""}`;
+    if (/underline/.test(decoration)) style.underline = true;
+    if (/line-through/.test(decoration)) style.strike = true;
+
+    return Object.keys(style).length > 0 ? style : null;
+}
+
+/** 原书给这个块下的语义样式；什么都没看出来就返回 null（这段照旧用统一排版渲染）。 */
+function detectBlockStyle(el: Element): ReadingBlockStyle | null {
+    const style: ReadingBlockStyle = {};
+    const tag = el.tagName;
+    const decls = readStyleDeclarations(el);
+    const hints = `${el.getAttribute("class") || ""} ${el.getAttribute("id") || ""}`.toLowerCase();
+
+    const heading = HEADING_LEVEL_BY_TAG[tag];
+    if (heading) style.heading = heading;
+    if (tag === "BLOCKQUOTE") style.quote = true;
+
+    // epub:type 是最权威的语义提示，优先信它
+    const epubType = `${el.getAttribute("epub:type") || ""} ${el.getAttribute("type") || ""}`.toLowerCase();
+    if (/\b(footnote|endnote|rearnote)\b/.test(epubType)) style.footnote = true;
+    if (/\b(epigraph|dedication|subtitle)\b/.test(epubType)) style.epigraph = true;
+    if (/\b(titlepage|copyright-page|halftitlepage|colophon)\b/.test(epubType)) style.align = "center";
+
+    const align = decls["text-align"] || "";
+    if (align === "center" || align === "right") style.align = align;
+    else if (!style.align && /\b(center|centered|text-center|align-center|title-?page|book-?title)\b/.test(hints)) style.align = "center";
+
+    const indentDecl = decls["text-indent"];
+    if (indentDecl !== undefined) {
+        const amount = parseFloat(indentDecl);
+        if (Number.isFinite(amount)) {
+            if (amount < 0) {
+                // 负缩进 = 首行悬挂（对话排版常见），按不缩进处理，别把整段推出去
+                style.indent = 0;
+            } else if (/em|rem|ch/.test(indentDecl)) {
+                style.indent = amount >= 0.8 ? Math.min(4, Math.round(amount)) : 0;
+            } else if (/px|pt|pc/.test(indentDecl)) {
+                style.indent = amount >= 12 ? Math.min(4, Math.max(1, Math.round(amount / 16))) : 0;
+            } else {
+                style.indent = amount >= 0.8 ? Math.min(4, Math.round(amount)) : 0;
+            }
+        }
+    } else if (/\b(no-?indent|indent-?0|flush)\b/.test(hints)) {
+        style.indent = 0;
+    } else if (/\bindent/.test(hints)) {
+        style.indent = 2;
+    }
+
+    if (decls["font-weight"] && /(bold|bolder|[6-9]00)/.test(decls["font-weight"])) style.bold = true;
+    if (decls["font-style"] === "italic" || decls["font-style"] === "oblique") style.italic = true;
+    if (tag === "B" || tag === "STRONG") style.bold = true;
+    if (/\b(bold|strong)\b/.test(hints)) style.bold = true;
+    if (/\b(italic|emphasis)\b/.test(hints)) style.italic = true;
+    // 整段引用：只有标签或 class 明确写了才认，别把「缩进」当成「引用」
+    if (!style.quote && /\b(blockquote|quotation|epigraph-text)\b/.test(hints)) style.quote = true;
+
+    return Object.keys(style).length > 0 ? style : null;
+}
+
+/** 逐字符累积一块的正文；span 的区间用「当前已累计的字符数」记，天然对齐最终文字。 */
+type InlineAccumulator = {
+    chars: string[];
+    spans: ReadingInlineSpan[];
+};
+
+/** 追加一段文本节点的内容。空白按 HTML 语义折叠成单个空格，
+ *  紧跟空格/换行之后的空白丢掉，免得缩进排版带出多余空格。 */
+function appendText(acc: InlineAccumulator, raw: string): void {
+    if (!raw) return;
+    const last = acc.chars[acc.chars.length - 1];
+    let text = raw.replace(/\s+/g, " ");
     if (!text) return;
-    if (!text.includes("\uFFFC")) { paragraphs.push(text); return; }
-    for (const piece of text.split(/(\uFFFCimg:\d+(?::\d+x\d+)?)/)) {
-        const trimmed = piece.trim();
-        if (trimmed) paragraphs.push(trimmed);
+    if ((acc.chars.length === 0 || last === " " || last === "\n") && text.startsWith(" ")) text = text.slice(1);
+    if (!text) return;
+    // 按下标逐「码元」入栈，不用 for...of：后者按码点迭代，代理对（生僻字/emoji）
+    // 会被算成一个元素，行内样式的区间就会和最终文字的 length 对不上、整段偏移。
+    for (let i = 0; i < text.length; i += 1) acc.chars.push(text[i]);
+}
+
+/** <br> → 段内换行。段落里允许出现 \n（TXT 的段落本来也是这么存的），
+ *  分页与选区换算都已经按「\n 也占一个字符」处理，所以这里直接落进文字即可。 */
+function appendLineBreak(acc: InlineAccumulator): void {
+    if (acc.chars.length === 0) return;
+    if (acc.chars[acc.chars.length - 1] === " ") acc.chars.pop();
+    if (acc.chars.length === 0) return;
+    if (acc.chars[acc.chars.length - 1] === "\n") return;
+    acc.chars.push("\n");
+}
+
+function walkInline(acc: InlineAccumulator, node: Node): void {
+    if (node.nodeType === 3) { appendText(acc, node.nodeValue || ""); return; }
+    if (node.nodeType !== 1) return;
+    const el = node as Element;
+    const tag = el.tagName;
+    // 注音只留被注的字，丢掉 <rt> 的拼音/<rp> 的括号——否则正文里会粘出一串拼音
+    if (tag === "RT" || tag === "RP") return;
+    if (tag === "SCRIPT" || tag === "STYLE") return;
+    if (tag === "BR") { appendLineBreak(acc); return; }
+    // 插图已被换成占位标记；残留的图片元素不产出文字
+    if (tag === "IMG" || tag === "IMAGE") return;
+
+    const style = inlineStyleForTag(tag, readStyleDeclarations(el));
+    const start = acc.chars.length;
+    for (const child of Array.from(el.childNodes)) walkInline(acc, child);
+    if (style && acc.chars.length > start) {
+        acc.spans.push({ start, end: acc.chars.length, ...style });
     }
 }
+
+/** 收尾：压掉连续空白/换行、去掉首尾空白，并把 span 的偏移同步换算过去。
+ *  换算靠一张「原始位置 → 归一化位置」的映射表，保证 span 与最终文字严格对齐
+ *  （这是批注锚点能不能落准的前提）。 */
+function finalizeInline(acc: InlineAccumulator): { text: string; spans: ReadingInlineSpan[] } {
+    const out: string[] = [];
+    const map: number[] = new Array(acc.chars.length);
+    for (let i = 0; i < acc.chars.length; i += 1) {
+        const ch = acc.chars[i];
+        const last = out[out.length - 1];
+        if (ch === "\n") {
+            if (out.length === 0) { map[i] = 0; continue; }
+            if (last === "\n") { map[i] = out.length - 1; continue; }
+            if (last === " ") out.pop();
+            out.push("\n");
+            map[i] = out.length - 1;
+            continue;
+        }
+        if (ch === " ") {
+            if (out.length === 0 || last === " " || last === "\n") {
+                map[i] = Math.max(0, out.length - 1);
+                continue;
+            }
+            out.push(" ");
+            map[i] = out.length - 1;
+            continue;
+        }
+        out.push(ch);
+        map[i] = out.length - 1;
+    }
+    while (out.length > 0 && (out[out.length - 1] === " " || out[out.length - 1] === "\n")) out.pop();
+
+    const text = out.join("");
+    const translate = (index: number): number => {
+        if (acc.chars.length === 0) return 0;
+        const clamped = Math.max(0, Math.min(acc.chars.length - 1, index));
+        const mapped = map[clamped];
+        return Math.max(0, Math.min(text.length, mapped === undefined ? text.length : mapped));
+    };
+
+    const spans: ReadingInlineSpan[] = [];
+    for (const span of acc.spans) {
+        const start = translate(span.start);
+        // end 是开区间，用「末字符的落点 + 1」换算，避免结尾被折叠时把区间算长
+        const end = Math.max(start, Math.min(text.length, translate(span.end - 1) + 1));
+        if (end <= start) continue;
+        spans.push({ ...span, start, end });
+    }
+    return { text, spans };
+}
+
+/** 段落被（插图标记等）过滤掉若干条后，与它并行的样式/行内数组要跟着同一张掩码裁，
+ *  否则下标会整体错位——那样批注和样式就全指到别的段落上去了。 */
+function maskParagraphList<T>(list: T[] | undefined, mask: boolean[]): T[] | undefined {
+    if (!Array.isArray(list)) return undefined;
+    return list.filter((_, index) => mask[index] !== false);
+}
+
+/** 一个叶子块的产物：正文 + 行内样式 + 块级样式。
+ *  插图标记和文字挤在同一块里时标记单独成段（和改动前一致），这时丢掉 spans 免得错位。 */
+type ExtractedBlock = {
+    text: string;
+    spans: ReadingInlineSpan[];
+    style: ReadingBlockStyle | null;
+};
+
+/** extractTextFromDom 的产物。两个样式数组与 paragraphs 一一对应，
+ *  只在书里确实带了样式时才给（不给就让渲染层走原来的统一排版）。 */
+type ExtractedDom = {
+    title: string;
+    paragraphs: string[];
+    paragraphStyles?: (ReadingBlockStyle | null)[];
+    paragraphSpans?: (ReadingInlineSpan[] | null)[];
+    imageSrcs?: string[];
+};
 
 /** 正文提取（DOM 版）。
  *  正则版遇到嵌套块（<div><p>…</p></div>）会错位，且去标签时不插分隔符，
  *  相邻的行内元素会被粘成一坨（目录里的「八 革职」+「1」变成「八 革职1」）。
- *  这里只取「叶子块」——本身不再包含块级后代的元素——避免父块和子块各产出一次。 */
-function extractTextFromDom(html: string): { title: string; paragraphs: string[]; imageSrcs?: string[] } | null {
+ *  这里只取「叶子块」——本身不再包含块级后代的元素——避免父块和子块各产出一次。
+ *  每个块顺带取走原书的语义样式（detectBlockStyle）与行内强调（walkInline）。 */
+function extractTextFromDom(html: string): ExtractedDom | null {
     if (typeof DOMParser === "undefined") return null;
     let doc: Document;
     try {
@@ -765,8 +1010,43 @@ function extractTextFromDom(html: string): { title: string; paragraphs: string[]
         imageSrcs.push(src.trim());
     });
 
-    const paragraphs: string[] = [];
+    const blocks: ExtractedBlock[] = [];
     const seenHeading = { done: false };
+
+    /** 一块正文入列。图片标记和文字挤在同一块里时标记单独成段（和改动前一致：
+     *  标记绝不能混进正文文字——那样既会显示成一个怪符号，也会被当成正文送进模型），
+     *  这时行内样式的区间已经跟文字对不上了，丢掉 spans 比错位安全。 */
+    const pushBlock = (text: string, spans: ReadingInlineSpan[], style: ReadingBlockStyle | null) => {
+        if (!text) return;
+        if (!text.includes("\uFFFC")) {
+            blocks.push({ text, spans, style });
+            return;
+        }
+        for (const piece of text.split(/(\uFFFCimg:\d+(?::\d+x\d+)?)/)) {
+            const trimmed = piece.trim();
+            if (!trimmed) continue;
+            blocks.push({
+                text: trimmed,
+                spans: [],
+                // 插图占位自己不带样式；后面的段落保留原块样式
+                style: parseReadingImageMarker(trimmed) ? null : style,
+            });
+        }
+    };
+
+    const readBlock = (node: Element, style: ReadingBlockStyle | null) => {
+        const acc: InlineAccumulator = { chars: [], spans: [] };
+        for (const child of Array.from(node.childNodes)) walkInline(acc, child);
+        const { text, spans } = finalizeInline(acc);
+        if (!text) return;
+        // 章节标题已经单独拿出来当章名了，正文里再出现一次就是重复
+        if (!seenHeading.done && node === heading && text === title) {
+            seenHeading.done = true;
+            return;
+        }
+        pushBlock(text, spans, style);
+    };
+
     const visit = (node: Element) => {
         const hasBlockChild = Array.from(node.children).some((child) => BLOCK_TAGS.has(child.tagName));
         if (hasBlockChild) {
@@ -775,27 +1055,32 @@ function extractTextFromDom(html: string): { title: string; paragraphs: string[]
             });
             return;
         }
-        const text = normalizeInlineText(node.textContent || "");
-        if (!text) return;
-        // 章节标题已经单独拿出来当章名了，正文里再出现一次就是重复
-        if (!seenHeading.done && node === heading && text === title) {
-            seenHeading.done = true;
-            return;
-        }
-        pushParagraphWithImages(paragraphs, text);
+        readBlock(node, detectBlockStyle(node));
     };
     Array.from(body.children).forEach((child) => {
         if (BLOCK_TAGS.has(child.tagName)) visit(child);
-        else {
-            pushParagraphWithImages(paragraphs, normalizeInlineText(child.textContent || ""));
-        }
+        else readBlock(child, null);
     });
 
-    if (paragraphs.length === 0) {
+    if (blocks.length === 0) {
         const plain = normalizeInlineText(body.textContent || "");
-        if (plain) paragraphs.push(plain);
+        if (plain) blocks.push({ text: plain, spans: [], style: null });
     }
-    return { title, paragraphs, imageSrcs };
+
+    // 一个带样式的块都没有（纯文本型 EPUB）时不给这套数组，渲染层直接走原来的
+    // 统一排版，表现与改动前完全一致。
+    const hasStyle = blocks.some((block) => block.style !== null || block.spans.length > 0);
+    return {
+        title,
+        paragraphs: blocks.map((block) => block.text),
+        imageSrcs,
+        ...(hasStyle
+            ? {
+                paragraphStyles: blocks.map((block) => block.style),
+                paragraphSpans: blocks.map((block) => (block.spans.length > 0 ? block.spans : null)),
+            }
+            : {}),
+    };
 }
 
 /** 行内文本归一：把标签间的换行/缩进压成单空格，但不吞掉正常的词间空格。 */
@@ -804,7 +1089,7 @@ function normalizeInlineText(value: string): string {
 }
 
 /** Extract readable text from HTML/XHTML content. */
-function extractTextFromHtml(html: string): { title: string; paragraphs: string[]; imageSrcs?: string[] } {
+function extractTextFromHtml(html: string): ExtractedDom {
     const fromDom = extractTextFromDom(html);
     if (fromDom && fromDom.paragraphs.length > 0) return fromDom;
 

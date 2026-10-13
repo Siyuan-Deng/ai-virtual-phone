@@ -44,7 +44,7 @@ import { Select, Toggle } from "@/components/ui/form";
 import { PdfPageRenderer } from "./reading-pdf-viewer";
 import { ReadingShareDialog } from "./reading-share-dialog";
 import { decodeTxtArrayBuffer, parsePdfPageRange, PDF_PAGES_PER_CHAPTER, parseTxtContent, parseEpubFile, parseMobiFile } from "@/lib/reading-parser";
-import type { Book, BookChapter, ReadingAnnotation, ReadingProgress } from "@/lib/reading-types";
+import type { Book, BookChapter, ReadingAnnotation, ReadingProgress, ReadingBlockStyle, ReadingInlineSpan } from "@/lib/reading-types";
 import type { Character } from "@/lib/character-types";
 import { splitBilingualText } from "@/lib/bilingual-text";
 import {
@@ -54,9 +54,35 @@ import {
 } from "@/lib/reading-inline-image";
 import { loadReadingAsset } from "@/lib/reading-appearance";
 
+/** 一行要用的原书排版信息；只在「还原原书排版」开着、且这本书带样式数据时才有值。 */
+type LineBlockStyle = {
+    /** 字号倍率（相对全局字号） */
+    scale: number;
+    align?: "center" | "right";
+    bold: boolean;
+    italic: boolean;
+    quote: boolean;
+    footnote: boolean;
+    /** 首行缩进几个字（滚动模式靠它决定要不要缩进） */
+    indentChars: number;
+    /** 段内行内样式区间（加粗/斜体/下划线/上下标）；下标相对整段文字的位置 */
+    spans: ReadingInlineSpan[] | null;
+};
+
 type TxtPageItem =
-    | { kind: "line"; text: string; chapterIndex: number; paragraphIndex: number; indent?: boolean; segEnd?: boolean; charStart?: number }
-    | { kind: "gap"; chapterIndex: number; paragraphIndex: number }
+    | {
+        kind: "line";
+        text: string;
+        chapterIndex: number;
+        paragraphIndex: number;
+        indent?: boolean;
+        segEnd?: boolean;
+        charStart?: number;
+        /** 这一行占多高（px）。还原原书排版时逐行不同（标题比正文大），分页按它累计 */
+        lineHeight?: number;
+        block?: LineBlockStyle;
+    }
+    | { kind: "gap"; chapterIndex: number; paragraphIndex: number; height?: number }
     | { kind: "image"; image: ReadingImageRef; chapterIndex: number; paragraphIndex: number }
     | { kind: "annotation"; annotation: ReadingAnnotation; chapterIndex: number; paragraphIndex: number };
 
@@ -192,6 +218,146 @@ function wrapTextToLines(text: string, maxWidth: number, ctx: CanvasRenderingCon
 
     if (current) lines.push(current);
     return lines.length > 0 ? lines : [""];
+}
+
+/** 引用块的左内缩（含左侧竖线的宽度）。分页按它收窄正文宽度，
+ *  CSS 里 padding-left + border-left 必须等于同一个数，否则排版和渲染会对不上。
+ *  导出去给 reading-app 注入样式用，避免两处各写一个数。 */
+export const QUOTE_INSET_PX = 21;
+/** 中文书的首行缩进档位：原书没给缩进信息时，沿用改动前的「缩进两个字」。 */
+const DEFAULT_BLOCK_INDENT = 2;
+
+/** 逐字字体折行：原书排版下同一行里可能有加粗/斜体片段，
+ *  按每个字符自己的字体量宽度，行内强调才会被算进行长，
+ *  否则加粗的那几行会溢出容器或者提前折行，整页都会错位。 */
+function wrapTextToLinesRuns(
+    text: string,
+    maxWidth: number,
+    ctx: CanvasRenderingContext2D,
+    firstLineOffset: number,
+    baseFont: string,
+    fontAt: (index: number) => string,
+): string[] {
+    if (!text) return [""];
+
+    const lines: string[] = [];
+    let current = "";
+    let lineIndex = 0;
+    let width = 0;
+
+    Array.from(text).forEach((char, index) => {
+        const font = fontAt(index) || baseFont;
+        ctx.font = font;
+        const charWidth = ctx.measureText(char).width;
+        const limit = lineIndex === 0 ? Math.max(1, maxWidth - firstLineOffset) : maxWidth;
+        if (current && width + charWidth > limit) {
+            lines.push(current);
+            current = char;
+            width = charWidth;
+            lineIndex += 1;
+        } else {
+            current += char;
+            width += charWidth;
+        }
+    });
+
+    if (current) lines.push(current);
+    return lines.length > 0 ? lines : [""];
+}
+
+/** 一行的排版参数（px 全部按当前字号/行距算好，分页与渲染共用同一套数）。 */
+type BlockMetrics = {
+    fontSize: number;
+    lineHeight: number;
+    scale: number;
+    bold: boolean;
+    italic: boolean;
+    /** 首行缩进几个字；0 = 不缩进 */
+    indentChars: number;
+    quote: boolean;
+    footnote: boolean;
+    align?: "center" | "right";
+};
+
+/** 原书标题级别 → 字号倍率。h1 最大，h5/h6 基本等于正文（原书里它们常靠加粗区分）。 */
+function blockScaleFor(style: ReadingBlockStyle | null): number {
+    if (!style) return 1;
+    if (style.heading) {
+        const scales = [1.55, 1.32, 1.18, 1.1, 1.02, 1.02];
+        return scales[Math.min(scales.length - 1, Math.max(0, style.heading - 1))];
+    }
+    if (style.epigraph) return 0.94;
+    if (style.quote) return 0.96;
+    if (style.footnote) return 0.82;
+    return 1;
+}
+
+/** 把一个块的语义样式翻成排版参数。
+ *  没样式（null）= 用改动前那套：首行缩进两字、字号行距跟随全局设置。 */
+function resolveBlockMetrics(
+    style: ReadingBlockStyle | null,
+    baseFontSize: number,
+    baseLineHeight: number,
+): BlockMetrics {
+    const scale = blockScaleFor(style);
+    const centering = style?.align ?? (style?.epigraph ? "center" : undefined);
+    // 居中/右对齐、引用、题记、脚注、标题都不带首行缩进（原书里它们本来就不缩）
+    const noIndent = Boolean(style?.align || style?.heading || style?.quote || style?.epigraph || style?.footnote);
+    return {
+        fontSize: baseFontSize * scale,
+        lineHeight: baseLineHeight * scale,
+        scale,
+        bold: style?.bold ?? Boolean(style?.heading),
+        italic: style?.italic ?? false,
+        indentChars: noIndent ? 0 : (style?.indent ?? DEFAULT_BLOCK_INDENT),
+        quote: Boolean(style?.quote),
+        footnote: Boolean(style?.footnote),
+        ...(centering ? { align: centering } : {}),
+    };
+}
+
+/** 两段之间留多少空白。还原原书排版时按块的角色给：
+ *  标题上下留白最大、缩进段落贴紧（段落靠缩进区分）、没缩进的段落沿用原来的段间距。 */
+function blockGapHeight(prev: BlockMetrics, next: BlockMetrics, fallbackGap: number): number {
+    if (next.align === "center" && next.scale < 1) return Math.round(next.lineHeight * 0.5);
+    if (next.quote) return Math.round(next.lineHeight * 0.45);
+    if (next.footnote && !prev.footnote) return Math.round(next.lineHeight * 1.1);
+    if (prev.footnote && !next.footnote) return Math.round(next.lineHeight * 0.9);
+    if (next.scale > 1) return Math.round(next.lineHeight * 0.75);
+    if (prev.scale > 1) return Math.round(prev.lineHeight * 0.55);
+    return next.indentChars > 0 ? Math.round(next.lineHeight * 0.42) : fallbackGap;
+}
+
+/** 按块的排版参数拼 canvas 字体串，量宽必须和渲染用的是同一套字。 */
+function canvasFontFor(
+    metrics: Pick<BlockMetrics, "fontSize" | "bold" | "italic">,
+    parts: { style: string; variant: string; weight: string; family: string },
+): string {
+    return [
+        metrics.italic ? "italic" : parts.style,
+        parts.variant,
+        metrics.bold ? "700" : parts.weight,
+        `${metrics.fontSize}px`,
+        parts.family,
+    ].join(" ");
+}
+
+/** 段落内某个字符位置是否落在加粗/斜体的行内区间里（多处叠加取并集）。 */
+function inlineEmphasisAt(
+    spans: ReadingInlineSpan[] | null | undefined,
+    index: number,
+): { bold: boolean; italic: boolean } | null {
+    if (!spans || spans.length === 0) return null;
+    let bold = false;
+    let italic = false;
+    let hit = false;
+    for (const span of spans) {
+        if (index < span.start || index >= span.end) continue;
+        hit = true;
+        if (span.bold) bold = true;
+        if (span.italic) italic = true;
+    }
+    return hit ? { bold, italic } : null;
 }
 
 function ReadingLoadingView({
@@ -853,44 +1019,165 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         const hits = (marksByParagraph.get(`${item.chapterIndex}:${item.paragraphIndex}`) || [])
             .filter(mark => mark.start < lineEnd && mark.end > lineStart)
             .sort((a, b) => a.start - b.start);
-        if (hits.length === 0) return item.text;
+        const spans = item.block?.spans ?? null;
+        const hasEmphasis = Boolean(spans && spans.some(span => span.bold || span.italic || span.underline || span.strike || span.sup || span.sub));
 
-        const nodes: React.ReactNode[] = [];
-        let cursor = lineStart;
-        hits.forEach((mark, i) => {
-            const from = Math.max(cursor, mark.start);
-            const to = Math.min(lineEnd, mark.end);
-            if (from > cursor) nodes.push(item.text.slice(cursor - lineStart, from - lineStart));
-            if (to > from) {
-                nodes.push(
-                    <span
-                        key={`${mark.id}-${i}`}
-                        className="reading-mark"
-                        data-style={mark.style}
-                        data-author={mark.authorType === "character" ? "character" : "user"}
-                        data-mark-id={mark.id}
-                    >
-                        {item.text.slice(from - lineStart, to - lineStart)}
-                    </span>,
-                );
-                cursor = to;
+        // 常见情况：正文没有行内强调。走原来那条路——纯文本，只在有荧光笔/划线时切片。
+        if (!hasEmphasis) {
+            if (hits.length === 0) return item.text;
+
+            const nodes: React.ReactNode[] = [];
+            let cursor = lineStart;
+            hits.forEach((mark, i) => {
+                const from = Math.max(cursor, mark.start);
+                const to = Math.min(lineEnd, mark.end);
+                if (from > cursor) nodes.push(item.text.slice(cursor - lineStart, from - lineStart));
+                if (to > from) {
+                    nodes.push(
+                        <span
+                            key={`${mark.id}-${i}`}
+                            className="reading-mark"
+                            data-style={mark.style}
+                            data-author={mark.authorType === "character" ? "character" : "user"}
+                            data-mark-id={mark.id}
+                        >
+                            {item.text.slice(from - lineStart, to - lineStart)}
+                        </span>,
+                    );
+                    cursor = to;
+                }
+            });
+            if (cursor < lineEnd) nodes.push(item.text.slice(cursor - lineStart));
+            return nodes;
+        }
+
+        // 有行内强调：逐字算出「强调位 + 是否有荧光笔/划线」，同一种组合的连续字符合成一个
+        // 节点。强调只加样式、不增删字符，所以按码元下标走的字符锚点仍然准确。
+        type EmphasisFlags = { bold: boolean; italic: boolean; underline: boolean; strike: boolean; sup: boolean; sub: boolean };
+        type StyledRun = { text: string; emphasis: EmphasisFlags | null; mark: ReadingMark | null };
+        const runs: StyledRun[] = [];
+        let current: StyledRun | null = null;
+        let charIndex = 0;
+        for (const ch of Array.from(item.text)) {
+            const absolute = lineStart + charIndex;
+            let emphasis: EmphasisFlags | null = null;
+            for (const span of spans!) {
+                if (absolute < span.start || absolute >= span.end) continue;
+                if (!emphasis) emphasis = { bold: false, italic: false, underline: false, strike: false, sup: false, sub: false };
+                if (span.bold) emphasis.bold = true;
+                if (span.italic) emphasis.italic = true;
+                if (span.underline) emphasis.underline = true;
+                if (span.strike) emphasis.strike = true;
+                if (span.sup) emphasis.sup = true;
+                if (span.sub) emphasis.sub = true;
             }
+            const mark = hits.find(item2 => item2.start <= absolute && item2.end > absolute) || null;
+            const sameAsCurrent = current
+                && JSON.stringify(current.emphasis) === JSON.stringify(emphasis)
+                && (current.mark?.id ?? "") === (mark?.id ?? "");
+            if (sameAsCurrent) current!.text += ch;
+            else {
+                current = { text: ch, emphasis, mark };
+                runs.push(current);
+            }
+            charIndex += ch.length;
+        }
+
+        return runs.map((node, index) => {
+            const style: CSSProperties = {};
+            if (node.emphasis) {
+                if (node.emphasis.bold) style.fontWeight = 700;
+                if (node.emphasis.italic) style.fontStyle = "italic";
+                if (node.emphasis.underline) style.textDecoration = "underline";
+                if (node.emphasis.strike) {
+                    // 同时有下划线和删除线时合并成一条声明，别让后写的把先写的盖掉
+                    style.textDecoration = `${node.emphasis.underline ? "underline " : ""}line-through`;
+                }
+                // 上下标用 em 相对字号，跟着这一行的字号走（标题里的脚注编号也不会错位）
+                if (node.emphasis.sup) { style.fontSize = "0.7em"; style.verticalAlign = "super"; }
+                if (node.emphasis.sub) { style.fontSize = "0.7em"; style.verticalAlign = "sub"; }
+            }
+            if (!node.mark) {
+                return Object.keys(style).length > 0
+                    ? <span key={index} style={style}>{node.text}</span>
+                    : node.text;
+            }
+            return (
+                <span
+                    key={index}
+                    className="reading-mark"
+                    data-style={node.mark.style}
+                    data-author={node.mark.authorType === "character" ? "character" : "user"}
+                    data-mark-id={node.mark.id}
+                    style={Object.keys(style).length > 0 ? style : undefined}
+                >
+                    {node.text}
+                </span>
+            );
         });
-        if (cursor < lineEnd) nodes.push(item.text.slice(cursor - lineStart));
-        return nodes;
     };
 
-    const renderLine = (item: Extract<TxtPageItem, { kind: "line" }>, key: number) => (
-        <p
-            key={key}
-            className={`reading-line${item.indent ? " reading-line-indent" : ""}${item.segEnd ? " reading-line-seg-end" : ""}`}
-            data-chapter={item.chapterIndex}
-            data-paragraph={item.paragraphIndex}
-            data-charstart={item.charStart ?? 0}
-        >
-            {renderLineContent(item)}
-        </p>
-    );
+    const renderLine = (item: Extract<TxtPageItem, { kind: "line" }>, key: number) => {
+        const block = item.block;
+        const className = [
+            "reading-line",
+            item.indent ? "reading-line-indent" : "",
+            item.segEnd ? "reading-line-seg-end" : "",
+            block?.quote ? "reading-line-quote" : "",
+            block?.footnote ? "reading-line-footnote" : "",
+            block?.align ? `reading-line-${block.align}` : "",
+        ].filter(Boolean).join(" ");
+
+        const style: CSSProperties = {};
+        if (block) {
+            // 字号/行距按倍率缩放：翻页模式下分页就是按同一套数算的高度，
+            // 所以渲染必须严格照它出（行距直接用 px，避免字体四舍五入差异）。
+            if (Math.abs(block.scale - 1) > 0.001) {
+                style.fontSize = `calc(var(--reading-font-size, 20px) * ${block.scale})`;
+            }
+            if (block.bold) style.fontWeight = 700;
+            if (block.italic) style.fontStyle = "italic";
+        }
+        if (item.lineHeight && item.lineHeight > 0) style.lineHeight = `${item.lineHeight}px`;
+        if (block && item.indent && item.block?.indentChars !== undefined) {
+            style["--reading-block-indent" as "--reading-block-indent"] = `${block.indentChars}em`;
+        }
+
+        return (
+            <p
+                key={key}
+                className={className}
+                data-chapter={item.chapterIndex}
+                data-paragraph={item.paragraphIndex}
+                data-charstart={item.charStart ?? 0}
+                style={Object.keys(style).length > 0 ? style : undefined}
+            >
+                {renderLineContent(item)}
+            </p>
+        );
+    };
+
+    /** 滚动模式用的行样式：滚动模式下由浏览器自己排版，不需要量高度，
+     *  只要把倍率、对齐、缩进和行内样式交给 CSS 就够了。 */
+    const blockStyleAt = useCallback((chapter: BookChapter, index: number): LineBlockStyle | null => {
+        if (readingConfig.restoreOriginalLayout === false) return null;
+        const styles = chapter.paragraphStyles;
+        // 长度对不上说明这份数据不完整（老数据 / 被裁错过），宁可不还原
+        if (!Array.isArray(styles) || styles.length !== chapter.paragraphs.length) return null;
+        const style = styles[index] ?? null;
+        const align = style?.align ?? (style?.epigraph ? "center" : undefined);
+        const noIndent = Boolean(style?.align || style?.heading || style?.quote || style?.epigraph || style?.footnote);
+        return {
+            scale: blockScaleFor(style),
+            bold: style?.bold ?? Boolean(style?.heading),
+            italic: style?.italic ?? false,
+            quote: Boolean(style?.quote),
+            footnote: Boolean(style?.footnote),
+            indentChars: noIndent ? 0 : (style?.indent ?? DEFAULT_BLOCK_INDENT),
+            ...(align ? { align } : {}),
+            spans: chapter.paragraphSpans?.[index] ?? null,
+        };
+    }, [readingConfig.restoreOriginalLayout]);
 
     /** 一张正文插图。图还没读出来时先占住位置（有原始尺寸就按比例占），
      *  否则图片加载完会把正文顶得一跳一跳。 */
@@ -922,7 +1209,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                         </div>
                         : item.kind === "image"
                             ? renderImageItem(item.image, i)
-                            : <p key={i} className={`reading-line${item.indent ? " reading-line-indent" : ""}${item.segEnd ? " reading-line-seg-end" : ""}`}>{item.text}</p>
+                            : renderLine(item, i)
             )}
         </div>
     );
@@ -1019,6 +1306,9 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                             index,
                             title: chapter.title,
                             paragraphs: chapter.paragraphs,
+                            // 从原始文件重建时也要带上原书排版，否则重建一次样式就丢了
+                            ...(chapter.paragraphStyles ? { paragraphStyles: chapter.paragraphStyles } : {}),
+                            ...(chapter.paragraphSpans ? { paragraphSpans: chapter.paragraphSpans } : {}),
                         }));
                         if (rebuiltChapters.length > 0) {
                             await saveChapters(book.id, rebuiltChapters);
@@ -2296,7 +2586,6 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         const lineHeight = parseFloat(lineStyle.lineHeight || "0") || 30.4;
         const gapHeight = parseFloat(gapStyle.height || "0") || 20;
         const fontSize = parseFloat(lineStyle.fontSize || "0") || 16;
-        const indentWidth = fontSize * 2;
         const annotationMeasure = txtMeasureAnnotationRef.current;
         const annotationNameEl = annotationMeasure.querySelector(".reading-annotation-name") as HTMLElement | null;
         const annotationTextEl = annotationMeasure.querySelector(".reading-annotation-text") as HTMLElement | null;
@@ -2316,6 +2605,8 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             paragraphCharCount,
             annotationSignature,
             bilingualTranslationEnabled ? 1 : 0,
+            // 切换「还原原书排版」会改变逐行高度，必须触发重新分页
+            readingConfig.restoreOriginalLayout !== false ? 1 : 0,
             Math.round(maxWidth),
             Math.round(maxHeight),
             lineHeight,
@@ -2352,6 +2643,37 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         }
         ctx.font = toCanvasFont(lineStyle);
 
+        // 还原原书排版：这本书确实带样式数据、且用户没关掉这个开关时才走。
+        // 只要求样式数组长度对得上段落数——对不上说明数据是旧的或被裁错了，宁可不还原。
+        const restoreLayout = readingConfig.restoreOriginalLayout !== false
+            && Array.isArray(currentChapter.paragraphStyles)
+            && currentChapter.paragraphStyles.length === currentChapter.paragraphs.length;
+        const chapterStyles: (ReadingBlockStyle | null)[] | undefined = restoreLayout
+            ? currentChapter.paragraphStyles
+            : undefined;
+        const chapterSpans: (ReadingInlineSpan[] | null)[] | undefined = restoreLayout
+            ? currentChapter.paragraphSpans
+            : undefined;
+        const fontParts = {
+            style: lineStyle.fontStyle,
+            variant: lineStyle.fontVariant,
+            weight: lineStyle.fontWeight,
+            family: lineStyle.fontFamily,
+        };
+        /** 第 index 段的排版参数。没还原时等价于改动前那一套（首行缩进两字、统一字号行距）。 */
+        const metricsAt = (index: number): BlockMetrics => (
+            restoreLayout
+                ? resolveBlockMetrics(chapterStyles?.[index] ?? null, fontSize, lineHeight)
+                : {
+                    fontSize, lineHeight, scale: 1, bold: false, italic: false,
+                    indentChars: DEFAULT_BLOCK_INDENT, quote: false, footnote: false,
+                }
+        );
+        /** 第 index 段与下一段之间的空白。没还原时返回 undefined，渲染层用回原来的 gapHeight。 */
+        const gapAfter = (index: number): number | undefined => (
+            restoreLayout ? blockGapHeight(metricsAt(index), metricsAt(index + 1), gapHeight) : undefined
+        );
+
         const tokens: TxtPageItem[] = [];
         const annotationMap = new Map<number, ReadingAnnotation[]>();
         for (const annotation of chapterAnnotations) {
@@ -2362,20 +2684,78 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
 
         currentChapter.paragraphs.forEach((paragraph, index) => {
             const imageMarker = parseReadingImageMarker(paragraph);
+            const metrics = metricsAt(index);
+            const pushGapAfter = () => {
+                if (index >= currentChapter.paragraphs.length - 1) return;
+                const height = gapAfter(index);
+                tokens.push({
+                    kind: "gap",
+                    chapterIndex,
+                    paragraphIndex: index,
+                    ...(height !== undefined ? { height } : {}),
+                });
+            };
+
             if (imageMarker) {
                 tokens.push({ kind: "image", image: imageMarker, chapterIndex, paragraphIndex: index });
-                if (index < currentChapter.paragraphs.length - 1) tokens.push({ kind: "gap", chapterIndex, paragraphIndex: index });
+                pushGapAfter();
                 return;
             }
+
+            const blockFont = canvasFontFor(metrics, fontParts);
+            const spans = chapterSpans?.[index] ?? null;
+            // 只有段落里真有加粗/斜体片段时才逐字量宽；纯正文走原来那条快路径
+            const mixedEmphasis = Boolean(spans && spans.some((span) => span.bold || span.italic));
+            // 引用块左侧留出竖线的位置，折行宽度要同步收窄，否则文字会钻到竖线底下
+            const blockWidth = Math.max(1, maxWidth - (metrics.quote ? QUOTE_INSET_PX : 0));
+
             const segments = paragraph.split("\n");
-            // 段落内的字符游标：wrapTextToLines 不裁剪字符，各行拼接等于原段落，
+            // 段落内的字符游标：折行函数不裁剪字符，各行拼接等于原段落，
             // 所以逐行累加长度就能得到每行在段落中的起始偏移（荧光笔/划线按此定位）。
             let charCursor = 0;
             segments.forEach((segment, segmentIndex) => {
-                const shouldIndent = segmentIndex === 0;
-                const wrappedLines = wrapTextToLines(segment, maxWidth, ctx, shouldIndent ? indentWidth : 0);
+                const shouldIndent = segmentIndex === 0 && metrics.indentChars > 0;
+                const firstLineOffset = shouldIndent ? metrics.indentChars * metrics.fontSize : 0;
+                ctx.font = blockFont;
+                const wrappedLines = mixedEmphasis
+                    ? wrapTextToLinesRuns(segment, blockWidth, ctx, firstLineOffset, blockFont, (charIndex) => {
+                        const emphasis = inlineEmphasisAt(spans, charCursor + charIndex);
+                        if (!emphasis || (!emphasis.bold && !emphasis.italic)) return blockFont;
+                        return canvasFontFor(
+                            {
+                                fontSize: metrics.fontSize,
+                                bold: metrics.bold || emphasis.bold,
+                                italic: metrics.italic || emphasis.italic,
+                            },
+                            fontParts,
+                        );
+                    })
+                    : wrapTextToLines(segment, blockWidth, ctx, firstLineOffset);
                 wrappedLines.forEach((line, lineIndex) => {
-                    tokens.push({ kind: "line", text: line, chapterIndex, paragraphIndex: index, indent: shouldIndent && lineIndex === 0, segEnd: lineIndex === wrappedLines.length - 1, charStart: charCursor });
+                    tokens.push({
+                        kind: "line",
+                        text: line,
+                        chapterIndex,
+                        paragraphIndex: index,
+                        indent: shouldIndent && lineIndex === 0,
+                        segEnd: lineIndex === wrappedLines.length - 1,
+                        charStart: charCursor,
+                        ...(restoreLayout
+                            ? {
+                                lineHeight: metrics.lineHeight,
+                                block: {
+                                    scale: metrics.scale,
+                                    bold: metrics.bold,
+                                    italic: metrics.italic,
+                                    quote: metrics.quote,
+                                    footnote: metrics.footnote,
+                                    indentChars: metrics.indentChars,
+                                    ...(metrics.align ? { align: metrics.align } : {}),
+                                    spans,
+                                },
+                            }
+                            : {}),
+                    });
                     charCursor += line.length;
                 });
                 if (segmentIndex < segments.length - 1) charCursor += 1; // 被 split 掉的 \n
@@ -2385,7 +2765,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             for (const annotation of paragraphAnnotations) {
                 tokens.push({ kind: "annotation", annotation, chapterIndex, paragraphIndex: index });
             }
-            if (index < currentChapter.paragraphs.length - 1) tokens.push({ kind: "gap", chapterIndex, paragraphIndex: index });
+            pushGapAfter();
         });
 
         const pages: TxtPageItem[][] = [];
@@ -2404,12 +2784,12 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
 
         for (const token of tokens) {
             const tokenHeight = token.kind === "gap"
-                ? gapHeight
+                ? (token.height ?? gapHeight)
                 : token.kind === "annotation"
                     ? measureAnnotationHeight(token.annotation)
                     : token.kind === "image"
                         ? measureImageHeight(token.image)
-                        : lineHeight;
+                        : (token.lineHeight ?? lineHeight);
             if (token.kind === "gap" && currentPage.length === 0) continue;
 
             if (currentPage.length > 0 && usedHeight + tokenHeight > maxHeight) {
@@ -2430,7 +2810,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         lastTxtPaginationSignatureRef.current = paginationSignature;
         setImageMaxHeight((prev) => (prev === maxHeight ? prev : maxHeight));
         setTxtPages(pages);
-    }, [annotations, bilingualTranslationEnabled, chapterIndex, currentChapter, isAnnotationTranslationExpanded, isPdf, isScrollMode, txtLayoutVersion]);
+    }, [annotations, bilingualTranslationEnabled, chapterIndex, currentChapter, isAnnotationTranslationExpanded, isPdf, isScrollMode, readingConfig.restoreOriginalLayout, txtLayoutVersion]);
 
     const txtTotalPages = txtPagesReadyForCurrentChapter ? txtPages.length : 1;
 
@@ -2942,6 +3322,9 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                                         );
                                     }
                                     const segmentCount = paragraph.split("\n").length;
+                                    // 还原原书排版时，首行缩进跟随这一段自己的档位（居中/引用/标题不缩进）
+                                    const block = blockStyleAt(chapter, pIndex);
+                                    const shouldIndent = block ? block.indentChars > 0 : true;
                                     const paragraphAnnotations = annotations.filter(
                                         (annotation) => annotation.chapterIndex === chapter.index && annotation.paragraphIndex === pIndex
                                     );
@@ -2957,9 +3340,10 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                                                         text: segment,
                                                         chapterIndex: chapter.index,
                                                         paragraphIndex: pIndex,
-                                                        indent: true,
+                                                        indent: shouldIndent && sIndex === 0,
                                                         segEnd: sIndex === segmentCount - 1,
                                                         charStart,
+                                                        ...(block ? { block } : {}),
                                                     }, sIndex);
                                                 });
                                             })()}
