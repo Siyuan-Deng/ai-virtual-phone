@@ -61,6 +61,9 @@ export type BookChapter = {
     paragraphStyles?: (ReadingBlockStyle | null)[];
     /** EPUB 原书排版：与 paragraphs 一一对应的行内样式区间 */
     paragraphSpans?: (ReadingInlineSpan[] | null)[];
+    /** 嵌在句子里的行内小图（脚注角标、装饰符这类）：与 paragraphs 一一对应，
+     *  每项按出现顺序给出该段每个占位字符对应的全书插图序号，null = 该段没有。 */
+    paragraphInlineImages?: (number[] | null)[];
     /** PDF only: synthetic page chunk start (1-based) */
     pageStart?: number;
     /** PDF only: synthetic page chunk end (1-based) */

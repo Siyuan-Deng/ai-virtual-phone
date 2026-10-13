@@ -7708,6 +7708,24 @@
   color: var(--reading-warm-ink-tertiary, #999);
 }
 
+/* 行内小图（脚注角标、装饰符这类嵌在句子里的图）。
+   高度死死卡在 1em：分页是按「一行 = 一个行高」算的，小图一旦把行撑高，
+   那一页就会比算出来的多出几行、末尾溢出屏幕。宽度跟着原图比例走。
+   这类图绝大多数是角标/符号，1em 也正好是它们该有的大小。 */
+.reading-inline-image-inline {
+  display: inline-block;
+  height: 1em;
+  max-height: 1em;
+  vertical-align: -0.12em;
+  line-height: 1;
+}
+.reading-inline-image-inline img {
+  height: 1em;
+  width: auto;
+  max-width: 3em;
+  display: block;
+}
+
 /* 下拉自己就说明了是什么，上面不再顶一行「字体」 */
 .reading-settings-label--bare {
   gap: 0;

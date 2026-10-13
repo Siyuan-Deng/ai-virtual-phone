@@ -474,6 +474,7 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                 // EPUB/MOBI 解析出来的原书排版：与 paragraphs 一一对应，缺省则整章按统一排版渲染
                 const paragraphStyles = (ch as { paragraphStyles?: BookChapter["paragraphStyles"] }).paragraphStyles;
                 const paragraphSpans = (ch as { paragraphSpans?: BookChapter["paragraphSpans"] }).paragraphSpans;
+                const paragraphInlineImages = (ch as { paragraphInlineImages?: BookChapter["paragraphInlineImages"] }).paragraphInlineImages;
                 return {
                     id: `${bookId}_ch${i}`,
                     bookId,
@@ -483,6 +484,7 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                     ...(typeof tocLevel === "number" ? { tocLevel } : {}),
                     ...(Array.isArray(paragraphStyles) ? { paragraphStyles } : {}),
                     ...(Array.isArray(paragraphSpans) ? { paragraphSpans } : {}),
+                    ...(Array.isArray(paragraphInlineImages) ? { paragraphInlineImages } : {}),
                 };
             });
 

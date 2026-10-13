@@ -45,6 +45,8 @@ export type ParsedChapter = {
     paragraphStyles?: (ReadingBlockStyle | null)[];
     /** 原书排版：与 paragraphs 一一对应的行内样式区间 */
     paragraphSpans?: (ReadingInlineSpan[] | null)[];
+    /** 与 paragraphs 一一对应的行内小图（脚注角标、装饰符这类嵌在句子里的图） */
+    paragraphInlineImages?: (number[] | null)[];
 };
 
 export type ParsedBook = {
@@ -634,6 +636,7 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
         let finalParagraphs = extracted.paragraphs;
         let paragraphStyles = extracted.paragraphStyles;
         let paragraphSpans = extracted.paragraphSpans;
+        let paragraphInlineImages = extracted.paragraphInlineImages;
         if (extracted.imageSrcs && extracted.imageSrcs.length > 0) {
             const chapterDir = filePath.includes("/") ? filePath.substring(0, filePath.lastIndexOf("/") + 1) : "";
             const localToGlobal = new Map<number, number>();
@@ -659,7 +662,24 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
             finalParagraphs = mapped.filter((paragraph) => paragraph !== "");
             paragraphStyles = maskParagraphList(paragraphStyles, keepMask);
             paragraphSpans = maskParagraphList(paragraphSpans, keepMask);
+            paragraphInlineImages = maskParagraphList(paragraphInlineImages, keepMask);
             if (finalParagraphs.length === 0) continue;
+
+            // 行内小图的序号还停在「本章 imageSrcs 下标」，换算成全书下标；
+            // 换算不出来的连占位字符一起删，避免序号整体错位（见 pruneInlineImages）
+            if (paragraphInlineImages) {
+                const nextText = finalParagraphs.slice();
+                const nextInline: (number[] | null)[] = [];
+                for (let i = 0; i < nextText.length; i += 1) {
+                    const list = paragraphInlineImages[i];
+                    if (!list || list.length === 0) { nextInline.push(null); continue; }
+                    const pruned = pruneInlineImages(nextText[i], list, (localIndex) => localToGlobal.get(localIndex));
+                    nextText[i] = pruned.text;
+                    nextInline.push(pruned.inlineImages ?? null);
+                }
+                finalParagraphs = nextText;
+                paragraphInlineImages = nextInline.some((list) => list !== null) ? nextInline : undefined;
+            }
         }
 
         const fromToc = tocByPath.get(normalizeTocHref(href, rootDir));
@@ -669,6 +689,7 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
             ...(fromToc ? { tocLevel: fromToc.level } : {}),
             ...(paragraphStyles ? { paragraphStyles } : {}),
             ...(paragraphSpans ? { paragraphSpans } : {}),
+            ...(paragraphInlineImages ? { paragraphInlineImages } : {}),
         });
     }
 
@@ -719,6 +740,25 @@ export async function parseEpubFile(arrayBuffer: ArrayBuffer, fileName?: string)
             if (chapter.paragraphSpans) {
                 chapter.paragraphSpans = maskParagraphList(chapter.paragraphSpans, keepMask);
             }
+            if (chapter.paragraphInlineImages) {
+                chapter.paragraphInlineImages = maskParagraphList(chapter.paragraphInlineImages, keepMask);
+            }
+        }
+    }
+
+    // 被丢弃的行内小图要从正文里摘掉，否则会留下一个拿不到图的占位字符
+    if (droppedImages.size > 0) {
+        for (const chapter of chapters) {
+            if (!chapter.paragraphInlineImages) continue;
+            const nextText: string[] = [];
+            const nextInline: (number[] | null)[] = [];
+            chapter.paragraphs.forEach((paragraph, index) => {
+                const stripped = stripDroppedInlineImages(paragraph, chapter.paragraphInlineImages?.[index] ?? undefined, droppedImages);
+                nextText.push(stripped.text);
+                nextInline.push(stripped.inlineImages ?? null);
+            });
+            chapter.paragraphs = nextText;
+            chapter.paragraphInlineImages = nextInline.some((list) => list !== null) ? nextInline : undefined;
         }
     }
 
@@ -749,6 +789,7 @@ export async function parseMobiFile(arrayBuffer: ArrayBuffer, fileName?: string)
             paragraphs: extracted.paragraphs,
             ...(extracted.paragraphStyles ? { paragraphStyles: extracted.paragraphStyles } : {}),
             ...(extracted.paragraphSpans ? { paragraphSpans: extracted.paragraphSpans } : {}),
+            ...(extracted.paragraphInlineImages ? { paragraphInlineImages: extracted.paragraphInlineImages } : {}),
         });
     }
 
@@ -784,6 +825,26 @@ const BLOCK_TAGS = new Set([
 // 行内强调这些语义样式，而且一律不新增/删除字符，字符锚点因此始终稳定。
 
 const HEADING_LEVEL_BY_TAG: Record<string, number> = { H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6 };
+
+/** 这张图是嵌在句子里的，还是自己独立成段的？
+ *
+ *  判据只看一件事：它所在的那个块除了图片还有没有别的文字。
+ *  有 → 是句子的一部分（脚注角标、行内装饰），该当行内小图；
+ *  没有 → 是独立插图，该当整段大图。
+ *
+ *  两条排除：
+ *  · <figure> 里的图一律算独立插图——figcaption 的文字会让「块里有文字」这条误判；
+ *  · 尺寸判据在这里用不了（要解码后才知道），所以只按结构判断大小图，
+ *    真正过小的装饰图另有丢弃规则兜底。 */
+function isInlineImageNode(node: Element, body: HTMLElement): boolean {
+    if (node.closest("figure")) return false;
+    let block: Element | null = node.parentElement;
+    while (block && block !== body && !BLOCK_TAGS.has(block.tagName)) block = block.parentElement;
+    // 找不到块级祖先（直接挂在 body 上）当独立插图处理
+    if (!block || block === body) return false;
+    const text = (block.textContent || "").split(INLINE_IMAGE_CHAR).join("").trim();
+    return text.length > 0;
+}
 
 /** 把 style="..." 拆成声明表。只认下面会用到的几个属性，不做完整 CSS 解析——
  *  原书真正的样式表（CSS 文件 / class）我们一概不执行，理由见上面那段注释。 */
@@ -879,7 +940,16 @@ function detectBlockStyle(el: Element): ReadingBlockStyle | null {
 type InlineAccumulator = {
     chars: string[];
     spans: ReadingInlineSpan[];
+    /** 这一块里行内小图的顺序（值 = 本次提取的 imageSrcs 下标）。
+     *  正文对应位置放一个 \uFFFC 占位符，两边一一对应。 */
+    inlineImages: number[];
 };
+
+/** 行内图片占位符。刻意只占「一个字符」：正文里的字符偏移（批注、划线、
+ *  选区换算）都按段落文字的下标算，一个字符换一张图才不会让后面的偏移全错。
+ *  渲染时它变成一个 <span> 里塞零宽空格 + 图片：零宽空格本身占一个字符位，
+ *  DOM 文字长度因此和段落文字严格对齐。 */
+const INLINE_IMAGE_CHAR = "\uFFFC";
 
 /** 追加一段文本节点的内容。空白按 HTML 语义折叠成单个空格，
  *  紧跟空格/换行之后的空白丢掉，免得缩进排版带出多余空格。 */
@@ -916,6 +986,14 @@ function walkInline(acc: InlineAccumulator, node: Node): void {
     if (tag === "BR") { appendLineBreak(acc); return; }
     // 插图已被换成占位标记；残留的图片元素不产出文字
     if (tag === "IMG" || tag === "IMAGE") return;
+
+    // 行内小图（脚注角标、装饰符）：登记它的下标，再往下走——
+    // 里面那个 \uFFFC 会作为普通字符落进正文
+    const inlineIndex = el.getAttribute("data-reading-inline-img");
+    if (inlineIndex !== null) {
+        const parsed = Number(inlineIndex);
+        if (Number.isFinite(parsed)) acc.inlineImages.push(parsed);
+    }
 
     const style = inlineStyleForTag(tag, readStyleDeclarations(el));
     const start = acc.chars.length;
@@ -982,21 +1060,85 @@ function maskParagraphList<T>(list: T[] | undefined, mask: boolean[]): T[] | und
     return list.filter((_, index) => mask[index] !== false);
 }
 
-/** 一个叶子块的产物：正文 + 行内样式 + 块级样式。
+/** 把行内小图的「本章下标」换算成「全书下标」，顺便把换算不出来的那几张
+ *  连同它的占位字符一起删掉。
+ *
+ *  必须删：占位字符和序号列表是一一对应的，只要有一张图换算失败却被留在列表外，
+ *  后面所有图就会整段串位（脚注角标显示成别的符号）。宁可少一张角标，不能串位。
+ *  这一步只发生在导入期，此时还没有任何批注，所以改动字符数不会让已存锚点错位。 */
+function pruneInlineImages(
+    text: string,
+    inlineImages: number[],
+    mapIndex: (localIndex: number) => number | undefined,
+): { text: string; inlineImages: number[] | undefined } {
+    const kept: number[] = [];
+    let out = "";
+    let last = 0;
+    let cursor = 0;
+    for (let i = 0; i < text.length; i += 1) {
+        if (text[i] !== INLINE_IMAGE_CHAR) continue;
+        const localIndex = inlineImages[cursor];
+        cursor += 1;
+        const mapped = localIndex === undefined ? undefined : mapIndex(localIndex);
+        if (mapped === undefined) {
+            out += text.slice(last, i);
+            last = i + 1;
+            continue;
+        }
+        kept.push(mapped);
+    }
+    if (kept.length === inlineImages.length) return { text, inlineImages: kept };
+    out += text.slice(last);
+    return { text: out, inlineImages: kept.length > 0 ? kept : undefined };
+}
+
+/** 把「被丢弃的行内小图」从正文里摘掉（连同它那个占位字符），并同步列表。
+ *  丢弃只发生在导入时、此时还没有任何批注，所以改动字符数不会让已存锚点错位。 */
+function stripDroppedInlineImages(
+    text: string,
+    inlineImages: number[] | undefined,
+    dropped: Set<number>,
+): { text: string; inlineImages: number[] | undefined } {
+    if (!inlineImages || inlineImages.length === 0 || dropped.size === 0) return { text, inlineImages };
+    const kept: number[] = [];
+    let out = "";
+    let last = 0;
+    let cursor = 0;
+    for (let i = 0; i < text.length; i += 1) {
+        if (text[i] !== INLINE_IMAGE_CHAR) continue;
+        const index = inlineImages[cursor];
+        cursor += 1;
+        if (index === undefined) break; // 数据不一致，保底不再往下猜
+        if (dropped.has(index)) {
+            out += text.slice(last, i);
+            last = i + 1;
+            continue;
+        }
+        kept.push(index);
+    }
+    if (kept.length === inlineImages.length) return { text, inlineImages };
+    out += text.slice(last);
+    return { text: out, inlineImages: kept.length > 0 ? kept : undefined };
+}
+
+/** 一个叶子块的产物：正文 + 行内样式 + 块级样式 + 行内小图。
  *  插图标记和文字挤在同一块里时标记单独成段（和改动前一致），这时丢掉 spans 免得错位。 */
 type ExtractedBlock = {
     text: string;
     spans: ReadingInlineSpan[];
     style: ReadingBlockStyle | null;
+    inlineImages: number[];
 };
 
-/** extractTextFromDom 的产物。两个样式数组与 paragraphs 一一对应，
- *  只在书里确实带了样式时才给（不给就让渲染层走原来的统一排版）。 */
+/** extractTextFromDom 的产物。几个并行数组与 paragraphs 一一对应，
+ *  只在书里确实带了相应内容时才给。 */
 type ExtractedDom = {
     title: string;
     paragraphs: string[];
     paragraphStyles?: (ReadingBlockStyle | null)[];
     paragraphSpans?: (ReadingInlineSpan[] | null)[];
+    /** 与 paragraphs 一一对应：这一段里的行内小图（值 = imageSrcs 下标，按出现顺序） */
+    paragraphInlineImages?: (number[] | null)[];
     imageSrcs?: string[];
 };
 
@@ -1021,8 +1163,12 @@ function extractTextFromDom(html: string): ExtractedDom | null {
     const heading = body.querySelector("h1, h2, h3");
     const title = normalizeInlineText(heading?.textContent || doc.querySelector("title")?.textContent || "");
 
-    // 插图：原地换成一条「标记段落」，保住它在正文里的位置。
-    // 下面的取文逻辑只看文字，图片元素本身不产出任何段落，不换的话图就没了。
+    // 插图分两类，处理方式完全不同：
+    //  · 独立成段的图（<figure> 里的插图、独图一段）→ 换成「标记段落」，
+    //    渲染成一整块大图，这是原来就有的行为；
+    //  · 嵌在句子里的图（脚注角标、章节装饰符最典型）→ 换成单个占位字符，
+    //    渲染成行内小图。这类图原来也被当成整段大图，于是正文里每几行就冒出
+    //    一张巨图——一本满是角标图的书读起来全是图。
     const imageSrcs: string[] = [];
     body.querySelectorAll("img, image").forEach((node) => {
         const src = node.getAttribute("src")
@@ -1030,12 +1176,24 @@ function extractTextFromDom(html: string): ExtractedDom | null {
             || node.getAttribute("href")
             || "";
         if (!src.trim()) { node.remove(); return; }
-        const placeholder = doc.createElement("p");
-        placeholder.textContent = buildReadingImageMarker(imageSrcs.length);
-        // <image> 一般裹在 <svg> 里，整块换掉，免得留个空 svg
-        const target = node.tagName.toLowerCase() === "image" ? (node.closest("svg") || node) : node;
-        target.replaceWith(placeholder);
+        const imageIndex = imageSrcs.length;
         imageSrcs.push(src.trim());
+        const target = node.tagName.toLowerCase() === "image" ? (node.closest("svg") || node) : node;
+
+        if (isInlineImageNode(node, body)) {
+            // 行内图：包一层带标记的 <span>，walkInline 见到它就登记下标，
+            // 里面的 \uFFFC 作为普通字符进入正文，位置因此被完整保住
+            const wrapper = doc.createElement("span");
+            wrapper.setAttribute("data-reading-inline-img", String(imageIndex));
+            wrapper.textContent = INLINE_IMAGE_CHAR;
+            target.replaceWith(wrapper);
+            return;
+        }
+
+        const placeholder = doc.createElement("p");
+        placeholder.textContent = buildReadingImageMarker(imageIndex);
+        // <image> 一般裹在 <svg> 里，整块换掉，免得留个空 svg
+        target.replaceWith(placeholder);
     });
 
     const blocks: ExtractedBlock[] = [];
@@ -1044,26 +1202,36 @@ function extractTextFromDom(html: string): ExtractedDom | null {
     /** 一块正文入列。图片标记和文字挤在同一块里时标记单独成段（和改动前一致：
      *  标记绝不能混进正文文字——那样既会显示成一个怪符号，也会被当成正文送进模型），
      *  这时行内样式的区间已经跟文字对不上了，丢掉 spans 比错位安全。 */
-    const pushBlock = (text: string, spans: ReadingInlineSpan[], style: ReadingBlockStyle | null) => {
+    const pushBlock = (
+        text: string,
+        spans: ReadingInlineSpan[],
+        style: ReadingBlockStyle | null,
+        inlineImages: number[],
+    ) => {
         if (!text) return;
-        if (!text.includes("\uFFFC")) {
-            blocks.push({ text, spans, style });
+        if (!text.includes("\uFFFCimg:")) {
+            blocks.push({ text, spans, style, inlineImages });
             return;
         }
+        // 独立插图标记和文字挤在同一块：标记单独成段（一直如此）。
+        // 切段之后行内图的下标可能对不上（块标记本身也以 \uFFFC 开头），
+        // 这种情况下宁可丢掉这一块的行内图，也不能让它们指到别的图上。
         for (const piece of text.split(/(\uFFFCimg:\d+(?::\d+x\d+)?)/)) {
             const trimmed = piece.trim();
             if (!trimmed) continue;
+            const isBlockMarker = Boolean(parseReadingImageMarker(trimmed));
             blocks.push({
                 text: trimmed,
                 spans: [],
                 // 插图占位自己不带样式；后面的段落保留原块样式
-                style: parseReadingImageMarker(trimmed) ? null : style,
+                style: isBlockMarker ? null : style,
+                inlineImages: [],
             });
         }
     };
 
     const readBlock = (node: Element, style: ReadingBlockStyle | null) => {
-        const acc: InlineAccumulator = { chars: [], spans: [] };
+        const acc: InlineAccumulator = { chars: [], spans: [], inlineImages: [] };
         for (const child of Array.from(node.childNodes)) walkInline(acc, child);
         const { text, spans } = finalizeInline(acc);
         if (!text) return;
@@ -1072,7 +1240,7 @@ function extractTextFromDom(html: string): ExtractedDom | null {
             seenHeading.done = true;
             return;
         }
-        pushBlock(text, spans, style);
+        pushBlock(text, spans, style, acc.inlineImages);
     };
 
     const visit = (node: Element) => {
@@ -1092,12 +1260,13 @@ function extractTextFromDom(html: string): ExtractedDom | null {
 
     if (blocks.length === 0) {
         const plain = normalizeInlineText(body.textContent || "");
-        if (plain) blocks.push({ text: plain, spans: [], style: null });
+        if (plain) blocks.push({ text: plain, spans: [], style: null, inlineImages: [] });
     }
 
     // 一个带样式的块都没有（纯文本型 EPUB）时不给这套数组，渲染层直接走原来的
     // 统一排版，表现与改动前完全一致。
     const hasStyle = blocks.some((block) => block.style !== null || block.spans.length > 0);
+    const hasInlineImages = blocks.some((block) => block.inlineImages.length > 0);
     return {
         title,
         paragraphs: blocks.map((block) => block.text),
@@ -1107,6 +1276,9 @@ function extractTextFromDom(html: string): ExtractedDom | null {
                 paragraphStyles: blocks.map((block) => block.style),
                 paragraphSpans: blocks.map((block) => (block.spans.length > 0 ? block.spans : null)),
             }
+            : {}),
+        ...(hasInlineImages
+            ? { paragraphInlineImages: blocks.map((block) => (block.inlineImages.length > 0 ? block.inlineImages : null)) }
             : {}),
     };
 }

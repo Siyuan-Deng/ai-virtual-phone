@@ -81,6 +81,8 @@ type TxtPageItem =
         /** 这一行占多高（px）。还原原书排版时逐行不同（标题比正文大），分页按它累计 */
         lineHeight?: number;
         block?: LineBlockStyle;
+        /** 这一行里的行内小图（脚注角标之类），按出现顺序给出插图序号 */
+        inlineImages?: number[];
     }
     | { kind: "gap"; chapterIndex: number; paragraphIndex: number; height?: number }
     | { kind: "image"; image: ReadingImageRef; chapterIndex: number; paragraphIndex: number }
@@ -197,6 +199,16 @@ function trimTrailingGaps(items: TxtPageItem[]): TxtPageItem[] {
     return items.slice(0, end);
 }
 
+/** 行内小图的占位字符（与 lib/reading-parser.ts 的 INLINE_IMAGE_CHAR 一致）。
+ *  正文里它占一个字符位，渲染时变成一个 1em 高的小图 + 一个零宽空格。 */
+const INLINE_IMAGE_CHAR = "\uFFFC";
+
+function countInlineImageChars(text: string): number {
+    let count = 0;
+    for (let i = 0; i < text.length; i += 1) if (text[i] === INLINE_IMAGE_CHAR) count += 1;
+    return count;
+}
+
 /** 逐字宽度缓存。分页要为整章每个字量一次宽，而 canvas 量一次宽要走完整套字体
  *  shaping；同一个字在书里会反复出现，缓存能把分页开销压掉一大截。
  *  键用「度量时的 ctx.font 规范化结果 + 字符」——直接取 ctx.font，调用方传进来的
@@ -218,7 +230,15 @@ function measureCharWidth(ctx: CanvasRenderingContext2D, char: string): number {
 /** 逐字折行（单一字体）。调用前必须先把 ctx.font 设成要用的字体——量宽走缓存，
  *  字体没设对会一路量错。不丢字符：各行拼接严格等于原文，
  *  字符游标（荧光笔/划线的定位）就建立在「拼接等于原文」这个前提上。 */
-function wrapTextToLines(text: string, maxWidth: number, ctx: CanvasRenderingContext2D, firstLineOffset = 0): string[] {
+function wrapTextToLines(
+    text: string,
+    maxWidth: number,
+    ctx: CanvasRenderingContext2D,
+    firstLineOffset = 0,
+    /** 行内小图占位字符按多宽算（0 = 按常量量）。渲染时小图被限制在一个字符高，
+     *  宽度按原图比例；这里按一个字宽估，最多差半个字，不会让某页明显溢出。 */
+    symbolWidth = 0,
+): string[] {
     if (!text) return [""];
 
     const lines: string[] = [];
@@ -227,7 +247,9 @@ function wrapTextToLines(text: string, maxWidth: number, ctx: CanvasRenderingCon
     let width = 0;
 
     for (const char of Array.from(text)) {
-        const charWidth = measureCharWidth(ctx, char);
+        const charWidth = char === INLINE_IMAGE_CHAR && symbolWidth > 0
+            ? symbolWidth
+            : measureCharWidth(ctx, char);
         const lineLimit = lineIndex === 0 ? Math.max(1, maxWidth - firstLineOffset) : maxWidth;
         if (current && width + charWidth > lineLimit) {
             lines.push(current);
@@ -265,6 +287,7 @@ function wrapFontRunsToLines(
     maxWidth: number,
     ctx: CanvasRenderingContext2D,
     firstLineOffset: number,
+    symbolWidth = 0,
 ): string[] {
     const lines: string[] = [];
     let current = "";
@@ -274,7 +297,9 @@ function wrapFontRunsToLines(
     for (const run of runs) {
         ctx.font = run.font;
         for (const char of Array.from(run.text)) {
-            const charWidth = measureCharWidth(ctx, char);
+            const charWidth = char === INLINE_IMAGE_CHAR && symbolWidth > 0
+                ? symbolWidth
+                : measureCharWidth(ctx, char);
             const limit = lineIndex === 0 ? Math.max(1, maxWidth - firstLineOffset) : maxWidth;
             if (current && width + charWidth > limit) {
                 lines.push(current);
@@ -638,6 +663,8 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     const lastTxtPaginationSignatureRef = useRef("");
     // 滚动阅读模式：连续滚动（多章窗口无缝衔接）
     const scrollFractionRef = useRef(0);
+    /** 上一次真正提交给渲染的滚动比例，见 commitScrollFraction */
+    const committedScrollFractionRef = useRef(0);
     const initialScrollFractionRef = useRef<number | null>(null); // 打开书时保存的章节内比例
     const pendingScrollFractionRef = useRef<number | null>(null); // 滑块跨章待定位比例
     const scrollContentRef = useRef<HTMLDivElement>(null);        // 滚动内容容器（含多章块）
@@ -700,6 +727,24 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         for (let i = start; i <= end; i++) out.push(chapters[i]);
         return out;
     }, [chapters, chapterIndex]);
+    /** 提交滚动比例。
+     *
+     *  滚动时每个滚动帧都会算一次比例，但**不能每帧都 setState**：scrollFraction 一变，
+     *  整个阅读器（滚动窗口里好几章的段落）就要重渲染一遍，进度保存也会跟着写一次库。
+     *  变化不足 0.4% 时只更新 ref（滚动位置计算、批注窗口估算仍能读到最新值），
+     *  不触发重渲染；到顶/到底一律提交，免得末端的百分比迟迟不更新。
+     *  force = 明确的跳转（滑块、打开书籍恢复位置），这种必须立刻提交。 */
+    const commitScrollFraction = useCallback((fraction: number, force = false) => {
+        const clamped = Math.max(0, Math.min(1, fraction));
+        scrollFractionRef.current = clamped;
+        const last = committedScrollFractionRef.current;
+        const atEdge = clamped <= 0 || clamped >= 1;
+        if (!force && !atEdge && Math.abs(clamped - last) < 0.004) return;
+        if (last === clamped && !force) return;
+        committedScrollFractionRef.current = clamped;
+        setScrollFraction(clamped);
+    }, []);
+
     // 滚动模式：将「章节内比例(0-1)」换算为具体滚动位置（窗口布局下按当前章块定位）
     const scrollToChapterFraction = useCallback((fraction: number, targetChapterIndex: number) => {
         const body = scrollRef.current;
@@ -711,9 +756,9 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         const target = Math.max(0, Math.min(maxScroll, metrics.top + Math.max(0, Math.min(1, fraction)) * span));
         body.scrollTop = target;
         const actual = span > 0 ? Math.min(1, Math.max(0, (target - metrics.top) / span)) : 0;
-        scrollFractionRef.current = actual;
-        setScrollFraction(actual);
-    }, []);
+        // 明确跳转，必须立刻提交（否则滑块拖完数字不跟着走）
+        commitScrollFraction(actual, true);
+    }, [commitScrollFraction]);
     const currentChapter = chapters[chapterIndex];
 
     /** 当前屏上会用到的插图序号。只加载这些，读完就放掉，
@@ -726,6 +771,10 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                 const marker = parseReadingImageMarker(paragraph);
                 if (marker) indices.add(marker.index);
             }
+            // 行内小图也要一起取出来，否则脚注角标会一直显示成空白占位
+            chapter.paragraphInlineImages?.forEach((list) => {
+                list?.forEach((index) => indices.add(index));
+            });
         }
         return [...indices].sort((a, b) => a - b);
     }, [currentChapter, isScrollMode, windowChapters]);
@@ -1090,10 +1139,58 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         return map;
     }, [marks]);
 
-    /** 把落在本行区间内的荧光笔/划线切成 <mark>/<u> 片段 */
+    /** 一张行内小图（脚注角标、装饰符）。
+     *  里面那个零宽空格是必需的：正文里它对应一个占位字符，而 DOM 的 textContent
+     *  长度是选区换算字符偏移的依据（见 reading-selection.ts）。少了它，
+     *  这一行之后的偏移会整体错一位，划线和批注就会落歪。 */
+    const renderInlineImage = (imageIndex: number, key: string) => {
+        // -1 = 这个占位字符没有对得上的图（数据缺项）。仍然要渲染那一个零宽空格，
+        // 否则这一行的 DOM 文字会比段落文字短一个字符，选区偏移整体错位。
+        const url = imageIndex >= 0 ? inlineImageUrls[imageIndex] : undefined;
+        return (
+            <span key={key} className="reading-inline-image-inline" data-inline-image={imageIndex}>
+                {"\u200B"}
+                {url ? <img src={url} alt="" /> : null}
+            </span>
+        );
+    };
+
+    /** 一行文字的渲染：按「行内小图」切成若干段文字，逐段渲染 */
     const renderLineContent = (item: Extract<TxtPageItem, { kind: "line" }>) => {
-        const lineStart = item.charStart ?? 0;
-        const lineEnd = lineStart + item.text.length;
+        if (!item.text.includes(INLINE_IMAGE_CHAR)) return renderTextRun(item.text, item.charStart ?? 0, item, "");
+
+        const pieces = item.text.split(INLINE_IMAGE_CHAR);
+        const inlineList = item.inlineImages ?? [];
+        const nodes: React.ReactNode[] = [];
+        let offset = item.charStart ?? 0;
+        pieces.forEach((piece, index) => {
+            if (piece) {
+                const rendered = renderTextRun(piece, offset, item, `p${index}-`);
+                // 可能是字符串，也可能是节点数组，两种都要摊平进来
+                if (Array.isArray(rendered)) nodes.push(...rendered);
+                else if (rendered) nodes.push(rendered);
+            }
+            offset += piece.length;
+            if (index < pieces.length - 1) {
+                nodes.push(renderInlineImage(inlineList[index] ?? -1, `inline-${index}`));
+                offset += 1; // 占位字符本身
+            }
+        });
+        return nodes;
+    };
+
+    /** 一段连续文字（不含行内小图）的渲染：把落在本段区间内的荧光笔/划线切成
+     *  <mark> 片段；有行内强调时再逐字叠加样式。baseStart = 这段的起点在段落里的下标。 */
+    const renderTextRun = (
+        text: string,
+        baseStart: number,
+        item: Extract<TxtPageItem, { kind: "line" }>,
+        /** 一行被行内小图切成多段时，各段都要有自己的 key 前缀——
+         *  否则不同段里同名几组节点会撞 key，React 会复用错节点。 */
+        keyPrefix: string,
+    ): React.ReactNode => {
+        const lineStart = baseStart;
+        const lineEnd = lineStart + text.length;
         const hits = (marksByParagraph.get(`${item.chapterIndex}:${item.paragraphIndex}`) || [])
             .filter(mark => mark.start < lineEnd && mark.end > lineStart)
             .sort((a, b) => a.start - b.start);
@@ -1102,30 +1199,30 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
 
         // 常见情况：正文没有行内强调。走原来那条路——纯文本，只在有荧光笔/划线时切片。
         if (!hasEmphasis) {
-            if (hits.length === 0) return item.text;
+            if (hits.length === 0) return text;
 
             const nodes: React.ReactNode[] = [];
             let cursor = lineStart;
             hits.forEach((mark, i) => {
                 const from = Math.max(cursor, mark.start);
                 const to = Math.min(lineEnd, mark.end);
-                if (from > cursor) nodes.push(item.text.slice(cursor - lineStart, from - lineStart));
+                if (from > cursor) nodes.push(text.slice(cursor - lineStart, from - lineStart));
                 if (to > from) {
                     nodes.push(
                         <span
-                            key={`${mark.id}-${i}`}
+                            key={`${keyPrefix}${mark.id}-${i}`}
                             className="reading-mark"
                             data-style={mark.style}
                             data-author={mark.authorType === "character" ? "character" : "user"}
                             data-mark-id={mark.id}
                         >
-                            {item.text.slice(from - lineStart, to - lineStart)}
+                            {text.slice(from - lineStart, to - lineStart)}
                         </span>,
                     );
                     cursor = to;
                 }
             });
-            if (cursor < lineEnd) nodes.push(item.text.slice(cursor - lineStart));
+            if (cursor < lineEnd) nodes.push(text.slice(cursor - lineStart));
             return nodes;
         }
 
@@ -1136,20 +1233,20 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         // 再按「标记相同」合并节点。原来每个字都要扫一遍 spans、为每个字各建一个对象、
         // 再 JSON.stringify 两次来比较——这条路径每次重绘都要整页走一遍，很吃性能。
         type StyledRun = { text: string; flags: number; mark: ReadingMark | null };
-        const flagOf = new Uint8Array(item.text.length);
+        const flagOf = new Uint8Array(text.length);
         for (const span of spans!) {
             const bits = (span.bold ? 1 : 0) | (span.italic ? 2 : 0) | (span.underline ? 4 : 0)
                 | (span.strike ? 8 : 0) | (span.sup ? 16 : 0) | (span.sub ? 32 : 0);
             if (bits === 0) continue;
             const from = Math.max(0, span.start - lineStart);
-            const to = Math.min(item.text.length, span.end - lineStart);
+            const to = Math.min(text.length, span.end - lineStart);
             for (let i = from; i < to; i += 1) flagOf[i] |= bits;
         }
 
         const runs: StyledRun[] = [];
         let current: StyledRun | null = null;
         let charIndex = 0;
-        for (const ch of Array.from(item.text)) {
+        for (const ch of Array.from(text)) {
             const absolute = lineStart + charIndex;
             const flags = flagOf[charIndex] || 0;
             const mark = hits.find(candidate => candidate.start <= absolute && candidate.end > absolute) || null;
@@ -1179,12 +1276,12 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             }
             if (!node.mark) {
                 return Object.keys(style).length > 0
-                    ? <span key={index} style={style}>{node.text}</span>
+                    ? <span key={`${keyPrefix}${index}`} style={style}>{node.text}</span>
                     : node.text;
             }
             return (
                 <span
-                    key={index}
+                    key={`${keyPrefix}${index}`}
                     className="reading-mark"
                     data-style={node.mark.style}
                     data-author={node.mark.authorType === "character" ? "character" : "user"}
@@ -1241,7 +1338,8 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
      *  只要把倍率、对齐、缩进和行内样式交给 CSS 就够了。
      *
      *  按章整表算好缓存起来：滚动时每个滚动帧都会把窗口内所有段落重渲染一遍，
-     *  逐段现算的话每帧要为上百个段落重建对象（滚动卡顿的一大来源）。 */
+     *  逐段现算的话每帧要为上百个段落重建对象（滚动卡顿的一大来源）。
+     *  注意行内小图不在这里——它和「还原原书排版」无关，滚动模式那边单独取。 */
     const scrollBlockStyles = useMemo(() => {
         const map = new Map<number, (LineBlockStyle | null)[]>();
         if (!isScrollMode || readingConfig.restoreOriginalLayout === false) return map;
@@ -1399,6 +1497,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                             // 从原始文件重建时也要带上原书排版，否则重建一次样式就丢了
                             ...(chapter.paragraphStyles ? { paragraphStyles: chapter.paragraphStyles } : {}),
                             ...(chapter.paragraphSpans ? { paragraphSpans: chapter.paragraphSpans } : {}),
+                            ...(chapter.paragraphInlineImages ? { paragraphInlineImages: chapter.paragraphInlineImages } : {}),
                         }));
                         if (rebuiltChapters.length > 0) {
                             await saveChapters(book.id, rebuiltChapters);
@@ -2744,6 +2843,12 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         const chapterSpans: (ReadingInlineSpan[] | null)[] | undefined = restoreLayout
             ? currentChapter.paragraphSpans
             : undefined;
+        // 行内小图与「是否还原原书排版」无关：它是排版正确性问题（角标图不该变成大图），
+        // 所以只要数据在就用，不受那个开关影响。
+        const chapterInlineImages = Array.isArray(currentChapter.paragraphInlineImages)
+            && currentChapter.paragraphInlineImages.length === currentChapter.paragraphs.length
+            ? currentChapter.paragraphInlineImages
+            : undefined;
         const fontParts = {
             style: lineStyle.fontStyle,
             variant: lineStyle.fontVariant,
@@ -2798,6 +2903,9 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             const mixedEmphasis = Boolean(spans && spans.some((span) => span.bold || span.italic));
             // 引用块左侧留出竖线的位置，折行宽度要同步收窄，否则文字会钻到竖线底下
             const blockWidth = Math.max(1, maxWidth - (metrics.quote ? QUOTE_INSET_PX : 0));
+            const paragraphInline = chapterInlineImages?.[index] ?? null;
+            // 行内小图在段落里是第几个：按段落文字顺序推进，每行取走自己那一段
+            let inlineCursor = 0;
 
             const segments = paragraph.split("\n");
             // 段落内的字符游标：折行函数不裁剪字符，各行拼接等于原段落，
@@ -2815,9 +2923,15 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                         blockWidth,
                         ctx,
                         firstLineOffset,
+                        metrics.fontSize,
                     )
-                    : wrapTextToLines(segment, blockWidth, ctx, firstLineOffset);
+                    : wrapTextToLines(segment, blockWidth, ctx, firstLineOffset, metrics.fontSize);
                 wrappedLines.forEach((line, lineIndex) => {
+                    const lineInlineCount = countInlineImageChars(line);
+                    const lineInline = paragraphInline && lineInlineCount > 0
+                        ? paragraphInline.slice(inlineCursor, inlineCursor + lineInlineCount)
+                        : null;
+                    inlineCursor += lineInlineCount;
                     tokens.push({
                         kind: "line",
                         text: line,
@@ -2826,6 +2940,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                         indent: shouldIndent && lineIndex === 0,
                         segEnd: lineIndex === wrappedLines.length - 1,
                         charStart: charCursor,
+                        ...(lineInline && lineInline.length > 0 ? { inlineImages: lineInline } : {}),
                         ...(restoreLayout
                             ? {
                                 lineHeight: metrics.lineHeight,
@@ -2954,6 +3069,17 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         }
     }, [flipAnim, flipAnimationEnabled, isPdf, txtPages, txtPage, txtTotalPages, chapterIndex, chapters.length, selectionInfo]);
 
+    /** 全书进度（0-1）。
+     *  按字数加权算，不是「第几章 / 共几章」——一本里版权页几十字、正文一万多字，
+     *  按章数算出来的百分比和实际读了多少完全对不上。这个数也是存进进度的那个值，
+     *  界面上显示的百分比因此和「下次打开恢复到哪里」是同一套算法。 */
+    const bookProgressFraction = (() => {
+        if (chapters.length === 0) return 0;
+        if (isPdf) return pdfTotalPages > 0 ? Math.min(1, Math.max(0, pdfCurrentPage / pdfTotalPages)) : 0;
+        if (isScrollMode) return toBookFraction(chapterIndex, Math.max(0, Math.min(1, scrollFraction)));
+        // 翻页模式：算到当前页的末尾（而不是页首），这样第一章第一页就不是 0%
+        return toBookFraction(chapterIndex, txtTotalPages > 0 ? (txtPage + 1) / txtTotalPages : 0);
+    })();
     const txtDisplayedPage = Math.min(txtPage + 1, txtTotalPages);
     const currentPageCount = isPdf ? Math.max(1, pdfTotalPages || 1) : Math.max(1, txtTotalPages);
     const txtBookSliderMax = chapters.length > 0 ? chapters.length + 1 : 1;
@@ -3054,8 +3180,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                 } else {
                     fraction = maxScroll > 0 ? Math.min(1, Math.max(0, body.scrollTop / maxScroll)) : 0;
                 }
-                scrollFractionRef.current = fraction;
-                setScrollFraction(fraction);
+                commitScrollFraction(fraction);
                 if (!metrics) return;
 
                 // 离开顶部后解除平移冷却
@@ -3091,7 +3216,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             body.removeEventListener("scroll", onScroll);
             if (rafId) window.cancelAnimationFrame(rafId);
         };
-    }, [isScrollMode]);
+    }, [commitScrollFraction, isScrollMode]);
 
     // 滚动模式：渲染后测量各章块位置，并应用窗口平移补偿 / 显式定位（useLayoutEffect 保证在绘制前执行，无闪跳）
     useLayoutEffect(() => {
@@ -3256,9 +3381,9 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         setShowReadingSettings(false);
     };
 
+    // 根节点上的 data-reading-fonts：注入的三档字体规则挂在这个属性上，
+    // 权重才不会和主题/插件那种 `.xxx *` 规则打平、被后注入的一方接管（见 reading-app.tsx）。
     return (
-        {/* data-reading-fonts：注入的三档字体规则挂在这个属性上，权重才不会和
-            主题/插件那种 `.xxx *` 规则打平、被后注入的一方接管（见 reading-app.tsx） */}
         <div ref={surfaceRef} className="reading-app-surface absolute inset-0 z-[100] flex flex-col bg-[var(--c-page-body-bg)]" data-reading-fonts="" data-immersive={immersive} style={{
             paddingTop: "var(--page-header-safe-top, 48px)",
             // 插图最高不超过一页能放下的高度，和分页算出来的那个数是同一个
@@ -3420,9 +3545,17 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                                         <div key={pIndex} className="reading-scroll-block">
                                             {(() => {
                                                 let charCursor = 0;
+                                                // 滚动模式下整段一次性交给浏览器排版，行内小图按整段给
+                                                const paragraphInline = chapter.paragraphInlineImages?.[pIndex] ?? null;
+                                                let inlineCursor = 0;
                                                 return paragraph.split("\n").map((segment, sIndex) => {
                                                     const charStart = charCursor;
                                                     charCursor += segment.length + 1; // 被拆掉的 \n 也占一个字符
+                                                    const inlineCount = countInlineImageChars(segment);
+                                                    const lineInline = paragraphInline && inlineCount > 0
+                                                        ? paragraphInline.slice(inlineCursor, inlineCursor + inlineCount)
+                                                        : null;
+                                                    inlineCursor += inlineCount;
                                                     return renderLine({
                                                         kind: "line",
                                                         text: segment,
@@ -3432,6 +3565,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                                                         segEnd: sIndex === segmentCount - 1,
                                                         charStart,
                                                         ...(block ? { block } : {}),
+                                                        ...(lineInline && lineInline.length > 0 ? { inlineImages: lineInline } : {}),
                                                     }, sIndex);
                                                 });
                                             })()}
@@ -3475,7 +3609,11 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
 
             {/* Immersive Page Number */}
             <span className={`reading-immersive-page ${immersive ? 'opacity-35' : 'opacity-0'}`}>
-                {isPdf ? `${pdfCurrentPage}/${pdfTotalPages || "?"}` : isScrollMode ? `${Math.round(Math.max(0, Math.min(1, scrollFraction)) * 100)}%` : `${txtDisplayedPage}/${txtTotalPages}`}
+                {/* 百分比一律是全书进度（按字数加权），不是本章读了百分之多少。
+                    PDF 本来就是全书页码；翻页模式再补上「本章第几页」，信息不丢。 */}
+                {isPdf
+                    ? `${pdfCurrentPage}/${pdfTotalPages || "?"}`
+                    : `${Math.round(bookProgressFraction * 100)}%${isScrollMode ? "" : ` · ${txtDisplayedPage}/${txtTotalPages}`}`}
             </span>
 
             {/* Bottom bar — mirrors header style */}
