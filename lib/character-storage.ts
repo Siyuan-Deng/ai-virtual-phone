@@ -229,7 +229,7 @@ export function parseCharacterFromJson(
 }
 
 /**
- * 用 JSON 覆盖一张已有的角色卡。只返回要改的字段，id 不动，所以记忆、聊天、剧情都还挂在这个角色上。
+ * 用 JSON（PNG 卡先用 readCharacterJsonFromPng 取出 JSON）覆盖一张已有的角色卡。只返回要改的字段，id 不动，所以记忆、聊天、剧情都还挂在这个角色上。
  * 文件里写了的照文件来；没写的、以及微信号、简介、拍立得样式和画布位置这些本机的东西，保留原卡。
  * 文件里既没名字也没人设，返回 null；含开场白等字段的照旧抛 CHAR_BLOCKED_FIELDS。
  */
@@ -317,20 +317,22 @@ function readPngTextChunk(u8: Uint8Array, keyword: string): string | null {
   return null;
 }
 
+/** PNG 角色卡里藏的那段 JSON；没有或解不出来返回 null */
+export function readCharacterJsonFromPng(buffer: ArrayBuffer): string | null {
+  const charaBase64 = readPngTextChunk(new Uint8Array(buffer), "ai_phone_character");
+  if (!charaBase64) return null;
+  try {
+    return decodeURIComponent(escape(atob(charaBase64)));
+  } catch {
+    return null;
+  }
+}
+
 export function parseCharacterFromPng(
   buffer: ArrayBuffer
 ): CharacterImportData | null {
-  const u8 = new Uint8Array(buffer);
-  const charaBase64 = readPngTextChunk(u8, "ai_phone_character");
-  if (!charaBase64) return null;
-
-  try {
-    const jsonStr = decodeURIComponent(escape(atob(charaBase64)));
-    return parseCharacterFromJson(jsonStr);
-  } catch (e) {
-    if (e instanceof Error && e.message === CHAR_BLOCKED_FIELDS) throw e;
-    return null;
-  }
+  const jsonStr = readCharacterJsonFromPng(buffer);
+  return jsonStr ? parseCharacterFromJson(jsonStr) : null;
 }
 
 // ── CRC32 ────────────────────────────────────────────

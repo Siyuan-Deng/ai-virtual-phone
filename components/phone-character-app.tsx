@@ -10,6 +10,7 @@ import {
   parseCharacterFromJson,
   parseCharacterFromPng,
   parseCharacterOverwriteFromJson,
+  readCharacterJsonFromPng,
   saveCharacters,
   loadBackgroundItems,
   saveBackgroundItems,
@@ -1870,9 +1871,9 @@ function CharArchiveView({
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [showUnsavedConfirm, setShowUnsavedConfirm] = useState<"back" | "cancel" | null>(null);
   const [showSaveVersionConfirm, setShowSaveVersionConfirm] = useState(false);
-  // 导入 JSON 覆盖：读好的字段先放这儿，走和保存一样的「备份旧卡 / 覆盖当前版本」
+  // 导入 JSON / PNG 覆盖：读好的字段先放这儿，走和保存一样的「备份旧卡 / 覆盖当前版本」
   const [pendingImport, setPendingImport] = useState<CharacterImportData | null>(null);
-  const importJsonRef = useRef<HTMLInputElement>(null);
+  const importRef = useRef<HTMLInputElement>(null);
   const [showVersions, setShowVersions] = useState(false);
   const [versions, setVersions] = useState<CharacterVersion[]>([]);
   const [restoreTarget, setRestoreTarget] = useState<CharacterVersion | null>(null);
@@ -2089,10 +2090,31 @@ function CharArchiveView({
     }
   }
 
-  async function handleImportJsonFile(file: File) {
+  async function handleOverwriteImport(file: File) {
     try {
-      const data = parseCharacterOverwriteFromJson(await file.text(), char);
+      const isPng = file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
+      if (!isPng && file.type !== "application/json" && !file.name.toLowerCase().endsWith(".json")) {
+        return onNotice("请选择 .json 或 .png 文件");
+      }
+      const json = isPng ? readCharacterJsonFromPng(await file.arrayBuffer()) : await file.text();
+      if (json === null) return onNotice("未在 PNG 中找到角色数据");
+      const data = parseCharacterOverwriteFromJson(json, char);
       if (!data) return onNotice("解析失败，请检查文件格式");
+      if (isPng) {
+        // PNG 卡这张图本身就是头像：换上它，裁剪回到居中
+        let avatar = "";
+        try {
+          avatar = await fileToDataUrl(file, {
+            maxSize: 1280,
+            quality: 0.86,
+            maxBytes: CHARACTER_AVATAR_MAX_BYTES,
+            fallbacks: CHARACTER_AVATAR_COMPRESSION_FALLBACKS,
+          });
+        } catch (error) {
+          console.error("Failed to read image file data", error);
+        }
+        if (avatar) Object.assign(data, { avatar, polaroidImageX: 50, polaroidImageY: 50, polaroidImageZoom: 1 });
+      }
       setPendingImport(data);
     } catch (e) {
       onNotice(e instanceof Error && e.message === CHAR_BLOCKED_FIELDS
@@ -2104,7 +2126,7 @@ function CharArchiveView({
   function chooseSaveVersion(createVersion: boolean) {
     setShowSaveVersionConfirm(false);
     if (pendingImport) {
-      onSave?.(pendingImport, createVersion, "导入 JSON 前备份");
+      onSave?.(pendingImport, createVersion, "导入角色卡前备份");
       setPendingImport(null);
     } else {
       commitSave(createVersion);
@@ -2593,12 +2615,12 @@ function CharArchiveView({
               </>
             ) : !dummy && !isEditing ? (
               <>
-                <button className="char-archive-btn" onClick={() => importJsonRef.current?.click()}>IMPORT JSON</button>
+                <button className="char-archive-btn" onClick={() => importRef.current?.click()}>IMPORT</button>
                 <input
-                  ref={importJsonRef} type="file" accept=".json,application/json" className="hidden"
+                  ref={importRef} type="file" accept=".json,.png,image/png,application/json" className="hidden"
                   onChange={async (e) => {
                     const file = e.target.files?.[0];
-                    if (file) await handleImportJsonFile(file);
+                    if (file) await handleOverwriteImport(file);
                     e.target.value = "";
                   }}
                 />
@@ -2648,9 +2670,9 @@ function CharArchiveView({
       {archiveFrame}
 
       {(showSaveVersionConfirm || pendingImport) && (
-        <div className="fixed inset-0 z-[10020] flex items-center justify-center bg-black/45 px-5" role="dialog" aria-modal="true" aria-label={pendingImport ? "导入 JSON 覆盖角色卡" : "保存角色卡"}>
+        <div className="fixed inset-0 z-[10020] flex items-center justify-center bg-black/45 px-5" role="dialog" aria-modal="true" aria-label={pendingImport ? "导入覆盖角色卡" : "保存角色卡"}>
           <div className="w-full max-w-sm rounded-2xl border border-[var(--c-panel-border)] bg-[var(--c-page-body-bg)] p-5 text-[var(--c-text)] shadow-2xl">
-            <div className="text-base font-bold">{pendingImport ? "导入 JSON 覆盖角色卡" : "保存角色卡"}</div>
+            <div className="text-base font-bold">{pendingImport ? "导入覆盖角色卡" : "保存角色卡"}</div>
             <p className="mt-2 ts-12 leading-relaxed opacity-75">
               {pendingImport
                 ? <>用文件里的设定覆盖这张卡，记忆、聊天和剧情都还在。当前是 V{getCharacterCurrentVersion(char.id)}，你可以先保存导入前的旧卡，也可以覆盖当前版本。</>
