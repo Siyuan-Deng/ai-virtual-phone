@@ -1,0 +1,39 @@
+name: Clear repo website
+
+# 部署平台（Vercel）会把正式网址写回仓库 About 的 Website 栏；这里定时把它清空。
+# 需要仓库 Secret REPO_ADMIN_TOKEN：只授权本仓库、Repository permissions → Administration 读写的 fine-grained token。
+# 没配这个 Secret 的仓库（同步过去的别人的 fork）直接跳过，什么都不做。
+# 仓库是公开的，Actions 日志谁都能看：日志里只说清没清，不打印网址。
+
+on:
+  push:
+    branches: [dev, main]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  clear:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 清空 Website 栏
+        env:
+          GH_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "没有配置 REPO_ADMIN_TOKEN，跳过"
+            exit 0
+          fi
+          # 推送之后部署平台还在部署，等它把网址写回去再清
+          if [ "$EVENT" = "push" ]; then sleep 300; fi
+          current=$(gh api "repos/$REPO" --jq '.homepage // ""')
+          if [ -z "$current" ]; then
+            echo "Website 栏是空的，不用动"
+            exit 0
+          fi
+          gh api -X PATCH "repos/$REPO" -f homepage="" --silent
+          echo "已清空 Website 栏"
