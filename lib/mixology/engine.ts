@@ -5,9 +5,9 @@
 // API 走全局默认接口配置（与角色绑定无关，特调对局是独立世界）。
 
 import { ChatEngineError, sendLLMRequest, sendLLMStreamRequest } from "../chat-engine";
-import type { LLMMessage } from "../llm-prompt-assembler";
-import { loadApiConfigs, loadBindingConfig } from "../settings-storage";
-import type { ApiConfig } from "../settings-types";
+import { collectPresetInstructions, type LLMMessage, type PresetInstructionBlocks } from "../llm-prompt-assembler";
+import { loadApiConfigs, loadBindingConfig, loadPresets } from "../settings-storage";
+import type { ApiConfig, PresetConfig } from "../settings-types";
 import type { MixHookSection } from "./mechanism-protocol";
 import { assembleMixPrompt, MIX_DEFAULT_USER_NAME, MIX_ENCORE_CLOSE, MIX_ENCORE_OPEN, MIX_TICKET_CLOSE, MIX_TICKET_OPEN, mixNamedOpen, type MixAssembledPrompt } from "./assembler";
 import { applyMixFilterRules, extractMixBlocks, type MixExtractedBlock } from "./prose";
@@ -60,6 +60,15 @@ export function resolveMixApiConfig(): ApiConfig | null {
         if (found) return found;
     }
     return configs[0] ?? null;
+}
+
+/**
+ * 对局用的预设：全局默认预设（和接口一样只认全局默认）。
+ * 只带预设自己写的指令条目和生成参数；人设、世界书、记忆这些标记条目不带——特调有自己的角色卡和材料。
+ */
+export function resolveMixPreset(): PresetConfig | null {
+    const id = loadBindingConfig().globalDefaults.presetId;
+    return id ? loadPresets().find((p) => p.id === id) ?? null : null;
 }
 
 /** 从方案快照装配提示词（材料从酒柜按 id 现取；角色卡被删则报错） */
@@ -173,8 +182,11 @@ function buildMixMessages(
     extraUserNudge?: string,
     feedOf?: MixFeedResolver,
     lastReplyOverride?: string,
+    preset?: PresetInstructionBlocks,
 ): LLMMessage[] {
+    // 预设里排在聊天记录前面的条目放最前，特调自己的系统提示词接在后面
     const messages: LLMMessage[] = [
+        ...(preset?.before ?? []),
         { role: "system", content: assembled.system, _debugMeta: { marker: "mixology_system" } },
     ];
     const turns = limitMixTurns(session.turns, session.historyLimit);
@@ -182,8 +194,13 @@ function buildMixMessages(
     for (let i = turns.length - 1; i >= 0; i -= 1) {
         if (turns[i].role === "assistant") { lastAssistantIdx = i; break; }
     }
+    // 预设里的绝对位置条目插在倒数第 depth 条之前（比历史还深的放最前，0 = 历史末尾）
+    const atDepth = (depth: number) => (preset?.atDepth ?? [])
+        .filter((entry) => Math.min(entry.depth, turns.length) === depth)
+        .map((entry) => entry.message);
     for (const [i, turn] of turns.entries()) {
         const isLast = i === lastAssistantIdx;
+        messages.push(...atDepth(turns.length - i));
         messages.push({
             role: turn.role,
             // 机括落杯前改写过最近一条 assistant：发给模型的整条换成它给的（只改请求，不落库）
@@ -193,6 +210,7 @@ function buildMixMessages(
             _debugMeta: { marker: "mixology_history", _fromHistory: true },
         });
     }
+    messages.push(...atDepth(0));
     if (assembled.postHistory) {
         messages.push({
             role: "system",
@@ -200,6 +218,8 @@ function buildMixMessages(
             _debugMeta: { marker: "mixology_strength" },
         });
     }
+    // 预设里排在聊天记录后面的条目（破限之类）放在苦精之后，和酒馆里破限压在最后一样
+    messages.push(...(preset?.after ?? []));
     if (extraUserNudge) {
         messages.push({
             role: "user",
@@ -523,8 +543,18 @@ async function runMixGeneration(
     }
     const combinedNudge = [nudge, extraNote].filter(Boolean).join("\n\n") || undefined;
     const { prompt: assembled, tickets, encores, active } = assembleFromSession(working, hookSections);
-    const messages = buildMixMessages(working, assembled, combinedNudge, buildFeedResolver(working, tickets, encores), hookLastReply);
-    const meta = { characterName: working.charName, userName: working.userName || "你" };
+    const meta = { characterName: working.charName, userName: working.userName || MIX_DEFAULT_USER_NAME };
+    const preset = resolveMixPreset();
+    const presetBlocks = preset
+        ? collectPresetInstructions(preset, {
+            activeTags: MIX_PROMPT_TAGS,
+            charName: meta.characterName,
+            userName: meta.userName,
+            lastUserMessage: [...working.turns].reverse().find((t) => t.role === "user")?.text,
+            lastCharMessage: [...working.turns].reverse().find((t) => t.role === "assistant")?.text,
+        })
+        : undefined;
+    const messages = buildMixMessages(working, assembled, combinedNudge, buildFeedResolver(working, tickets, encores), hookLastReply, presetBlocks);
     // skipTimestampStrip：特调是"所见即模型所写"，不走聊天那套幻觉时间戳剥离——
     // 那个剥离器在流式时会扣住尾部 64 字等括号闭合，机括的末尾标记行会整行压在里面不出来
     const llmOptions = { appId: MIX_PROMPT_APP_ID, appTags: MIX_PROMPT_TAGS, skipOutputRegex: true, skipTimestampStrip: true, signal };
@@ -532,7 +562,7 @@ async function runMixGeneration(
     if (onDelta) {
         let got = false;
         try {
-            const streamed = await sendLLMStreamRequest(apiConfig, null, messages, [], meta, llmOptions, {
+            const streamed = await sendLLMStreamRequest(apiConfig, preset, messages, [], meta, llmOptions, {
                 onDelta: (chunk) => { got = true; onDelta(chunk); },
             });
             raw = streamed.content;
@@ -540,10 +570,10 @@ async function runMixGeneration(
             // 一个字都没来就报错：多半是这条接口不支持 SSE（或者中间有代理把它拆了），
             // 退回一次性请求重试一遍；已经吐过字再断的话就是真出错了，照常抛出去
             if (got || (error instanceof Error && signal?.aborted)) throw error;
-            raw = await sendLLMRequest(apiConfig, null, messages, [], meta, llmOptions);
+            raw = await sendLLMRequest(apiConfig, preset, messages, [], meta, llmOptions);
         }
     } else {
-        raw = await sendLLMRequest(apiConfig, null, messages, [], meta, llmOptions);
+        raw = await sendLLMRequest(apiConfig, preset, messages, [], meta, llmOptions);
     }
     // 块对号入座：有契约的小票/尾调才是块的候选归属（纯静态小品不收块）
     const contractTickets = tickets.filter((t) => t.contract.trim());

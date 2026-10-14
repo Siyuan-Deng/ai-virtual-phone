@@ -1,6 +1,6 @@
 import { loadCharacters } from "./character-storage";
 import type { Character } from "./character-types";
-import { ChatEngineError, sendLLMRequest } from "./chat-engine";
+import { ChatEngineError, sendLLMRequestPreferStream } from "./chat-engine";
 import { buildCalendarScheduleMarker } from "./calendar-storage";
 import { getWeekStartIso } from "./calendar-utils";
 import { assemblePromptPayload, type LLMMessage } from "./llm-prompt-assembler";
@@ -136,7 +136,8 @@ export async function callGameLLM(input: {
   const userName = input.characterId
     ? resolveUserIdentity(input.characterId, GAME_BINDING_APP_ID)?.name || "用户"
     : "用户";
-  const content = await sendLLMRequest(configs.apiConfig, configs.preset, input.messages, configs.regexes, {
+  // 优先流式：长生成在 iOS Safari 上非流式约 60 秒无数据就会断开（见 sendLLMRequestPreferStream）
+  const content = await sendLLMRequestPreferStream(configs.apiConfig, configs.preset, input.messages, configs.regexes, {
     characterName,
     userName,
   }, {

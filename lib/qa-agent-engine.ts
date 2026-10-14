@@ -205,6 +205,7 @@ type QaVisibleSink = (text: string) => void | Promise<void>;
 const QA_DIRECTIVE_START = /\[[^\[\]\n]{0,60}?(?:执行动作|工具调用|获取指令)/;
 const QA_THINK_START = /<\s*(?:think|thinking)\b/i;
 const QA_THINK_END = /<\/\s*(?:think|thinking)\s*>/i;
+const NOT_A_BLOCK = Symbol("not-a-block");
 
 function createQaStreamFilter(sink: QaVisibleSink, onHolding?: (holding: boolean) => void | Promise<void>) {
     let buffer = "";
@@ -216,21 +217,31 @@ function createQaStreamFilter(sink: QaVisibleSink, onHolding?: (holding: boolean
         await onHolding?.(next);
     };
 
-    const findStart = (text: string): number => {
-        const directive = QA_DIRECTIVE_START.exec(text);
-        const think = QA_THINK_START.exec(text);
+    const findStart = (text: string, from = 0): number => {
+        const rest = text.slice(from);
+        const directive = QA_DIRECTIVE_START.exec(rest);
+        const think = QA_THINK_START.exec(rest);
         const indexes = [directive?.index, think?.index].filter((v): v is number => typeof v === "number");
-        return indexes.length ? Math.min(...indexes) : -1;
+        return indexes.length ? from + Math.min(...indexes) : -1;
     };
+
+    const isThinkStart = (text: string, start: number): boolean => QA_THINK_START.test(text.slice(start, start + 12));
 
     // 指令收尾：对参数括号做字符串感知的配平扫描。
     // 不能用「第一个 )]」判断——代码里 arr[fn()] 这类序列会提前骗停；
     // 也不能设长度上限放弃——放弃后指令尾部会当正文泄漏（见 e2e/test-leak-repro）。
-    const findDirectiveEnd = (text: string, start: number): number | null => {
-        const half = text.indexOf("(", start);
-        const full = text.indexOf("（", start);
-        let i = half === -1 ? full : full === -1 ? half : Math.min(half, full);
-        if (i === -1) return null; // 参数括号还没流到
+    // 参数括号之前先遇到换行或 ]：按 parseToolCallAt 的规则这不是执行指令（例如正文里提到
+    // 「`[执行动作: 写入]`」），返回 NOT_A_BLOCK 当正文显示，不再扣住后文；
+    // [获取指令:xxx] 本来就不带参数括号，到 ] 为止整条隐藏。
+    const findDirectiveEnd = (text: string, start: number): number | null | typeof NOT_A_BLOCK => {
+        let i = start + 1;
+        for (; i < text.length; i++) {
+            const ch = text[i];
+            if (ch === "\n") return NOT_A_BLOCK;
+            if (ch === "]") return text.slice(start, i).includes("获取指令") ? i + 1 : NOT_A_BLOCK;
+            if (ch === "(" || ch === "（") break;
+        }
+        if (i >= text.length) return null; // 参数括号还没流到
         let depth = 0;
         let inString = false;
         for (; i < text.length; i++) {
@@ -256,8 +267,8 @@ function createQaStreamFilter(sink: QaVisibleSink, onHolding?: (holding: boolean
         return null;
     };
 
-    const findEnd = (text: string, start: number): number | null => {
-        if (QA_THINK_START.test(text.slice(start, start + 12))) {
+    const findEnd = (text: string, start: number): number | null | typeof NOT_A_BLOCK => {
+        if (isThinkStart(text, start)) {
             const match = QA_THINK_END.exec(text.slice(start));
             return match ? start + match.index + match[0].length : null;
         }
@@ -277,10 +288,21 @@ function createQaStreamFilter(sink: QaVisibleSink, onHolding?: (holding: boolean
     const drain = async (final: boolean) => {
         let out = "";
         let work = buffer;
+        let from = 0;
         for (;;) {
-            const start = findStart(work);
+            const start = findStart(work, from);
             if (start === -1) break;
             const end = findEnd(work, start);
+            if (end === NOT_A_BLOCK) {
+                from = start + 1;
+                continue;
+            }
+            // 流已结束、<think> 仍未闭合：不是真的思考块，而是正文里提到了这个标签
+            // （如「模型会输出 `<think>` 标签」）。当正文显示，否则后文会被整段丢弃。
+            if (end == null && final && isThinkStart(work, start)) {
+                from = start + 1;
+                continue;
+            }
             if (end == null) {
                 out += work.slice(0, start);
                 buffer = final ? "" : work.slice(start);
@@ -293,6 +315,7 @@ function createQaStreamFilter(sink: QaVisibleSink, onHolding?: (holding: boolean
             }
             out += work.slice(0, start);
             work = work.slice(end);
+            from = 0;
         }
         if (final) {
             out += work;

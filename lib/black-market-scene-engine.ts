@@ -3,7 +3,7 @@ import type { Character } from "./character-types";
 import type { ChatMessage } from "./chat-storage";
 import { buildCalendarScheduleMarker } from "./calendar-storage";
 import { getWeekStartIso } from "./calendar-utils";
-import { ChatEngineError, sendLLMRequest } from "./chat-engine";
+import { ChatEngineError, sendLLMRequestPreferStream } from "./chat-engine";
 import { assemblePromptPayload, type LLMMessage } from "./llm-prompt-assembler";
 import { MacroEngine, postProcessTrim } from "./macro-engine";
 import { loadMemoryConfig, incrementEventCounter } from "./memory-storage";
@@ -29,7 +29,7 @@ import {
   resolveUserIdentity,
 } from "./settings-storage";
 import type { ApiConfig, PresetConfig, RegexConfig, WorldBookConfig } from "./settings-types";
-import { simpleLLMCall } from "./api-helpers";
+import { simpleLLMCallPreferStream } from "./simple-llm-stream";
 
 type SceneConfigs = {
   character: Character;
@@ -179,7 +179,8 @@ export async function generateBlackMarketSceneReply(sessionId: string, userText:
 
   const { messages, configs } = await buildScenePromptMessages(withUser, owned.templateSnapshot);
   const userName = withUser.userName || resolveUserIdentity(withUser.characterId, BLACK_MARKET_BINDING_APP_ID)?.name || "用户";
-  const reply = await sendLLMRequest(configs.apiConfig, configs.preset, messages, configs.regexes, {
+  // 优先流式：长生成在 iOS Safari 上非流式约 60 秒无数据就会断开（见 sendLLMRequestPreferStream）
+  const reply = await sendLLMRequestPreferStream(configs.apiConfig, configs.preset, messages, configs.regexes, {
     characterName: withUser.characterName,
     userName,
   }, {
@@ -232,7 +233,7 @@ export async function summarizeAndRecordBlackMarketScene(sessionId: string): Pro
     "请只输出短期记忆正文。",
   ].join("\n");
 
-  const result = await simpleLLMCall(apiConfig, [{ role: "user", content: prompt }], {
+  const result = await simpleLLMCallPreferStream(apiConfig, [{ role: "user", content: prompt }], {
     temperature: 0.3,
   });
   const summary = (result.content || "").trim();
