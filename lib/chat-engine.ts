@@ -932,6 +932,8 @@ export async function sendLLMRequestPreferStream(
             appTags: options?.appTags,
             followUpCount: options?.followUpCount,
             debugSessionId: options?.debugSessionId,
+            // 插件 hook 靠它判断替谁生成（剧情的日历 / 经期注入就看这个），流式这条路也得带上
+            characterId: options?.characterId,
             signal: options?.signal,
         }, {
             onDelta: () => { received = true; },
