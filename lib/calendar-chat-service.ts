@@ -406,6 +406,8 @@ type CompletionRecord = {
     baselineFingerprints: Record<string, string>;
     interactionFingerprint: string;
     interactionUserMessageCount?: number;
+    /** 注入那一轮最后一条用户消息的指纹：之后的请求里它还在、后面又多了新的，就是真正的下一轮 */
+    interactionLastUser?: string;
     responseSeen: boolean;
     lastAttemptAt?: string;
     respondedAt?: string;
@@ -449,11 +451,15 @@ function shortStableHash(value: string): string {
     return (hash >>> 0).toString(36);
 }
 
-function interactionFingerprint(purpose: string, sessionId: string | undefined, messages: Message[]): string {
-    const users = messages
+function userContents(messages: Message[]): string[] {
+    return messages
         .filter((message) => message?.role === "user")
         .map((message) => stableContentText(message.content))
         .filter(Boolean);
+}
+
+function interactionFingerprint(purpose: string, sessionId: string | undefined, messages: Message[]): string {
+    const users = userContents(messages);
     return `${purpose || "chat"}:${sessionId || "story"}:${users.length}:${shortStableHash(users.join("␞"))}`;
 }
 
@@ -622,6 +628,8 @@ function prepareCompletionMerge(payload: LlmRequestPayload, messages: Message[],
     const original = (payload.messages || []) as Message[];
     const fingerprint = interactionFingerprint(payload.purpose, payload.sessionId, original);
     const userCount = userMessageCount(original);
+    const userHashes = userContents(original).map(shortStableHash);
+    const lastUser = userHashes[userHashes.length - 1] ?? "";
     const lastRole = lastConversationRole(original);
     const kept: CompletionRecord[] = [];
     const injected: CompletionRecord[] = [];
@@ -637,13 +645,20 @@ function prepareCompletionMerge(payload: LlmRequestPayload, messages: Message[],
             continue;
         }
         if (record.interactionFingerprint && record.interactionFingerprint !== fingerprint && record.responseSeen) {
-            // 真正的下一轮会多一条用户消息；编辑、删了重发、重试第一轮用户消息数不变，事实要留着
-            if (userCount > Number(record.interactionUserMessageCount || 0)) continue;
+            // 已经回应过了，现在又是另一次请求：是真正的下一轮就把这件事放下。
+            // 下一轮的样子：注入那一轮最后一条用户消息还在，后面又来了新的。不能只看用户消息条数——
+            // 历史按 token 预算截断，聊久了窗口满了条数就不涨了，以前会被当成重试，每轮都再提一遍。
+            // 编辑、删了重发：那条消息没了；重试：它还是最后一条——这两种事实都要留着。
+            // 老记录没存那条消息的指纹，回应过了就当已经过去。
+            const movedOn = userCount > Number(record.interactionUserMessageCount || 0)
+                || (record.interactionLastUser ? userHashes.slice(0, -1).includes(record.interactionLastUser) : true);
+            if (movedOn) continue;
             record.responseSeen = false;
         }
         if (!record.interactionFingerprint || record.interactionFingerprint !== fingerprint) {
             record.interactionFingerprint = fingerprint;
             record.interactionUserMessageCount = userCount;
+            record.interactionLastUser = lastUser;
             record.responseSeen = false;
             record.lastAttemptAt = new Date().toISOString();
         }
