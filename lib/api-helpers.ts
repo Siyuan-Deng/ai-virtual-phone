@@ -90,37 +90,43 @@ export function isNativeGoogleApi(config: ApiConfig): boolean {
     return config.provider === "Google";
 }
 
+export type SimpleLLMMessage = { role: string; content: string };
+export type SimpleLLMCallOptions = { temperature?: number; max_tokens?: number; signal?: AbortSignal; label?: string };
+export type SimpleLLMCallResult = { content: string | null; error?: string; finishReason?: string; wasTruncated?: boolean };
+export type SimpleLLMRequest = {
+    url: string;
+    headers: Record<string, string>;
+    body: string;
+    providerKind: "anthropic" | "gemini" | "openai-compatible";
+};
+
 /**
- * Send a simple LLM request (single user message) and return the text response.
- * Used by summarizer, moments-engine, and other non-chat LLM calls.
- * Handles all provider formats automatically.
+ * simpleLLMCall 的请求构造（地址 / 头 / 请求体），非流式与流式共用，保证两条路径发出的内容一致。
+ * stream=true 时只额外打开各家的流式开关。地址或密钥无效返回 null。
  */
-export async function simpleLLMCall(
+export function buildSimpleLLMRequest(
     config: ApiConfig,
-    messages: { role: string; content: string }[],
-    options?: { temperature?: number; max_tokens?: number; signal?: AbortSignal; label?: string },
-): Promise<{ content: string | null; error?: string; finishReason?: string; wasTruncated?: boolean }> {
+    messages: SimpleLLMMessage[],
+    options?: SimpleLLMCallOptions,
+    stream = false,
+): SimpleLLMRequest | null {
     const baseUrl = determineBaseUrl(config);
-    if (!baseUrl || !config.apiKey) {
-        return { content: null, error: "API 地址或密钥无效" };
-    }
+    if (!baseUrl || !config.apiKey) return null;
 
     const headers = buildRequestHeaders(config, baseUrl);
     const temperature = options?.temperature ?? 0.7;
     const max_tokens = options?.max_tokens;
 
-    try {
-        let fetchUrl: string;
-        let body: string;
-
-        if (isNativeAnthropicApi(config)) {
-            // Anthropic Messages API
-            fetchUrl = `${baseUrl.replace(/\/$/, "")}/messages`;
-            const anthropicMessages = messages
-                .filter(m => m.role !== "system")
-                .map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
-            const systemMsg = messages.find(m => m.role === "system");
-            body = JSON.stringify({
+    if (isNativeAnthropicApi(config)) {
+        // Anthropic Messages API
+        const anthropicMessages = messages
+            .filter(m => m.role !== "system")
+            .map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
+        const systemMsg = messages.find(m => m.role === "system");
+        return {
+            url: `${baseUrl.replace(/\/$/, "")}/messages`,
+            headers,
+            body: JSON.stringify({
                 model: config.defaultModel,
                 messages: anthropicMessages,
                 ...(systemMsg ? { system: systemMsg.content } : {}),
@@ -128,33 +134,67 @@ export async function simpleLLMCall(
                 // Anthropic requires max_tokens. Keep this helper aligned with
                 // the main chat engine instead of silently capping output low.
                 max_tokens: max_tokens ?? SIMPLE_ANTHROPIC_AUTO_MAX_TOKENS,
-            });
-        } else if (isNativeGoogleApi(config)) {
-            // Google Gemini API
-            fetchUrl = `${baseUrl.replace(/\/$/, "")}/models/${config.defaultModel}:generateContent?key=${config.apiKey}`;
-            // Remove Authorization header for Gemini (uses URL key)
-            delete headers["Authorization"];
-            const parts = messages.map(m => ({
-                role: m.role === "assistant" ? "model" : "user",
-                parts: [{ text: m.content }],
-            }));
-            body = JSON.stringify({
+                ...(stream ? { stream: true } : {}),
+            }),
+            providerKind: "anthropic",
+        };
+    }
+    if (isNativeGoogleApi(config)) {
+        // Google Gemini API
+        // Remove Authorization header for Gemini (uses URL key)
+        delete headers["Authorization"];
+        const parts = messages.map(m => ({
+            role: m.role === "assistant" ? "model" : "user",
+            parts: [{ text: m.content }],
+        }));
+        const method = stream ? "streamGenerateContent?alt=sse&" : "generateContent?";
+        return {
+            url: `${baseUrl.replace(/\/$/, "")}/models/${config.defaultModel}:${method}key=${config.apiKey}`,
+            headers,
+            body: JSON.stringify({
                 contents: parts,
                 generationConfig: {
                     temperature,
                     ...(max_tokens ? { maxOutputTokens: max_tokens } : {}),
                 },
-            });
-        } else {
-            // OpenAI-compatible (all others including proxies/relays/custom)
-            fetchUrl = buildChatCompletionsUrl(baseUrl);
-            body = JSON.stringify({
-                model: config.defaultModel,
-                messages,
-                temperature,
-                ...(max_tokens ? { max_tokens } : {}),
-            });
-        }
+            }),
+            providerKind: "gemini",
+        };
+    }
+    // OpenAI-compatible (all others including proxies/relays/custom)
+    return {
+        url: buildChatCompletionsUrl(baseUrl),
+        headers,
+        body: JSON.stringify({
+            model: config.defaultModel,
+            messages,
+            temperature,
+            ...(max_tokens ? { max_tokens } : {}),
+            ...(stream ? { stream: true } : {}),
+        }),
+        providerKind: "openai-compatible",
+    };
+}
+
+/**
+ * Send a simple LLM request (single user message) and return the text response.
+ * Used by summarizer, moments-engine, and other non-chat LLM calls.
+ * Handles all provider formats automatically.
+ */
+export async function simpleLLMCall(
+    config: ApiConfig,
+    messages: SimpleLLMMessage[],
+    options?: SimpleLLMCallOptions,
+): Promise<SimpleLLMCallResult> {
+    const request = buildSimpleLLMRequest(config, messages, options);
+    if (!request) {
+        return { content: null, error: "API 地址或密钥无效" };
+    }
+
+    try {
+        const fetchUrl = request.url;
+        const headers = request.headers;
+        const body = request.body;
 
         const bodySize = body.length;
         const bodyTokenEstimate = Math.ceil(bodySize / 3);
@@ -236,7 +276,7 @@ export function extractFinishReason(data: Record<string, unknown>): string | und
         ?? undefined;
 }
 
-function isTruncationFinishReason(reason?: string): boolean {
+export function isTruncationFinishReason(reason?: string): boolean {
     if (!reason) return false;
     const normalized = String(reason).trim().toLowerCase();
     return normalized === "length"
@@ -266,7 +306,7 @@ function shortDebugText(value: unknown, limit = 120): string {
     return text.length > limit ? `${text.slice(0, limit)}...` : text;
 }
 
-function describeEmptyLLMResponse(
+export function describeEmptyLLMResponse(
     data: Record<string, unknown>,
     finishReason?: string,
     wasTruncated = false,
@@ -335,7 +375,7 @@ export function stripHallucinatedTimestamps(text: string): string {
         .replace(/\(system\s*time\s*[:：][^)]*\)\s*/gi, "");
 }
 
-function stripReasoningMarkup(text: string): string {
+export function stripReasoningMarkup(text: string): string {
     return text
         .replace(/<(?:think|thinking)>[\s\S]*?<\/(?:think|thinking)>/gi, "")
         .trim();

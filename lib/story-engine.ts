@@ -10,7 +10,7 @@ import {
 } from "./settings-storage";
 import type { ApiConfig, PresetConfig, RegexConfig, WorldBookConfig } from "./settings-types";
 import { assemblePromptPayload, type LLMMessage } from "./llm-prompt-assembler";
-import { applyLlmRequestHooksForPreview, previewMessagesForApi, sendLLMRequest, ChatEngineError } from "./chat-engine";
+import { applyLlmRequestHooksForPreview, previewMessagesForApi, sendLLMRequestPreferStream, ChatEngineError } from "./chat-engine";
 import { loadMemoryConfig } from "./memory-storage";
 import { retrieveCoreMemoriesForPrompt, retrieveMemoriesForPrompt } from "./memory-service";
 import { formatCoreMemories, formatLongTermMemories } from "./memory-injector";
@@ -163,7 +163,8 @@ export async function generateStoryCompletion(
   const userIdentity = resolveUserIdentity(characterId, "story");
   const macroEngine = new MacroEngine(character.name, userIdentity?.name ?? "用户");
 
-  const rawOutput = await sendLLMRequest(apiConfig, preset, llmMessages, regexes, {
+  // 剧情一次生成很长：优先流式，避免 iOS Safari 约 60 秒无数据就断开（见 sendLLMRequestPreferStream）
+  const rawOutput = await sendLLMRequestPreferStream(apiConfig, preset, llmMessages, regexes, {
     characterName: character.name,
   }, { skipOutputRegex: true, includeReasoning: true, appId: "story", appTags: storyAppTags(options?.extra), characterId, signal: options?.signal });
 
