@@ -124,6 +124,7 @@ function addImportedRegexTags(builders: Map<string, GroupBuilder>, app: Installe
     if (!group.id.startsWith(prefix)) continue;
     for (const rule of group.rules ?? []) {
       addTagSet(builder, stringArray(rule.tags), rule.scriptName || group.name);
+      for (const set of rule.tagSets ?? []) addTagSet(builder, stringArray(set), rule.scriptName || group.name);
     }
   }
 }

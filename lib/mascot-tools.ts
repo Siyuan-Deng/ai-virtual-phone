@@ -2499,6 +2499,7 @@ async function handleReadRegexGroup(args: Record<string, unknown>): Promise<Tool
         lines.push(`    find: ${r.findRegex}`);
         lines.push(`    replace: ${r.replaceString}`);
         lines.push(`    tags: ${JSON.stringify(r.tags || ["chat", "text"])}`);
+        if (r.tagSets?.length) lines.push(`    tagSets（满足任意一组）: ${JSON.stringify(r.tagSets)}`);
         lines.push(`    placement: ${JSON.stringify(r.placement)}`);
         lines.push(`    markdownOnly: ${r.markdownOnly ? "true" : "false"} / promptOnly: ${r.promptOnly ? "true" : "false"} / historyOnly: ${r.historyOnly ? "true" : "false"} / substituteRegex: ${r.substituteRegex ?? 0}`);
         lines.push(`    minDepth: ${r.minDepth != null ? r.minDepth : "不限"} / maxDepth: ${r.maxDepth != null ? r.maxDepth : "不限"}`);
@@ -2586,7 +2587,11 @@ async function handleUpdateRegexRule(args: Record<string, unknown>): Promise<Too
     if (ruleIdx < 0) return { name: "更新正则规则", success: false, error: `找不到规则 id：${args.ruleId}` };
     const updates = { ...(args.updates as Record<string, unknown>) };
     if ("substituteRegex" in updates) updates.substituteRegex = numberOption(updates.substituteRegex, 0);
-    if ("tags" in updates) updates.tags = normalizeMascotRegexRuleTags(updates.tags);
+    // 改了范围就是重新单选，原来多选的那几组不再算
+    if ("tags" in updates) {
+        updates.tags = normalizeMascotRegexRuleTags(updates.tags);
+        updates.tagSets = undefined;
+    }
     if ("minDepth" in updates) updates.minDepth = normalizeRegexDepth(updates.minDepth);
     if ("maxDepth" in updates) updates.maxDepth = normalizeRegexDepth(updates.maxDepth);
     group.rules[ruleIdx] = { ...group.rules[ruleIdx], ...updates } as typeof group.rules[number];

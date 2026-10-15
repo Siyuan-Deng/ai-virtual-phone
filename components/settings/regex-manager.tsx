@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useContext, useCallback, useMemo } from "react";
-import { Plus, Trash2, Download, Database, Play, Upload, ChevronLeft, AlertCircle, Maximize2, X, Replace, Copy, Check, Folder, FolderPlus, FolderInput, Pencil, Pin } from "lucide-react";
+import { Plus, Trash2, Download, Database, Play, Upload, ChevronLeft, AlertCircle, Maximize2, X, Replace, Copy, Check, Folder, FolderPlus, FolderInput, Pencil, Pin, ChevronDown } from "lucide-react";
 import {
     loadRegexes,
     saveRegexes,
@@ -26,7 +26,7 @@ import { Toggle } from "@/components/ui/form";
 import { useLongPressReorder } from "./use-long-press-reorder";
 import { testRegexRule } from "@/lib/llm-prompt-assembler";
 import { MacroEngine } from "@/lib/macro-engine";
-import { areTagsEqual, getTagProfileId, getTagsLabel, type TagProfile } from "@/lib/content-tag-utils";
+import { areTagsEqual, getTagsLabel, type TagProfile } from "@/lib/content-tag-utils";
 import { buildCustomAppTagGroups, flattenTagGroups } from "@/lib/custom-app-tag-profiles";
 import { CUSTOM_APPS_UPDATED_EVENT, loadInstalledCustomApps } from "@/lib/custom-app-storage";
 import type { InstalledCustomApp } from "@/lib/custom-app-types";
@@ -175,7 +175,22 @@ function migrateLegacyRuleTags(tags: string[]): string[] {
     return tags;
 }
 
+/** 规则管到哪些地方，一组标签一个范围；空数组就是全部 */
+function getRuleTagSets(rule: Pick<RegexRule, "tags" | "tagSets">): string[][] {
+    if (rule.tagSets && rule.tagSets.length > 0) return rule.tagSets.map(set => [...set]);
+    const tags = getRuleTags(rule);
+    return tags.length > 0 ? [tags] : [];
+}
+
+/** 只选一个照旧写 tags；选了几个写 tagSets，tags 留第一组给旧版本 */
+function setRuleTagSets(sets: string[][]): Partial<RegexRule> {
+    const unique = sets.filter((set, index) => set.length > 0 && sets.findIndex(other => areTagsEqual(other, set)) === index);
+    if (unique.length === 0) return { tags: undefined, tagSets: undefined };
+    return { tags: unique[0], tagSets: unique.length > 1 ? unique : undefined };
+}
+
 function normalizeRuleScope(rule: RegexRule): RegexRule {
+    if (rule.tagSets !== undefined) return { ...rule, ...setRuleTagSets(getRuleTagSets(rule).map(migrateLegacyRuleTags)) };
     const tags = migrateLegacyRuleTags(getRuleTags(rule));
     if (tags.length === 0) return rule.tags === undefined ? rule : { ...rule, tags: undefined };
     return areTagsEqual(tags, getRuleTags(rule)) ? rule : { ...rule, tags };
@@ -188,23 +203,14 @@ function normalizeGroupScope(group: RegexConfig): RegexConfig {
     };
 }
 
-function getRuleTagProfileId(rule: Pick<RegexRule, "tags">, profiles: TagProfile[]): string {
-    return getTagProfileId(getRuleTags(rule), profiles);
+function getRuleScopeLabel(rule: Pick<RegexRule, "tags" | "tagSets">, profiles: TagProfile[]): string {
+    const sets = getRuleTagSets(rule);
+    return sets.length > 0 ? sets.map(set => getTagsLabel(set, profiles)).join("、") : "全部";
 }
 
-function getRuleTagsLabel(rule: Pick<RegexRule, "tags">, profiles: TagProfile[]): string {
-    return getTagsLabel(getRuleTags(rule), profiles);
-}
-
-function getRuleRawTagsLabel(rule: Pick<RegexRule, "tags">): string {
-    const tags = getRuleTags(rule);
-    return tags.length > 0 ? tags.join(" · ") : "通用";
-}
-
-function setRuleTags(tags: string[]): Partial<RegexRule> {
-    return {
-        tags: tags.length > 0 ? tags : undefined,
-    };
+function getRuleRawTagsLabel(rule: Pick<RegexRule, "tags" | "tagSets">): string {
+    const sets = getRuleTagSets(rule);
+    return sets.length > 0 ? sets.map(set => set.join(" · ")).join(" ／ ") : "通用";
 }
 
 export function RegexManager({ isActive = true }: { isActive?: boolean } = {}) {
@@ -230,6 +236,7 @@ export function RegexManager({ isActive = true }: { isActive?: boolean } = {}) {
     const [folderNameDraft, setFolderNameDraft] = useState("");
     const [confirmDeleteFolderId, setConfirmDeleteFolderId] = useState<string | null>(null);
     const [moveSelection, setMoveSelection] = useState<Set<string> | null>(null);
+    const [scopeSheetRuleId, setScopeSheetRuleId] = useState<string | null>(null);
     /** 最外层文件夹和正则组混排的顺序（长按拖出来的） */
     const [rootOrder, setRootOrder] = useState<string[]>([]);
 
@@ -547,6 +554,11 @@ export function RegexManager({ isActive = true }: { isActive?: boolean } = {}) {
             placement: placement.length > 0 ? placement : [1],
         };
         if (Array.isArray(obj.tags)) rule.tags = obj.tags.filter((t): t is string => typeof t === "string");
+        if (Array.isArray(obj.tagSets)) {
+            rule.tagSets = obj.tagSets
+                .filter((set): set is unknown[] => Array.isArray(set))
+                .map(set => set.filter((t): t is string => typeof t === "string"));
+        }
         if (Array.isArray(obj.trimStrings)) rule.trimStrings = obj.trimStrings.filter((t): t is string => typeof t === "string");
         if (typeof obj.markdownOnly === "boolean") rule.markdownOnly = obj.markdownOnly;
         if (typeof obj.promptOnly === "boolean") rule.promptOnly = obj.promptOnly;
@@ -1062,8 +1074,8 @@ export function RegexManager({ isActive = true }: { isActive?: boolean } = {}) {
                                                                 <span className="ui-tag" data-variant="muted">
                                                                     <span className="font-mono overflow-hidden text-ellipsis whitespace-nowrap max-w-[160px] inline-block align-bottom">{rule.findRegex || "无匹配正则"}</span>
                                                                 </span>
-                                                                <span className="ui-status-tag" data-variant={getRuleTags(rule).length > 0 ? "success" : undefined}>
-                                                                    {getRuleTagsLabel(rule, regexScopeTagProfiles)}
+                                                                <span className="ui-status-tag" data-variant={getRuleTagSets(rule).length > 0 ? "success" : undefined}>
+                                                                    {getRuleScopeLabel(rule, regexScopeTagProfiles)}
                                                                 </span>
                                                                 {rule.disabled && <span className="ui-status-tag">已禁用</span>}
                                                             </div>
@@ -1197,22 +1209,14 @@ export function RegexManager({ isActive = true }: { isActive?: boolean } = {}) {
 
                                                         <div className="flex flex-col gap-1">
                                                             <label className="menu-desc">适用范围</label>
-                                                            <select
-                                                                value={getRuleTagProfileId(rule, regexScopeTagProfiles)}
-                                                                onChange={(e) => {
-                                                                    const selectedProfile = regexScopeTagProfiles.find(profile => profile.id === e.target.value);
-                                                                    if (!selectedProfile) return;
-                                                                    updateRule(rule.id, setRuleTags(selectedProfile.tags));
-                                                                }}
-                                                                className="ui-input ts-13"
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setScopeSheetRuleId(rule.id)}
+                                                                className="ui-input ts-13 flex w-full items-center justify-between gap-2 text-left"
                                                             >
-                                                                {getRuleTagProfileId(rule, regexScopeTagProfiles) === "__custom__" ? (
-                                                                    <option value="__custom__">{getRuleRawTagsLabel(rule)}</option>
-                                                                ) : null}
-                                                                {regexScopeTagProfiles.map((profile) => (
-                                                                    <option key={profile.id} value={profile.id}>{profile.label}</option>
-                                                                ))}
-                                                            </select>
+                                                                <span className="min-w-0 truncate">{getRuleScopeLabel(rule, regexScopeTagProfiles)}</span>
+                                                                <ChevronDown size={15} className="shrink-0 opacity-60" />
+                                                            </button>
                                                             <div className="menu-desc !mt-0">
                                                                 实际标签：{getRuleRawTagsLabel(rule)}
                                                             </div>
@@ -1440,6 +1444,47 @@ export function RegexManager({ isActive = true }: { isActive?: boolean } = {}) {
                             >
                                 <FolderInput size={16} /> 移入{moveSelection.size > 0 ? `（${moveSelection.size}）` : ""}
                             </button>
+                        </div>
+                    </BottomSheet>
+                );
+            })()}
+
+            {scopeSheetRuleId && (() => {
+                const rule = activeGroup?.rules?.find(r => r.id === scopeSheetRuleId);
+                if (!rule) return null;
+                const sets = getRuleTagSets(rule);
+                // 下拉里没有的（导入的、手写的标签组合）也列出来，别一打开就丢了
+                const options = [
+                    ...regexScopeTagProfiles.map(profile => ({ key: profile.id, label: profile.label, tags: profile.tags })),
+                    ...sets
+                        .filter(set => !regexScopeTagProfiles.some(profile => areTagsEqual(profile.tags, set)))
+                        .map(set => ({ key: `raw:${set.join(",")}`, label: getTagsLabel(set, regexScopeTagProfiles), tags: set })),
+                ];
+                const renderOption = (key: string, label: string, checked: boolean, onClick: () => void) => (
+                    <button
+                        key={key}
+                        type="button"
+                        className="binding-sheet-option"
+                        data-selected={checked}
+                        aria-pressed={checked}
+                        onClick={onClick}
+                    >
+                        <span className="binding-sheet-check">{checked && <Check size={15} />}</span>
+                        <span className="binding-sheet-option-text">{label}</span>
+                    </button>
+                );
+                return (
+                    <BottomSheet title="适用范围（可多选）" onClose={() => setScopeSheetRuleId(null)}>
+                        <div className="flex max-h-[60vh] flex-col gap-1 overflow-y-auto">
+                            {renderOption("__all__", "全部", sets.length === 0, () => updateRule(rule.id, setRuleTagSets([])))}
+                            {options.map(option => {
+                                const isOn = (o: typeof option) => sets.some(set => areTagsEqual(set, o.tags));
+                                const checked = isOn(option);
+                                // 按列表顺序存，显示出来是「聊天、剧情」，不是点的先后
+                                return renderOption(option.key, option.label, checked, () => updateRule(rule.id, setRuleTagSets(
+                                    options.filter(o => (o === option ? !checked : isOn(o))).map(o => o.tags),
+                                )));
+                            })}
                         </div>
                     </BottomSheet>
                 );

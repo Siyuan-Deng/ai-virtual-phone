@@ -9,7 +9,7 @@ import { MacroEngine, postProcessTrim } from "./macro-engine";
 import type { RecentBlock, UnifiedRecentItem } from "./short-term-assembler";
 import { readDwellingLayoutCache } from "./dwelling-storage";
 import { formatDwellingContext } from "./dwelling-engine";
-import { matchesActiveTags } from "./content-tag-utils";
+import { matchesActiveTagSets } from "./content-tag-utils";
 import { formatXiaohongshuShareForPrompt } from "./chat-share";
 import { stripStateAndInnerForPrompt } from "./prompt-sanitizer";
 import { formatPromptTimestamp, getPromptTimestampOptionsForTimeContext, resolvePromptTimeAware, type PromptTimestampOptions } from "./prompt-time";
@@ -1567,7 +1567,7 @@ function shouldRunRule(
 ): boolean {
     if (rule.disabled) return false;
     if (!rule.placement?.includes(placement)) return false;
-    if (!matchesActiveTags(rule.tags, ctx.activeTags ?? [])) return false;
+    if (!matchesActiveTagSets(rule.tags, rule.tagSets, ctx.activeTags ?? [])) return false;
     // historyOnly gate: only fire on chat history message blocks
     if (rule.historyOnly === true && ctx.history !== true) return false;
 
@@ -2401,7 +2401,7 @@ export function applyAllOutputRegex(text: string, regexGroups: RegexConfig[], ct
             if (rule.disabled) continue;
             if (!rule.placement?.includes(2)) continue;
             if (rule.promptOnly) continue;
-            if (!matchesActiveTags(rule.tags, ctx?.activeTags ?? [])) continue;
+            if (!matchesActiveTagSets(rule.tags, rule.tagSets, ctx?.activeTags ?? [])) continue;
             try {
                 result = runRegexRule(rule, result, ctx?.macroEngine);
             } catch {
@@ -2428,7 +2428,7 @@ export function applyAllReasoningRegex(text: string, regexGroups: RegexConfig[],
             if (rule.disabled) continue;
             if (!rule.placement?.includes(6)) continue;
             if (rule.promptOnly) continue;
-            if (!matchesActiveTags(rule.tags, ctx?.activeTags ?? [])) continue;
+            if (!matchesActiveTagSets(rule.tags, rule.tagSets, ctx?.activeTags ?? [])) continue;
             try {
                 result = runRegexRule(rule, result, ctx?.macroEngine);
             } catch {
