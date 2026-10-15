@@ -183,15 +183,44 @@ marked.setOptions({
     gfm: true,         // GitHub Flavored Markdown (tables, strikethrough)
 });
 
+/** 0. Pre-process markdown before marked */
+function preprocessMarkdown(content: string): string {
+    return content
+        .replace(/<\/?([a-zA-Z][a-zA-Z0-9_-]*)[^>]*>/g, (match, tag) =>  // strip all non-standard HTML tags (keep content)
+            STANDARD_TAGS.has(tag.toLowerCase()) ? match : "")
+        .replace(/^[ \t]+/gm, "")                     // strip leading whitespace (prevents marked treating indented HTML as code blocks)
+        .replace(/\n{3,}/g, "\n\n")                    // max 2 consecutive newlines
+        .replace(/(>)\s*\n\n\s*(<)/g, "$1\n$2");       // remove blank lines between HTML tags
+}
+
+/** 收进片刻纪事用：只要看得见的正文段落。生成页、折叠块（思维链、摘要）不要，
+ *  正则换出来的状态栏这类不成段的 HTML 也不要；段内 <br> 换行也拆成一段 */
+export function storyProseParagraphs(content: string): string[] {
+    if (typeof DOMParser === "undefined") return [];
+    const paragraphs: string[] = [];
+    for (const seg of splitContent(content)) {
+        if (seg.type !== "markdown") continue;
+        const html = marked.parse(preprocessMarkdown(seg.content), { async: false }) as string;
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        doc.querySelectorAll("style, script").forEach(node => node.remove());
+        doc.querySelectorAll("br").forEach(node => node.replaceWith("\n"));
+        // 正文是 marked 出来的段落；正则包了一层 div 的也照样找得到。整块没有段落的才退回全文
+        const blocks = Array.from(doc.body.querySelectorAll("p, blockquote, h1, h2, h3, h4, h5, h6, li"))
+            .filter(node => !node.parentElement?.closest("p, blockquote, li, details, table"));
+        const texts = blocks.length > 0 ? blocks.map(node => node.textContent || "") : [doc.body.textContent || ""];
+        for (const block of texts) {
+            for (const line of block.split("\n")) {
+                const trimmed = line.trim();
+                if (trimmed) paragraphs.push(trimmed);
+            }
+        }
+    }
+    return paragraphs;
+}
+
 function MarkdownSegment({ content, scopeClass }: { content: string; scopeClass: string }) {
     const html = useMemo(() => {
-        // 0. Pre-process:
-        const preprocessed = content
-            .replace(/<\/?([a-zA-Z][a-zA-Z0-9_-]*)[^>]*>/g, (match, tag) =>  // strip all non-standard HTML tags (keep content)
-                STANDARD_TAGS.has(tag.toLowerCase()) ? match : "")
-            .replace(/^[ \t]+/gm, "")                     // strip leading whitespace (prevents marked treating indented HTML as code blocks)
-            .replace(/\n{3,}/g, "\n\n")                    // max 2 consecutive newlines
-            .replace(/(>)\s*\n\n\s*(<)/g, "$1\n$2");       // remove blank lines between HTML tags
+        const preprocessed = preprocessMarkdown(content);
 
         // 1. Markdown → HTML
         const rawHtml = marked.parse(preprocessed, { async: false }) as string;

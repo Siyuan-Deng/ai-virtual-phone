@@ -685,6 +685,11 @@
   color: rgba(42, 39, 34, 0.78);
 }
 
+/* 片刻纪事的纸条没有标题，正文接在小字下面，空出标题那段距离 */
+.moment-card .diary-entry-card-text {
+  margin-top: 22px;
+}
+
 .diary-entry-card-meta {
   display: flex;
   align-items: center;

@@ -35,7 +35,29 @@ type Props = {
     progressPercent: number;
     annotations: ReadingShareAnnotation[];
     onClose: () => void;
+    /** 片刻纪事借用这个弹窗：进度位写日期 */
+    progressLabel?: string;
+    /** 署名换成说这句话的人；不给就是阅读账号 */
+    signature?: { name: string; avatar?: string };
+    /** 字体直接给；不给就去阅读界面里量 */
+    fonts?: ReadingShareFonts;
+    title?: string;
+    /** 存图的文件名开头 */
+    filePrefix?: string;
 };
+
+/** 头像地址（data URL 或图片地址）读成能画到 canvas 上的图 */
+async function loadAvatarImage(src: string): Promise<CanvasImageSource | null> {
+    try {
+        const image = new Image();
+        image.crossOrigin = "anonymous";
+        image.src = src;
+        await image.decode();
+        return image;
+    } catch {
+        return null;
+    }
+}
 
 /** 阅读界面实际渲染用的三档字体。直接问 DOM 最准——自定义上传的字体在这里是
  *  运行期才生成的 family 名，配置里查不到；注入的那条样式也只有 DOM 知道。 */
@@ -81,6 +103,7 @@ function resolveRenderedFonts(): ReadingShareFonts {
 
 export function ReadingShareDialog({
     quoteParagraphs, bookTitle, bookAuthor, chapterTitle, progressPercent, annotations, onClose,
+    progressLabel, signature, fonts, title = "分享摘抄", filePrefix = "摘抄",
 }: Props) {
     const [template, setTemplate] = useState<ReadingShareTemplate>("poster");
     const [palette, setPalette] = useState<ReadingSharePalette>(READING_SHARE_TEMPLATE_PRESETS.poster);
@@ -123,20 +146,26 @@ export function ReadingShareDialog({
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const avatarRef = useRef<CanvasImageSource | null>(null);
     /** 摘抄内容在弹窗打开期间不会变；钉住，免得父组件重渲染就重画一遍 */
-    const contentRef = useRef({ quoteParagraphs, annotations, bookTitle, bookAuthor, chapterTitle, progressPercent });
+    const contentRef = useRef({ quoteParagraphs, annotations, bookTitle, bookAuthor, chapterTitle, progressPercent, progressLabel, signature, fonts });
 
     useEffect(() => {
         let cancelled = false;
         const draw = async () => {
             try {
+                const given = contentRef.current;
                 if (avatarRef.current === null) {
-                    const blob = await loadReadingProfileAvatar().catch(() => null);
-                    if (blob && typeof createImageBitmap === "function") {
-                        avatarRef.current = await createImageBitmap(blob).catch(() => null);
+                    if (given.signature) {
+                        avatarRef.current = given.signature.avatar ? await loadAvatarImage(given.signature.avatar) : null;
+                    } else {
+                        const blob = await loadReadingProfileAvatar().catch(() => null);
+                        if (blob && typeof createImageBitmap === "function") {
+                            avatarRef.current = await createImageBitmap(blob).catch(() => null);
+                        }
                     }
                 }
                 // 等字体真正可用，否则画出来的是系统字体
                 if (typeof document !== "undefined" && document.fonts?.ready) {
+                    if (given.fonts) await document.fonts.load(`40px ${given.fonts.body}`).catch(() => {});
                     await document.fonts.ready.catch(() => {});
                 }
                 if (cancelled) return;
@@ -149,9 +178,10 @@ export function ReadingShareDialog({
                     bookTitle: content.bookTitle,
                     bookAuthor: content.bookAuthor,
                     chapterTitle: content.chapterTitle,
-                    userName: loadReadingProfile().name,
+                    userName: content.signature ? content.signature.name : loadReadingProfile().name,
                     avatar: avatarRef.current,
                     progressPercent: content.progressPercent,
+                    progressLabel: content.progressLabel,
                     annotations: content.annotations.filter((annotation) => (
                         annotation.authorType === "user" ? withMine : withTheirs
                     )),
@@ -159,7 +189,7 @@ export function ReadingShareDialog({
                         user: appearance.userAnnotationCardColor || READING_ANNOTATION_STYLE_DEFAULTS.userCardColor,
                         character: appearance.annotationCardColor || READING_ANNOTATION_STYLE_DEFAULTS.cardColor,
                     },
-                    fonts: resolveRenderedFonts(),
+                    fonts: content.fonts ?? resolveRenderedFonts(),
                     timestamp: new Date(),
                     palette,
                     align,
@@ -187,7 +217,7 @@ export function ReadingShareDialog({
             setError(null);
             const blob = await readingShareCardToBlob(canvas);
             const stamp = new Date().toISOString().slice(0, 10);
-            await downloadFile(blob, `摘抄-${contentRef.current.bookTitle || "未命名"}-${stamp}.png`);
+            await downloadFile(blob, `${filePrefix}-${contentRef.current.bookTitle || "未命名"}-${stamp}.png`);
         } catch (err) {
             setError(err instanceof Error ? err.message : "保存失败");
         } finally {
@@ -197,7 +227,7 @@ export function ReadingShareDialog({
 
     return (
         <ContentDialog
-            title="分享摘抄"
+            title={title}
             confirmLabel={busy ? "生成中..." : "保存图片"}
             cancelLabel="关闭"
             onConfirm={() => { if (!busy) void handleDownload(); }}

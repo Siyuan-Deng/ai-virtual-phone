@@ -78,6 +78,8 @@ export type ReadingShareCardInput = {
     avatar: CanvasImageSource | null;
     /** 这段话在全书的位置，0-100 */
     progressPercent: number;
+    /** 不是读书摘的（片刻纪事）：进度位改写这个（日期），大数字也换成它，时间戳不再另写 */
+    progressLabel?: string;
     annotations: ReadingShareAnnotation[];
     /** 批注便签的底色，和阅读界面里的批注卡片一致 */
     annotationColors: { user: string; character: string };
@@ -403,6 +405,7 @@ function metaLine(input: ReadingShareCardInput): string {
 }
 
 function stampText(input: ReadingShareCardInput): string {
+    if (input.progressLabel) return "";
     const pad = (value: number) => String(value).padStart(2, "0");
     const t = input.timestamp;
     return `${t.getFullYear()}.${pad(t.getMonth() + 1)}.${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}`;
@@ -413,7 +416,12 @@ function percentValue(input: ReadingShareCardInput): number {
 }
 
 function progressText(input: ReadingShareCardInput): string {
-    return `读到全书 ${percentValue(input)}%`;
+    return input.progressLabel ?? `读到全书 ${percentValue(input)}%`;
+}
+
+/** 进度 · 时间戳，有一边空着就不带点 */
+function progressStamp(input: ReadingShareCardInput): string {
+    return [progressText(input), stampText(input)].filter(Boolean).join(" · ");
 }
 
 function displayName(input: ReadingShareCardInput): string {
@@ -647,7 +655,7 @@ function renderPoster(ctx: Ctx): number {
         pad, centerY, 58, palette.background, readingMarkColor(palette.background, 0.7), null, palette.background,
     );
     pen.font(21, ctx.fonts.body);
-    pen.text(`${progressText(input)} · ${stampText(input)}`, WIDTH - pad, centerY + 8, palette.background, "right");
+    pen.text(progressStamp(input), WIDTH - pad, centerY + 8, palette.background, "right");
     return y + barHeight;
 }
 
@@ -688,7 +696,7 @@ function renderBookmark(ctx: Ctx): number {
     pen.font(19, ctx.fonts.body);
     pen.text(truncateToWidth(pen, metaLine(input), inner), cardX + cardWidth / 2, y + 19, palette.sub, "center");
     y += 30;
-    pen.text(`${progressText(input)} · ${stampText(input)}`, cardX + cardWidth / 2, y + 19, palette.sub, "center");
+    pen.text(progressStamp(input), cardX + cardWidth / 2, y + 19, palette.sub, "center");
     y += 40;
     pen.circleOutline(cardX + cardWidth / 2, y + 8, 7, palette.sub);
     return y + 38 + padY;
@@ -723,7 +731,12 @@ function renderMagazine(ctx: Ctx): number {
     y += 42;
     const footerHeight = 112;
     const centerY = y + 40;
-    drawSignature(ctx, pad, centerY, 58, palette.ink, palette.sub, stampText(input), palette.accent, inner * 0.55);
+    drawSignature(ctx, pad, centerY, 58, palette.ink, palette.sub, stampText(input) || null, palette.accent, inner * 0.55);
+    if (input.progressLabel) {
+        pen.font(52, ctx.fonts.body, "300");
+        pen.text(input.progressLabel, WIDTH - pad, y + 80, palette.ink, "right");
+        return y + footerHeight + 30;
+    }
     pen.font(94, ctx.fonts.body, "300");
     const percent = String(percentValue(input));
     const percentWidth = pen.measure(percent);
@@ -766,7 +779,7 @@ function renderMinimal(ctx: Ctx): number {
     pen.font(19, ctx.fonts.body);
     pen.text(truncateToWidth(pen, metaLine(input), inner), WIDTH / 2, y + 19, palette.sub, "center");
     y += 30;
-    pen.text(`${progressText(input)} · ${stampText(input)}`, WIDTH / 2, y + 19, palette.sub, "center");
+    pen.text(progressStamp(input), WIDTH / 2, y + 19, palette.sub, "center");
     return y + 30 + pad;
 }
 
@@ -806,9 +819,11 @@ function renderCollage(ctx: Ctx): number {
     drawSignature(ctx, pad, centerY, 58, palette.sub, palette.sub, null, palette.accent);
     pen.font(20, ctx.fonts.body);
     pen.text(truncateToWidth(pen, metaLine(input), WIDTH - pad * 2), pad, centerY + 62, palette.sub);
-    pen.text(`${progressText(input)} · ${stampText(input)}`, pad, centerY + 92, palette.sub);
-    pen.font(56, ctx.fonts.body, "300");
-    pen.text(`${percentValue(input)}%`, WIDTH - pad, centerY + 92, palette.accent, "right");
+    pen.text(progressStamp(input), pad, centerY + 92, palette.sub);
+    if (!input.progressLabel) {
+        pen.font(56, ctx.fonts.body, "300");
+        pen.text(`${percentValue(input)}%`, WIDTH - pad, centerY + 92, palette.accent, "right");
+    }
     return centerY + 92 + pad;
 }
 
@@ -848,7 +863,7 @@ function renderLetter(ctx: Ctx): number {
 
     y += 26;
     const centerY = y + 30;
-    drawSignature(ctx, pad, centerY, 58, palette.ink, palette.sub, `${progressText(input)} · ${stampText(input)}`);
+    drawSignature(ctx, pad, centerY, 58, palette.ink, palette.sub, progressStamp(input));
     return centerY + 40 + pad;
 }
 
@@ -953,7 +968,7 @@ function renderNotecard(ctx: Ctx): number {
 
     drawSignature(
         ctx, pad, y + 30, 60, palette.ink, palette.sub,
-        `摘录于 ${stampText(input)}`, palette.accent, inner - 80,
+        `摘录于 ${input.progressLabel ?? stampText(input)}`, palette.accent, inner - 80,
     );
     y += 96;
 
@@ -982,6 +997,7 @@ function renderNotecard(ctx: Ctx): number {
         y += 32;
     }
     pen.font(19, ctx.fonts.body);
+    if (input.progressLabel) return y + pad;
     pen.text(progressText(input), foot.x, y + 19, readingMarkColor(palette.sub, 0.75), foot.textAlign);
     return y + 19 + pad;
 }
@@ -1061,7 +1077,7 @@ function renderCoverband(ctx: Ctx): number {
     const centerY = y + 24;
     drawSignature(ctx, pad, centerY, 48, palette.ink, palette.sub, null, palette.accent, inner - 260);
     pen.font(19, ctx.fonts.body);
-    pen.text(`${progressText(input)} · ${stampText(input)}`, WIDTH - pad, centerY + 7, palette.sub, "right");
+    pen.text(progressStamp(input), WIDTH - pad, centerY + 7, palette.sub, "right");
     return centerY + 24 + pad;
 }
 
@@ -1100,7 +1116,9 @@ function renderCentered(ctx: Ctx): number {
     }
     pen.font(18, ctx.fonts.body);
     pen.text(
-        `${displayName(input)} 摘录于 ${stampText(input)} · ${progressText(input)}`,
+        input.progressLabel
+            ? `${displayName(input)} · ${input.progressLabel}`
+            : `${displayName(input)} 摘录于 ${stampText(input)} · ${progressText(input)}`,
         WIDTH / 2, y + 18, readingMarkColor(palette.sub, 0.8), "center",
     );
     return y + 18 + pad;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent, type PointerEvent } from "react";
 import { Bot, ChevronLeft, ChevronRight, Clock3, Globe, NotebookPen, Trash2, WandSparkles, X } from "lucide-react";
 import { DotsThree } from "@phosphor-icons/react";
 
@@ -20,13 +20,9 @@ import {
   createDiaryEntry,
   deleteDiaryEntry,
   loadDiaryEntries,
-  loadDiaryEntryFontAssetId,
-  loadDiaryEntryFontScale,
   loadDiaryEntryTimerSettings,
   loadDiaryReplyRules,
   resolveDiaryReplyRule,
-  saveDiaryEntryFontAssetId,
-  saveDiaryEntryFontScale,
   saveDiaryEntryTimerSettings,
   saveDiaryReplyRules,
   updateDiaryEntry,
@@ -44,15 +40,8 @@ import { cancelDiaryReply, scheduleDiaryReply } from "@/lib/diary-reply-service"
 import { inheritedCharacterAppApiLabel, loadCharacterAppApiId } from "@/lib/app-api-binding";
 import { loadApiConfigs } from "@/lib/settings-storage";
 import { AppApiPickerDialog } from "@/components/settings/app-api-picker-dialog";
-import { getThemeAssetDataUrl, saveThemeAssetFromBlob } from "@/lib/theme-storage";
-
-// TA的日记和我的日记各自独立一套字体，互不影响，跟以前双日记插件的行为一致。
-function diaryFontFamilyName(kind: DiaryEntryAuthorType): string {
-  return kind === "user" ? "AIPhoneDiaryEntryUserWriterFont" : "AIPhoneDiaryEntryCharacterFont";
-}
-function diaryFontStyleId(kind: DiaryEntryAuthorType): string {
-  return kind === "user" ? "ai-phone-diary-entry-user-writer-font-face" : "ai-phone-diary-entry-character-font-face";
-}
+import { useDiaryFont } from "./use-diary-font";
+import { useDragToTrash } from "./use-drag-to-trash";
 
 const DIARY_REPLY_MODE_LABELS: Record<DiaryReplyMode, string> = {
   none: "不回应",
@@ -78,38 +67,6 @@ type DiaryBook = {
 type ComposeTarget =
   | { mode: "create"; characterId: string }
   | { mode: "edit"; entry: DiaryEntry };
-
-type DiaryEntryDragState = {
-  entry: DiaryEntry;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  isOverTrash: boolean;
-};
-
-type DiaryEntryDragSession = {
-  entry: DiaryEntry;
-  pointerId: number;
-  target: HTMLButtonElement;
-  startX: number;
-  startY: number;
-  width: number;
-  height: number;
-  timer: number | null;
-  dragging: boolean;
-};
-
-type DiaryEntryDragScrollLock = {
-  bodyOverflow: string;
-  bodyTouchAction: string;
-  htmlOverscrollBehavior: string;
-  htmlTouchAction: string;
-  main: HTMLElement | null;
-  mainOverflow: string;
-  mainTouchAction: string;
-  mainScrollTop: number;
-};
 
 function formatEntryTime(value: string): string {
   const date = new Date(value);
@@ -168,9 +125,6 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
   const [deleteCandidateEntry, setDeleteCandidateEntry] = useState<DiaryEntry | null>(null);
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
   const [localGeneratingIds, setGeneratingCharacterIds] = useState<string[]>([]);
-  const [diaryFontAssetId, setDiaryFontAssetId] = useState<string | null>(() => loadDiaryEntryFontAssetId(kind));
-  const [diaryFontDataUrl, setDiaryFontDataUrl] = useState<string | null>(null);
-  const [diaryFontScale, setDiaryFontScale] = useState<number>(() => loadDiaryEntryFontScale(kind));
   // Merge in the module-level tracker so background generation (timer, or a
   // batch started before leaving the app) is visible again after re-entry.
   const trackedGeneratingIds = useDiaryGenerating();
@@ -178,104 +132,23 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
     () => Array.from(new Set([...localGeneratingIds, ...trackedGeneratingIds])),
     [localGeneratingIds, trackedGeneratingIds],
   );
-  const [entryDrag, setEntryDrag] = useState<DiaryEntryDragState | null>(null);
   const entryMainRef = useRef<HTMLElement | null>(null);
-  const entryTrashRef = useRef<HTMLDivElement | null>(null);
   const fontFileRef = useRef<HTMLInputElement | null>(null);
-  const entryDragRef = useRef<DiaryEntryDragSession | null>(null);
-  const entryDragClickSuppressedRef = useRef(false);
-  const entryDragClickSuppressTimerRef = useRef<number | null>(null);
-  const entryDragScrollLockRef = useRef<DiaryEntryDragScrollLock | null>(null);
-  const entryDragTouchMoveBlockerRef = useRef<((event: globalThis.TouchEvent) => void) | null>(null);
 
   const notify = useCallback((message: string) => {
     onNotice?.(message);
   }, [onNotice]);
 
+  const font = useDiaryFont(kind, notify);
+  const trash = useDragToTrash<DiaryEntry>({
+    enabled: Boolean(activeCharacterId),
+    scrollRef: entryMainRef,
+    onDrop: setDeleteCandidateEntry,
+  });
+
   const refreshEntries = useCallback(() => {
     setEntries(loadDiaryEntries());
   }, []);
-
-  useEffect(() => {
-    if (!diaryFontAssetId) {
-      setDiaryFontDataUrl(null);
-      return;
-    }
-    let cancelled = false;
-    void getThemeAssetDataUrl(diaryFontAssetId).then((dataUrl) => {
-      if (cancelled) return;
-      if (dataUrl) {
-        setDiaryFontDataUrl(dataUrl);
-        return;
-      }
-      saveDiaryEntryFontAssetId(null, kind);
-      setDiaryFontAssetId(null);
-      setDiaryFontDataUrl(null);
-      notify("日记字体资源丢失，已恢复默认字体");
-    }).catch(() => {
-      if (cancelled) return;
-      setDiaryFontDataUrl(null);
-      notify("日记字体加载失败，暂时使用默认字体");
-    });
-    return () => { cancelled = true; };
-  }, [diaryFontAssetId, kind, notify]);
-
-  useEffect(() => {
-    const styleId = diaryFontStyleId(kind);
-    let node = document.getElementById(styleId) as HTMLStyleElement | null;
-    if (!node) {
-      node = document.createElement("style");
-      node.id = styleId;
-      document.head.append(node);
-    }
-    node.textContent = diaryFontDataUrl
-      ? `@font-face{font-family:"${diaryFontFamilyName(kind)}";src:url("${diaryFontDataUrl}");font-display:swap;}`
-      : "";
-  }, [diaryFontDataUrl, kind]);
-
-  const handleDiaryFontUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-
-    try {
-      const assetId = await saveThemeAssetFromBlob(file, "font");
-      const dataUrl = await getThemeAssetDataUrl(assetId);
-      if (!dataUrl) {
-        throw new Error("字体资源没有保存成功");
-      }
-      saveDiaryEntryFontAssetId(assetId, kind);
-      setDiaryFontAssetId(assetId);
-      setDiaryFontDataUrl(dataUrl);
-      notify(`日记字体已上传：${file.name}`);
-    } catch (error) {
-      notify("日记字体上传失败：" + String(error));
-    }
-  }, [kind, notify]);
-
-  const handleDiaryFontScaleChange = useCallback((scale: number) => {
-    const normalized = Math.min(1.25, Math.max(0.85, scale));
-    setDiaryFontScale(normalized);
-    saveDiaryEntryFontScale(normalized, kind);
-  }, [kind]);
-
-  const handleDiaryFontReset = useCallback(() => {
-    saveDiaryEntryFontAssetId(null, kind);
-    saveDiaryEntryFontScale(1, kind);
-    setDiaryFontAssetId(null);
-    setDiaryFontDataUrl(null);
-    setDiaryFontScale(1);
-    notify("已恢复默认日记字体");
-  }, [kind, notify]);
-
-  const diaryEntryStyle = useMemo(() => {
-    return {
-      ...(diaryFontDataUrl
-        ? { "--diary-entry-font-family": `"${diaryFontFamilyName(kind)}", "NoteWall Ximai", var(--app-font-family)` }
-        : {}),
-      "--diary-entry-font-scale": String(diaryFontScale),
-    } as CSSProperties;
-  }, [diaryFontDataUrl, diaryFontScale, kind]);
 
   const deleteEntry = useCallback((entry: DiaryEntry) => {
     deleteDiaryEntry(entry.id);
@@ -425,248 +298,6 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
     notify("日记已更新。");
   }, [kind, notify, refreshEntries, resolveTargets]);
 
-  const clearEntryDragTimer = useCallback(() => {
-    const timer = entryDragRef.current?.timer;
-    if (timer !== null && timer !== undefined) {
-      window.clearTimeout(timer);
-      if (entryDragRef.current) entryDragRef.current.timer = null;
-    }
-  }, []);
-
-  const suppressEntryClick = useCallback((duration = 700) => {
-    if (entryDragClickSuppressTimerRef.current !== null) {
-      window.clearTimeout(entryDragClickSuppressTimerRef.current);
-    }
-    entryDragClickSuppressedRef.current = true;
-    entryDragClickSuppressTimerRef.current = window.setTimeout(() => {
-      entryDragClickSuppressedRef.current = false;
-      entryDragClickSuppressTimerRef.current = null;
-    }, duration);
-  }, []);
-
-  const lockEntryDragScroll = useCallback(() => {
-    if (entryDragScrollLockRef.current || typeof document === "undefined") return;
-    const main = entryMainRef.current;
-    entryDragScrollLockRef.current = {
-      bodyOverflow: document.body.style.overflow,
-      bodyTouchAction: document.body.style.touchAction,
-      htmlOverscrollBehavior: document.documentElement.style.overscrollBehavior,
-      htmlTouchAction: document.documentElement.style.touchAction,
-      main,
-      mainOverflow: main?.style.overflow ?? "",
-      mainTouchAction: main?.style.touchAction ?? "",
-      mainScrollTop: main?.scrollTop ?? 0,
-    };
-    document.body.style.overflow = "hidden";
-    document.body.style.touchAction = "none";
-    document.documentElement.style.overscrollBehavior = "none";
-    document.documentElement.style.touchAction = "none";
-    if (!entryDragTouchMoveBlockerRef.current) {
-      entryDragTouchMoveBlockerRef.current = (event: globalThis.TouchEvent) => {
-        event.preventDefault();
-      };
-      document.addEventListener("touchmove", entryDragTouchMoveBlockerRef.current, { capture: true, passive: false });
-    }
-    if (main) {
-      main.style.overflow = "hidden";
-      main.style.touchAction = "none";
-    }
-  }, []);
-
-  const unlockEntryDragScroll = useCallback(() => {
-    const lock = entryDragScrollLockRef.current;
-    if (!lock || typeof document === "undefined") return;
-    document.body.style.overflow = lock.bodyOverflow;
-    document.body.style.touchAction = lock.bodyTouchAction;
-    document.documentElement.style.overscrollBehavior = lock.htmlOverscrollBehavior;
-    document.documentElement.style.touchAction = lock.htmlTouchAction;
-    if (entryDragTouchMoveBlockerRef.current) {
-      document.removeEventListener("touchmove", entryDragTouchMoveBlockerRef.current, { capture: true });
-      entryDragTouchMoveBlockerRef.current = null;
-    }
-    if (lock.main) {
-      lock.main.style.overflow = lock.mainOverflow;
-      lock.main.style.touchAction = lock.mainTouchAction;
-      lock.main.scrollTop = lock.mainScrollTop;
-    }
-    entryDragScrollLockRef.current = null;
-  }, []);
-
-  const isEntryOverTrash = useCallback((clientX: number, clientY: number, width: number, height: number) => {
-    const trashRect = entryTrashRef.current?.getBoundingClientRect();
-    if (!trashRect) return false;
-    const entryRect = {
-      left: clientX - width / 2,
-      right: clientX + width / 2,
-      top: clientY - height / 2,
-      bottom: clientY + height / 2,
-    };
-    return entryRect.left < trashRect.right
-      && entryRect.right > trashRect.left
-      && entryRect.top < trashRect.bottom
-      && entryRect.bottom > trashRect.top;
-  }, []);
-
-  const resetEntryDrag = useCallback(() => {
-    clearEntryDragTimer();
-    const session = entryDragRef.current;
-    if (session?.dragging) {
-      suppressEntryClick();
-    }
-    if (session) {
-      try {
-        session.target.releasePointerCapture(session.pointerId);
-      } catch {
-        // Pointer capture may already be gone.
-      }
-    }
-    entryDragRef.current = null;
-    setEntryDrag(null);
-    unlockEntryDragScroll();
-  }, [clearEntryDragTimer, suppressEntryClick, unlockEntryDragScroll]);
-
-  const updateEntryDragPosition = useCallback((clientX: number, clientY: number) => {
-    const session = entryDragRef.current;
-    if (!session?.dragging) return;
-    const lock = entryDragScrollLockRef.current;
-    if (lock?.main) lock.main.scrollTop = lock.mainScrollTop;
-    const isOverTrash = isEntryOverTrash(clientX, clientY, session.width, session.height);
-    setEntryDrag({
-      entry: session.entry,
-      x: clientX,
-      y: clientY,
-      width: session.width,
-      height: session.height,
-      isOverTrash,
-    });
-  }, [isEntryOverTrash]);
-
-  const finishEntryDrag = useCallback((clientX: number, clientY: number) => {
-    const session = entryDragRef.current;
-    if (!session) return;
-    const shouldDelete = session.dragging && isEntryOverTrash(clientX, clientY, session.width, session.height);
-    const entry = session.entry;
-    resetEntryDrag();
-    if (shouldDelete) setDeleteCandidateEntry(entry);
-  }, [isEntryOverTrash, resetEntryDrag]);
-
-  useEffect(() => {
-    if (!entryDrag) return;
-    const handleWindowPointerMove = (event: globalThis.PointerEvent) => {
-      const session = entryDragRef.current;
-      if (!session?.dragging || session.pointerId !== event.pointerId) return;
-      event.preventDefault();
-      updateEntryDragPosition(event.clientX, event.clientY);
-    };
-    const handleWindowPointerUp = (event: globalThis.PointerEvent) => {
-      const session = entryDragRef.current;
-      if (!session || session.pointerId !== event.pointerId) return;
-      event.preventDefault();
-      finishEntryDrag(event.clientX, event.clientY);
-    };
-    const handleWindowPointerCancel = (event: globalThis.PointerEvent) => {
-      const session = entryDragRef.current;
-      if (!session || session.pointerId !== event.pointerId) return;
-      resetEntryDrag();
-    };
-    window.addEventListener("pointermove", handleWindowPointerMove, { passive: false });
-    window.addEventListener("pointerup", handleWindowPointerUp, { passive: false });
-    window.addEventListener("pointercancel", handleWindowPointerCancel);
-    return () => {
-      window.removeEventListener("pointermove", handleWindowPointerMove);
-      window.removeEventListener("pointerup", handleWindowPointerUp);
-      window.removeEventListener("pointercancel", handleWindowPointerCancel);
-    };
-  }, [entryDrag, finishEntryDrag, resetEntryDrag, updateEntryDragPosition]);
-
-  useEffect(() => {
-    return () => {
-      resetEntryDrag();
-      unlockEntryDragScroll();
-      if (entryDragClickSuppressTimerRef.current !== null) {
-        window.clearTimeout(entryDragClickSuppressTimerRef.current);
-        entryDragClickSuppressTimerRef.current = null;
-      }
-    };
-  }, [resetEntryDrag, unlockEntryDragScroll]);
-
-  const handleEntryPointerDown = useCallback((event: PointerEvent<HTMLButtonElement>, entry: DiaryEntry) => {
-    if (!activeCharacterId) return;
-    if (event.pointerType === "mouse" && event.button !== 0) return;
-    clearEntryDragTimer();
-    const rect = event.currentTarget.getBoundingClientRect();
-    const target = event.currentTarget;
-    entryDragRef.current = {
-      entry,
-      pointerId: event.pointerId,
-      target,
-      startX: event.clientX,
-      startY: event.clientY,
-      width: rect.width,
-      height: rect.height,
-      timer: window.setTimeout(() => {
-        const session = entryDragRef.current;
-        if (!session || session.pointerId !== event.pointerId || session.dragging) return;
-        session.dragging = true;
-        session.timer = null;
-        suppressEntryClick(900);
-        lockEntryDragScroll();
-        try {
-          session.target.setPointerCapture(session.pointerId);
-        } catch {
-          // Some touch browsers release capture during native gestures.
-        }
-        setEntryDrag({
-          entry: session.entry,
-          x: event.clientX,
-          y: event.clientY,
-          width: session.width,
-          height: session.height,
-          isOverTrash: isEntryOverTrash(event.clientX, event.clientY, session.width, session.height),
-        });
-      }, 430),
-      dragging: false,
-    };
-  }, [activeCharacterId, clearEntryDragTimer, isEntryOverTrash, lockEntryDragScroll, suppressEntryClick]);
-
-  const handleEntryPointerMove = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    const session = entryDragRef.current;
-    if (!session || session.pointerId !== event.pointerId) return;
-    const dx = event.clientX - session.startX;
-    const dy = event.clientY - session.startY;
-    if (!session.dragging) {
-      if (Math.hypot(dx, dy) > 8) {
-        clearEntryDragTimer();
-        entryDragRef.current = null;
-      }
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    updateEntryDragPosition(event.clientX, event.clientY);
-  }, [clearEntryDragTimer, updateEntryDragPosition]);
-
-  const handleEntryPointerUp = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    const session = entryDragRef.current;
-    if (!session || session.pointerId !== event.pointerId) return;
-    event.preventDefault();
-    event.stopPropagation();
-    finishEntryDrag(event.clientX, event.clientY);
-  }, [finishEntryDrag]);
-
-  const handleEntryPointerCancel = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    const session = entryDragRef.current;
-    if (!session || session.pointerId !== event.pointerId) return;
-    resetEntryDrag();
-  }, [resetEntryDrag]);
-
-  const handleEntryPointerLeave = useCallback((event: PointerEvent<HTMLButtonElement>) => {
-    const session = entryDragRef.current;
-    if (!session || session.pointerId !== event.pointerId || session.dragging) return;
-    clearEntryDragTimer();
-    entryDragRef.current = null;
-  }, [clearEntryDragTimer]);
-
   const kindEntries = useMemo(() => entries.filter(entry => entry.authorType === kind), [entries, kind]);
 
   const books = useMemo<DiaryBook[]>(() => {
@@ -691,7 +322,7 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
   const activeBookBusy = Boolean(activeBook && generatingCharacterIds.includes(activeBook.characterId));
 
   return (
-    <section className={`diary-app diary-entry-app ${entryDrag ? "is-entry-dragging" : ""}`} style={diaryEntryStyle}>
+    <section className={`diary-app diary-entry-app ${trash.drag ? "is-entry-dragging" : ""}`} style={font.style}>
       {generatingCharacterIds.length > 0 && (
         <div className="diary-generating-toast" role="status">
           <span className="diary-generating-toast-spinner" aria-hidden="true" />
@@ -716,7 +347,7 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
           type="file"
           accept=".ttf,.otf,.woff,.woff2,font/*,application/font-woff,application/font-woff2"
           className="hidden"
-          onChange={handleDiaryFontUpload}
+          onChange={font.upload}
         />
         <span className="diary-entry-header-actions">
           <button
@@ -759,15 +390,15 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
               <DiaryEntryCard
                 key={entry.id}
                 entry={entry}
-                isDragSource={entryDrag?.entry.id === entry.id}
-                onPointerDown={(event) => handleEntryPointerDown(event, entry)}
-                onPointerMove={handleEntryPointerMove}
-                onPointerUp={handleEntryPointerUp}
-                onPointerCancel={handleEntryPointerCancel}
-                onPointerLeave={handleEntryPointerLeave}
+                isDragSource={trash.drag?.item.id === entry.id}
+                onPointerDown={(event) => trash.onPointerDown(event, entry)}
+                onPointerMove={trash.onPointerMove}
+                onPointerUp={trash.onPointerUp}
+                onPointerCancel={trash.onPointerCancel}
+                onPointerLeave={trash.onPointerLeave}
                 onClick={(event) => {
                   event.stopPropagation();
-                  if (entryDragClickSuppressedRef.current) {
+                  if (trash.isClickSuppressed()) {
                     event.preventDefault();
                     return;
                   }
@@ -891,11 +522,11 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
 
       {fontPanelOpen ? (
         <DiaryEntryFontPanel
-          hasCustomFont={Boolean(diaryFontDataUrl)}
-          scale={diaryFontScale}
+          hasCustomFont={font.hasCustomFont}
+          scale={font.scale}
           onUpload={() => fontFileRef.current?.click()}
-          onScaleChange={handleDiaryFontScaleChange}
-          onReset={handleDiaryFontReset}
+          onScaleChange={font.changeScale}
+          onReset={font.reset}
           onClose={() => setFontPanelOpen(false)}
         />
       ) : null}
@@ -935,24 +566,24 @@ export function DiaryEntriesApp({ kind, onBack, onNotice }: DiaryEntriesAppProps
       ) : null}
 
       <div
-        ref={entryTrashRef}
-        className={`diary-entry-trash-bin ${entryDrag ? "is-visible" : ""} ${entryDrag?.isOverTrash ? "is-over" : ""}`}
-        aria-hidden={!entryDrag}
+        ref={trash.trashRef}
+        className={`diary-entry-trash-bin ${trash.drag ? "is-visible" : ""} ${trash.drag?.isOverTrash ? "is-over" : ""}`}
+        aria-hidden={!trash.drag}
       >
         <Trash2 size={30} strokeWidth={1.8} />
       </div>
 
-      {entryDrag ? (
+      {trash.drag ? (
         <div
           className="diary-entry-card diary-entry-drag-ghost"
           style={{
-            left: entryDrag.x,
-            top: entryDrag.y,
-            width: entryDrag.width,
-            minHeight: entryDrag.height,
+            left: trash.drag.x,
+            top: trash.drag.y,
+            width: trash.drag.width,
+            minHeight: trash.drag.height,
           }}
         >
-          <DiaryEntryCardContent entry={entryDrag.entry} />
+          <DiaryEntryCardContent entry={trash.drag.item} />
         </div>
       ) : null}
     </section>
@@ -1054,7 +685,8 @@ function DiaryEntryCard({
   );
 }
 
-function DiaryEntryFontPanel({
+export function DiaryEntryFontPanel({
+  title = "日记字体",
   hasCustomFont,
   scale,
   onUpload,
@@ -1062,6 +694,7 @@ function DiaryEntryFontPanel({
   onReset,
   onClose,
 }: {
+  title?: string;
   hasCustomFont: boolean;
   scale: number;
   onUpload: () => void;
@@ -1074,7 +707,7 @@ function DiaryEntryFontPanel({
       <section className="diary-font-panel" onClick={event => event.stopPropagation()}>
         <header>
           <div>
-            <h2>日记字体</h2>
+            <h2>{title}</h2>
             <p>{hasCustomFont ? "已使用自定义字体" : "当前使用默认手写字体"}</p>
           </div>
           <button type="button" className="diary-icon-btn" onClick={onClose} aria-label="关闭">

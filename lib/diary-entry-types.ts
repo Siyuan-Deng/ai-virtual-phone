@@ -2,6 +2,9 @@ export type DiaryEntryTrigger = "manual" | "timer";
 
 export type DiaryEntryAuthorType = "character" | "user";
 
+/** 手记里各自一套字体的几本：TA的日记、我的日记、片刻纪事 */
+export type DiaryFontKind = DiaryEntryAuthorType | "moment";
+
 export type DiaryEntryTodoItem = {
   text: string;
   done: boolean;

@@ -37,7 +37,8 @@ function SolidBackIcon({ size = 17 }: { size?: number }) {
 }
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { Avatar } from "@/components/ui/primitives";
-import { StoryHtmlRenderer } from "@/components/ui/story-html-renderer";
+import { StoryHtmlRenderer, storyProseParagraphs } from "@/components/ui/story-html-renderer";
+import { addMoment } from "@/lib/moment-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import { maybeRunSummarization } from "@/lib/memory-summarizer";
 import { getLastSummarizedTimestamp, incrementEventCounter } from "@/lib/memory-storage";
@@ -105,6 +106,7 @@ import { MacroEngine } from "@/lib/macro-engine";
 
 type StoryAppProps = {
   onClose: () => void;
+  onNotice?: (message: string) => void;
 };
 
 type StoryGenerationRun = {
@@ -449,7 +451,7 @@ const StoryComposer = memo(function StoryComposer({
   );
 });
 
-export function StoryApp({ onClose }: StoryAppProps) {
+export function StoryApp({ onClose, onNotice }: StoryAppProps) {
   const [ready, setReady] = useState(false);
   // 剧情库这次没读出来（iOS 偶尔会）：不新建会话，提示重试
   const [loadFailed, setLoadFailed] = useState(false);
@@ -1178,6 +1180,39 @@ export function StoryApp({ onClose }: StoryAppProps) {
     setActiveMessageId(null);
     setStorageVersion(v => v + 1);
   }
+  /** 番外的名字：往前找最近一条用模板发的指令，取它填的内容第一行 */
+  function storyExtraTitle(msgId: string): string | undefined {
+    const index = messages.findIndex(m => m.id === msgId);
+    for (let i = index; i >= 0; i -= 1) {
+      const content = messages[i].extraOrder?.content?.trim();
+      if (!content) continue;
+      const line = content.split("\n").map(item => item.trim()).find(Boolean) || "";
+      return line.length > 16 ? `${line.slice(0, 16)}…` : line;
+    }
+    return undefined;
+  }
+  function handleStoryCollect(msg: StoryMessage) {
+    setActiveMessageId(null);
+    if (!currentSession || !currentCharacter) return;
+    const paragraphs = storyProseParagraphs(msg.renderedContent || msg.rawContent);
+    if (paragraphs.length === 0) {
+      onNotice?.("这条没有能收的正文");
+      return;
+    }
+    const moment = addMoment({
+      characterId: currentCharacter.id,
+      characterName: currentCharacter.name,
+      source: isExtra ? "extra" : "story",
+      sourceTitle: isExtra ? storyExtraTitle(msg.id) : undefined,
+      speaker: msg.role === "user" ? "user" : "char",
+      speakerName: msg.role === "user" ? storyUserName : currentCharacter.name,
+      paragraphs,
+      sessionId: currentSession.id,
+      messageId: msg.id,
+      messageAt: msg.createdAt,
+    });
+    onNotice?.(moment ? "已收进片刻纪事" : "这条已经收过了");
+  }
   function handleStoryEditStart(msg: StoryMessage) {
     setEditingMessageId(msg.id);
     setEditingContent(msg.rawContent); // 仅作为非受控 textarea 的初始值
@@ -1890,6 +1925,9 @@ export function StoryApp({ onClose }: StoryAppProps) {
                               <div style={{ display: "flex" }}>
                                 <button onClick={() => handleStoryCopy(message.rawContent)} className="story-ctx-btn">复制</button>
                                 <button onClick={() => handleStoryEditStart(message)} className="story-ctx-btn">编辑</button>
+                                {(message.role === "assistant" || message.role === "user") && !message.instruction && (
+                                  <button onClick={() => handleStoryCollect(message)} className="story-ctx-btn">收藏</button>
+                                )}
                                 {(message.role === "assistant" || message.role === "user") && (
                                   <button onClick={() => { void handleStoryRetry(message.id); }} className="story-ctx-btn story-ctx-btn-danger">重试</button>
                                 )}
