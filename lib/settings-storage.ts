@@ -43,6 +43,7 @@ import { pinnedFirst, withSortIndex } from "./list-order";
 import { orderLikeFolders } from "./item-folders";
 import { loadApiConfigFolders, loadApiConfigRootOrder } from "./api-config-folders";
 import { loadWorldBookFolders, loadWorldBookRootOrder } from "./worldbook-folders";
+import { loadRegexFolders, loadRegexRootOrder } from "./regex-folders";
 import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
 import { isGenerationParameterKey } from "./generation-parameters";
 
@@ -523,7 +524,8 @@ function normalizeRegexGroupScopes(group: RegexConfig): RegexConfig {
 export function loadRegexes(): RegexConfig[] {
     if (typeof window === "undefined") return [];
     try {
-        return readRegexesCache().map(normalizeRegexGroupScopes);
+        // 和世界书一样：置顶的在前，按设置页里拖出来的顺序（IndexedDB 读回来是按 id 排的）
+        return orderLikeFolders(pinnedFirst(readRegexesCache().map(normalizeRegexGroupScopes)), loadRegexFolders(), loadRegexRootOrder());
     } catch {
         return [];
     }
@@ -531,7 +533,7 @@ export function loadRegexes(): RegexConfig[] {
 
 export function saveRegexes(regexes: RegexConfig[]): void {
     if (typeof window === "undefined") return;
-    writeRegexesCache(regexes);
+    writeRegexesCache(withSortIndex(regexes));
     window.dispatchEvent(new CustomEvent("settings-regexes-updated"));
 }
 

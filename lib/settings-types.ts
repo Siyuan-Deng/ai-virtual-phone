@@ -145,6 +145,8 @@ export type RegexRule = {
 export type RegexConfig = SettingItemMeta & {
     builtIn?: boolean;
     rules: RegexRule[];
+    /** 所在文件夹（lib/regex-folders）；没有或文件夹已删就是未分类 */
+    folderId?: string;
 };
 
 // --- ApiConfig (migrated from api-settings.tsx) ---
