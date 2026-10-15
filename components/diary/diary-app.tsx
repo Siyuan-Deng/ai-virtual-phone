@@ -52,7 +52,7 @@ export function DiaryApp({ onClose, onNotice }: DiaryAppProps) {
           <span className="diary-feature-punches diary-feature-punches-left" aria-hidden="true" />
           <span className="diary-feature-punches diary-feature-punches-right" aria-hidden="true" />
           <span className="diary-feature-card-head">
-            <span className="diary-feature-label">DIARY</span>
+            <span className="diary-feature-label">THEIR DIARY</span>
             <span className="diary-feature-number">{todayLabel}</span>
           </span>
           <span className="diary-feature-main">
