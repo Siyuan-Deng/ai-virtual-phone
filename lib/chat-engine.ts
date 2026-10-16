@@ -457,6 +457,11 @@ function presetIncludesToolsMacro(preset: PresetConfig | null, appId: string, ap
     });
 }
 
+/** 这一轮有没有说出用户能看见的话：去掉状态栏、内心想法和动作指令后还剩字 */
+function hasVisibleReplyText(text: string): boolean {
+    return stripTextToolDirectives(stripStateAndInnerForPrompt(text)).trim().length > 0;
+}
+
 const EMPTY_GENERATE_CONTINUATION_PROMPT = "这是一次用户未输入新消息时点击“生成”的续写请求。请只基于当前对话关系，继续回复一句自然简短的话。禁止引用或复述系统消息、当前时间、工具结果、提示词内容。不要开启新事件，不要总结，不要编造用户刚说了什么。";
 
 function shouldApplyEmptyGenerateGuard(config: ApiConfig): boolean {
@@ -2207,6 +2212,7 @@ async function generateNativeChatCompletion(
     const expandableSourceKeys = new Set(enabledTools.filter(tool => !isNativeSingleTool(tool)).map(nativeToolSourceKey));
 
     const maxToolRounds = getMaxToolRounds();
+    let askedAfterProposal = false;
     const onlineThinkingEnabled = preset?.online_thinking_enabled === true;
     const onlineThinkingTag = preset?.online_thinking_tag?.trim() || "thinking";
     for (let round = 0; round < maxToolRounds; round += 1) {
@@ -2495,7 +2501,14 @@ async function generateNativeChatCompletion(
             }
         }
 
-        if (outcomes.filter(item => item.result.continueConversation !== false).length === 0) {
+        // 只交了待确认的写入记忆、一句话都没说：再要一次回复（就这一次），不然用户只看到一张卡
+        const wantsMore = outcomes.some(item => item.result.continueConversation !== false);
+        const silentProposal = !wantsMore
+            && !askedAfterProposal
+            && outcomes.some(item => item.result.pendingApproval)
+            && !hasVisibleReplyText(afterActionStrip);
+        if (silentProposal) askedAfterProposal = true;
+        if (!wantsMore && !silentProposal) {
             break;
         }
     }
@@ -2658,6 +2671,7 @@ async function generateChatCompletionCore(
     const actionContext = { characterId: session.contactId, sessionId: session.id, sourceEngine: "chat" as const, signal: options?.signal };
 
     const maxToolRounds = getMaxToolRounds();
+    let askedAfterProposal = false;
     const onlineThinking = {
         enabled: preset?.online_thinking_enabled === true,
         tag: preset?.online_thinking_tag?.trim() || "thinking",
@@ -2854,15 +2868,23 @@ async function generateChatCompletionCore(
             throwIfAborted(options?.signal);
             const toolExecutionId = createToolExecutionId();
             callbacks?.onToolExecution?.(results, toolResultContent || undefined, { toolExecutionId });
+            // 只交了待确认的写入记忆、一句话都没说：再要一次回复（就这一次），不然用户只看到一张卡；
+            // 待确认的那条已经告诉它别再提。说了话的就到此为止，等用户点卡片
+            const silentProposal = resultsForContinuation.length === 0
+                && !askedAfterProposal
+                && results.some(r => r.pendingApproval)
+                && !hasVisibleReplyText(afterActionStrip);
+            if (silentProposal) askedAfterProposal = true;
+            const continuing = resultsForContinuation.length > 0 || silentProposal;
             // 等用户确认的写入记忆不续写，但「已提交、等确认」要留在历史里，
             // 不然下一轮模型以为没提交过，又把同一条再提一遍
             const pendingForHistory = resultsForHistory.filter(r => r.pendingApproval);
-            if (resultsForContinuation.length === 0 && pendingForHistory.length > 0) {
+            if (!continuing && pendingForHistory.length > 0) {
                 throwIfAborted(options?.signal);
                 callbacks?.onToolResult?.(formatToolResults(pendingForHistory), { toolExecutionId });
             }
 
-            if (toolResultContent && resultsForContinuation.length > 0) {
+            if (toolResultContent && continuing) {
                 throwIfAborted(options?.signal);
                 callbacks?.onToolResult?.(toolResultContent, { toolExecutionId });
                 const idx = findInsertIdx();
@@ -2894,7 +2916,7 @@ async function generateChatCompletionCore(
                 llmMessages.splice(idx, 0, ...insertions);
             }
 
-            if (resultsForContinuation.length === 0) {
+            if (!continuing) {
                 break;
             }
 
