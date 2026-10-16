@@ -289,6 +289,9 @@ type BackgroundCompletionRound = {
     responseBatchId?: string;
     rawResponseText?: string;
     reasoningText?: string;
+    /** 动作灰条（「正在添加日程…」「已添加日程」）：这轮话之前、之后各自出现的 */
+    noticesBefore?: string[];
+    noticesAfter?: string[];
 };
 
 async function generateBackgroundCompletionRounds(
@@ -299,24 +302,46 @@ async function generateBackgroundCompletionRounds(
     const rounds: BackgroundCompletionRound[] = [];
     // 每轮 LLM 调用的思维链：onReasoning 先于该轮 onTextPart 触发，挂到该轮文本上
     let pendingReasoning: string | undefined;
+    // 动作灰条跟在它发生时的那一轮后面；一句话还没说就先动手的，攒着放到下一轮前面
+    let noticesBeforeNextRound: string[] = [];
+    const pushRound = (round: BackgroundCompletionRound) => {
+        rounds.push({ ...round, noticesBefore: noticesBeforeNextRound });
+        noticesBeforeNextRound = [];
+    };
+    const takeReasoning = () => {
+        const reasoningText = pendingReasoning;
+        pendingReasoning = undefined;
+        return reasoningText;
+    };
     const result = await generateChatCompletion(session, messages, options, {
         onReasoning: (t) => { pendingReasoning = t; },
         onTextPart: (text, _senderInfo, meta) => {
             if (!text.trim()) return;
-            const reasoningText = pendingReasoning;
-            pendingReasoning = undefined;
-            rounds.push({
+            pushRound({
                 text,
                 responseBatchId: meta?.responseBatchId,
                 rawResponseText: meta?.rawResponseText ?? text,
-                reasoningText,
+                reasoningText: takeReasoning(),
             });
+        },
+        // 原生工具那一轮边说话边调用动作，这句话不走 onTextPart，不接住就丢了
+        onNativeToolAssistantTurn: ({ content, rawContent, reasoning }) => {
+            if (!content.trim()) return;
+            pushRound({ text: content, rawResponseText: rawContent || content, reasoningText: reasoning || takeReasoning() });
+        },
+        onToolNotice: (notice) => {
+            if (!notice.trim()) return;
+            const last = rounds[rounds.length - 1];
+            if (last) (last.noticesAfter ??= []).push(notice);
+            else noticesBeforeNextRound.push(notice);
         },
     });
     if (rounds.length === 0) {
         const fallback = flattenCompletionResult(result);
-        if (fallback.trim()) rounds.push({ text: fallback, rawResponseText: fallback, reasoningText: pendingReasoning });
+        if (fallback.trim()) pushRound({ text: fallback, rawResponseText: fallback, reasoningText: pendingReasoning });
     }
+    // 只动了手、一句话没说：灰条也得落下来
+    if (noticesBeforeNextRound.length > 0) pushRound({ text: "" });
     return rounds;
 }
 
@@ -332,6 +357,8 @@ async function saveBackgroundCompletionRounds(
     let newCount = currentCount;
     let stateValues: StateValue[] = [];
     for (const round of rounds) {
+        saveBackgroundToolNotices(sessionId, round.noticesBefore);
+        if (!round.text.trim()) continue;
         const result = await parseAndSaveResponse(
             round.text,
             sessionId,
@@ -354,8 +381,17 @@ async function saveBackgroundCompletionRounds(
         if (result.stateValues.length > 0) {
             stateValues = result.stateValues;
         }
+        saveBackgroundToolNotices(sessionId, round.noticesAfter);
     }
     return { hasVisible, newCount, stateValues };
+}
+
+/** 后台生成（追问、日历提醒、定时醒来这些）里角色动了日历等动作，也和前台一样落一条灰条 */
+function saveBackgroundToolNotices(sessionId: string, notices?: string[]) {
+    for (const notice of notices ?? []) {
+        const message = pushChatMessage({ sessionId, role: "system", content: notice, mediaType: "tool_notice" });
+        window.dispatchEvent(new CustomEvent("followup-message-saved", { detail: { sessionId, message } }));
+    }
 }
 
 function pollSchedules() {

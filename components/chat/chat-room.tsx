@@ -3320,6 +3320,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 await processGroupParts(results, setMessages, generationGuard, roundReasoning, { instantReveal: isSessionStreamingEnabled(session, true) });
             } else {
                 let capturedReasoning: string | undefined;
+                // 这条路是整段回复最后一起落库：动作灰条先攒着，放在回复后面
+                const toolNotices: string[] = [];
                 const cr = await generateChatCompletion(
                     session,
                     history,
@@ -3329,6 +3331,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     },
                     {
                         onReasoning: (t) => { capturedReasoning = t; },
+                        onToolNotice: (notice) => { toolNotices.push(notice); },
                         onStreamDelta: (delta) => {
                             if (!isCurrentGeneration()) return;
                             streamAccumRef.current += delta;
@@ -3353,6 +3356,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 if (!isCurrentGeneration()) return;
                 const result = await splitAndSaveAIMessages(flattenCompletionResult(cr), { ...generationGuard, reasoningText: capturedReasoning, instantReveal: isSessionStreamingEnabled(session, true) });
                 if (!isCurrentGeneration()) return;
+                toolNotices.forEach(persistToolNotice);
                 scheduleFollowUp(session.id, 0, result.stateValues);
                 handleCallTrigger(result.triggerCall);
                 shouldRunDeclineReply = Boolean(result.hasDecline);
