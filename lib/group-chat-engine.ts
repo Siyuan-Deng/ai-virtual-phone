@@ -75,7 +75,7 @@ import { getCustomStickerExample, loadCustomStickers } from "./custom-sticker-st
 import { formatCustomAppChatDirectivesForPrompt } from "./custom-app-chat-directives";
 import { findEnabledToolForSchema, getEnabledTools } from "./tool-storage";
 import { formatToolsForPrompt, formatGroupToolsForPrompt, formatToolSchema } from "./tool-prompt";
-import { parseToolCalls, parseToolFetches, executeToolCalls, formatToolResults, type ToolCall } from "./tool-executor";
+import { parseToolCalls, parseToolFetches, executeToolCalls, formatToolNotices, formatToolResults, type ToolCall } from "./tool-executor";
 import { stripStateAndInnerForPrompt } from "./prompt-sanitizer";
 import { buildGroupRosterMacro } from "./group-admin";
 import { parseOfflineResponse, extractThinkingTag, type ParsedOfflineResponse } from "./chat-offline-storage";
@@ -659,10 +659,10 @@ async function runNativeGroupToolLoop(params: {
             ...loaderCalls.map(item => getNativeGroupActorName(item.call)),
             ...textCalls.map(call => call.actor),
         ].map(name => name?.trim()).filter(Boolean))].join("、") || "未标注角色";
-        const displayedActionNames = [
+        const displayedActionNames = [...new Set([
             ...loaderCalls.map(item => `展开「${item.loader.label}」动作说明`),
             ...realNativeCalls.map(call => nativeBundle.displayNameMap.get(call.name) || nativeBundle.nameMap.get(call.name) || call.name),
-        ];
+        ])];
         if (displayedActionNames.length > 0) callbacks?.onToolNotice?.(`${actorNames}正在${displayedActionNames.join("、")}...`);
 
         let realResults: Awaited<ReturnType<typeof executeToolCalls>> = [];
@@ -742,9 +742,7 @@ async function runNativeGroupToolLoop(params: {
             nativeBundle = buildNativeChatTools(enabledTools, expandedSourceIds, nativeToolBuildOptions);
         }
 
-        const notices = outcomes.map(item => (
-            item.result.userNotice || (item.result.success ? `✓ ${item.result.name} 执行成功` : `✗ ${item.result.name}: ${item.result.error}`)
-        )).filter(Boolean).join("；");
+        const notices = formatToolNotices(outcomes.map(item => item.result));
         throwIfAborted(signal);
         if (notices) callbacks?.onToolNotice?.(notices);
 
@@ -966,7 +964,7 @@ export async function generateGroupChatCompletion(
         // Handle [执行动作:xxx({...})]
         if (toolCalls.length > 0) {
             const actorNames = [...new Set(toolCalls.map(t => t.actor?.trim()).filter(Boolean))].join("、") || "未标注角色";
-            callbacks?.onToolNotice?.(`${actorNames}正在${toolCalls.map(t => t.name).join("、")}...`);
+            callbacks?.onToolNotice?.(`${actorNames}正在${[...new Set(toolCalls.map(t => t.name))].join("、")}...`);
 
             let results: Awaited<ReturnType<typeof executeToolCalls>>;
             try {
@@ -987,8 +985,8 @@ export async function generateGroupChatCompletion(
                     return attachGroupToolActor(result!, actor);
                 }));
                 throwIfAborted(options?.signal);
-                const notices = results.map(r => r.userNotice || (r.success ? `✓ ${r.name} 执行成功` : `✗ ${r.name}: ${r.error}`)).join("；");
-                callbacks?.onToolNotice?.(notices);
+                const notices = formatToolNotices(results);
+                if (notices) callbacks?.onToolNotice?.(notices);
             } catch (err) {
                 throwIfAborted(options?.signal);
                 callbacks?.onToolNotice?.(`⚠️ 动作执行失败: ${err instanceof Error ? err.message : String(err)}`);
@@ -1001,6 +999,13 @@ export async function generateGroupChatCompletion(
             throwIfAborted(options?.signal);
             const toolExecutionId = createToolExecutionId();
             callbacks?.onToolExecution?.(results, toolResultContent || undefined, { toolExecutionId });
+            // 等用户确认的写入记忆不续写，但「已提交、等确认」要留在历史里，
+            // 不然下一轮模型以为没提交过，又把同一条再提一遍
+            const pendingForHistory = resultsForHistory.filter(r => r.pendingApproval);
+            if (resultsForContinuation.length === 0 && pendingForHistory.length > 0) {
+                throwIfAborted(options?.signal);
+                callbacks?.onToolResult?.(formatToolResults(pendingForHistory), { toolExecutionId });
+            }
 
             if (toolResultContent && resultsForContinuation.length > 0) {
                 throwIfAborted(options?.signal);
