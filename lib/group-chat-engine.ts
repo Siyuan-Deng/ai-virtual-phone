@@ -2,7 +2,7 @@
 // Group chat engine: single API call for all characters.
 
 import { ChatSession, ChatMessage, loadChatAppSettings, createResponseBatchId, createResponseRoundId, createToolExecutionId, loadChatSessions, getLatestCharacterStateValues, isSessionStreamingEnabled } from "./chat-storage";
-import { extractTextToolDirectiveText } from "./text-tool-protocol";
+import { extractTextToolDirectiveText, stripTextToolDirectives } from "./text-tool-protocol";
 import type { ApiConfig, PresetConfig, RegexConfig } from "./settings-types";
 import { loadCharacters } from "./character-storage";
 import { buildScreenEffectPromptHint } from "./chat-screen-effects";
@@ -84,6 +84,11 @@ import type { DebugPromptSnapshot } from "./debug-store";
 import { throwIfAborted } from "./abort-utils";
 import { buildCharacterTimeContext, buildGroupTimeContext } from "./character-time";
 import { getPromptTimestampOptionsForTimeContext } from "./prompt-time";
+
+/** 这一轮有没有说出用户能看见的话：去掉状态栏、内心想法和动作指令后还剩字 */
+function hasVisibleReplyText(text: string): boolean {
+    return stripTextToolDirectives(stripStateAndInnerForPrompt(text)).trim().length > 0;
+}
 
 function stripGroupFinancialActionsForMetadataRepair(text: string): string {
     return stripStateAndInnerForPrompt(text)
@@ -570,6 +575,7 @@ async function runNativeGroupToolLoop(params: {
 }): Promise<string> {
     const { session, llmMessages, config, preset, regexes, nameToId, memberNames, enabledTools, appTags, signal, callbacks } = params;
     const MAX_TOOL_ROUNDS = 5;
+    let askedAfterProposal = false;
     const onlineThinkingEnabled = preset?.online_thinking_enabled === true;
     const onlineThinkingTag = preset?.online_thinking_tag?.trim() || "thinking";
     const persistedSession = loadChatSessions().find(item => item.id === session.id);
@@ -780,7 +786,14 @@ async function runNativeGroupToolLoop(params: {
 
         await appendNativeMediaContext(requestMessages, realResults, config.enableImageRecognition, signal);
 
-        if (outcomes.filter(item => item.result.continueConversation !== false).length === 0) {
+        // 只交了待确认的写入记忆、一句话都没说：再要一次回复（就这一次），不然用户只看到一张卡
+        const wantsMore = outcomes.some(item => item.result.continueConversation !== false);
+        const silentProposal = !wantsMore
+            && !askedAfterProposal
+            && outcomes.some(item => item.result.pendingApproval)
+            && !hasVisibleReplyText(assistantForToolContext);
+        if (silentProposal) askedAfterProposal = true;
+        if (!wantsMore && !silentProposal) {
             break;
         }
     }
@@ -808,6 +821,7 @@ export async function generateGroupChatCompletion(
     const participantIds = session.participantIds || [];
 
     const MAX_TOOL_ROUNDS = 5;
+    let askedAfterProposal = false;
     const meta = { characterName: `群聊:${session.groupName || "群聊"}` };
     let finalRawOutput = "";
     // 线上思维链标签解析：预设开启时从正文提取 <tag> 思维链（覆盖原生），并剥离标签后再做后续解析
@@ -999,15 +1013,23 @@ export async function generateGroupChatCompletion(
             throwIfAborted(options?.signal);
             const toolExecutionId = createToolExecutionId();
             callbacks?.onToolExecution?.(results, toolResultContent || undefined, { toolExecutionId });
+            // 只交了待确认的写入记忆、一句话都没说：再要一次回复（就这一次），不然用户只看到一张卡；
+            // 待确认的那条已经告诉它别再提。说了话的就到此为止，等用户点卡片
+            const silentProposal = resultsForContinuation.length === 0
+                && !askedAfterProposal
+                && results.some(r => r.pendingApproval)
+                && !hasVisibleReplyText(assistantForToolContext);
+            if (silentProposal) askedAfterProposal = true;
+            const continuing = resultsForContinuation.length > 0 || silentProposal;
             // 等用户确认的写入记忆不续写，但「已提交、等确认」要留在历史里，
             // 不然下一轮模型以为没提交过，又把同一条再提一遍
             const pendingForHistory = resultsForHistory.filter(r => r.pendingApproval);
-            if (resultsForContinuation.length === 0 && pendingForHistory.length > 0) {
+            if (!continuing && pendingForHistory.length > 0) {
                 throwIfAborted(options?.signal);
                 callbacks?.onToolResult?.(formatToolResults(pendingForHistory), { toolExecutionId });
             }
 
-            if (toolResultContent && resultsForContinuation.length > 0) {
+            if (toolResultContent && continuing) {
                 throwIfAborted(options?.signal);
                 callbacks?.onToolResult?.(toolResultContent, { toolExecutionId });
                 const idx = findInsertIdx();
@@ -1017,7 +1039,7 @@ export async function generateGroupChatCompletion(
                 );
             }
 
-            if (resultsForContinuation.length === 0) {
+            if (!continuing) {
                 break;
             }
 
