@@ -70,6 +70,32 @@ function toHistoryMessage(message: StoryMessage, contextExcludedTags?: string): 
   };
 }
 
+/** 剧情里 system 的只有「指令」发的才进提示词；报错提示（「重试失败…」）也是 system，不能当指令发给模型 */
+function isPromptStoryMessage(message: StoryMessage): boolean {
+  return message.role !== "system" || message.instruction === true;
+}
+
+/** 上次回复之后发的系统指令，在时间线上挪到这次输入的紧前面。
+ *  剧情历史和私聊、日记这些按时间混排，指令发出去到你输入之间要是有别处的记录，
+ *  就会插在两者中间，指令看着像一条旧记录，模型不当回事（聊天里两者总挨着） */
+function pinPendingInstructions(history: ChatMessage[]): ChatMessage[] {
+  let lastUser = -1;
+  let lastAssistant = -1;
+  history.forEach((message, index) => {
+    if (message.role === "user") lastUser = index;
+    if (message.role === "assistant") lastAssistant = index;
+  });
+  if (lastUser < 0) return history;
+  const anchor = Date.parse(history[lastUser].createdAt);
+  if (!Number.isFinite(anchor)) return history;
+  const pending = history
+    .map((message, index) => ({ message, index }))
+    .filter(({ message, index }) => index > lastAssistant && index < lastUser && message.mediaType === "system_instruction");
+  if (pending.length === 0) return history;
+  const pinned = new Map(pending.map(({ message }, order) => [message.id, new Date(anchor - (pending.length - order)).toISOString()]));
+  return history.map(message => pinned.has(message.id) ? { ...message, createdAt: pinned.get(message.id)! } : message);
+}
+
 /** 番外多一个 story_extra 标签：日历、经期这些只进正篇，不进番外 */
 function storyAppTags(extra?: boolean): string[] {
   return extra ? ["story", "story_extra"] : ["story"];
@@ -200,7 +226,9 @@ async function buildStoryPromptMessages(
   }
 
   const userIdentity = resolveUserIdentity(characterId, "story");
-  const historyMessages = history.map((message) => toHistoryMessage(message, contextExcludedTags));
+  const historyMessages = pinPendingInstructions(
+    history.filter(isPromptStoryMessage).map((message) => toHistoryMessage(message, contextExcludedTags)),
+  );
   const memConfig = loadMemoryConfig();
   const { recentBlocks, truncatedHistory, wbActivationContext, unifiedRecentItems } = prepareShortTermContext(characterId, "story", {
     userName: userIdentity?.name ?? "用户",
