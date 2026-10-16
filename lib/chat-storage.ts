@@ -12,6 +12,7 @@ import { loadCharacters } from "./character-storage";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { emitChatPluginEvent, runChatPluginTransformSync } from "./chat-plugin-hooks";
 import { parseAIResponse } from "./rich-message-parser";
+import { formatRichMediaForHistory } from "./llm-prompt-assembler";
 import { extractTextToolDirectiveText } from "./text-tool-protocol";
 
 export const DEFAULT_VISION_IMAGE_PROMPT_LIMIT = 1;
@@ -1261,6 +1262,13 @@ function messageToEditableRawPart(message: ChatMessage): string {
     if (message.mediaType === "image") {
         const label = message.mediaData?.label?.trim() || message.content.trim();
         if (label) return `[照片:${label}]`;
+    }
+    // 语音条、表情包、位置、音乐、红包这些，文字在 mediaData 里、content 是空的：
+    // 按给模型看的那套写法还原成 AI 原文，不然删掉同一次回复里的别条，重建原文时它们就丢了，
+    // 再「编辑回复」一保存，这条也跟着没了
+    if (message.mediaType) {
+        const formatted = formatRichMediaForHistory(message, "", "").trim();
+        if (formatted) return formatted;
     }
     return message.content.trim();
 }
