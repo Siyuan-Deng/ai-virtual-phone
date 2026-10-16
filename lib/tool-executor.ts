@@ -132,6 +132,8 @@ export type ToolResult = {
     continueConversation?: boolean;
     persistToHistory?: boolean;
     userNotice?: string;
+    /** 不出灰条：比如同一条记忆已经在等确认，模型又提了一遍 */
+    quietNotice?: boolean;
     pendingApproval?: boolean;
     pendingRequest?: MemoryWriteRequest;
     mediaAttachments?: MediaAttachment[];
@@ -775,6 +777,15 @@ async function executeCompositeTool(
 }
 
 function normalizeInternalToolResult(result: ToolResult): ToolResult {
+    // 等用户点确认的写入记忆（和重复提的同一条）不续写：卡片在等人点，
+    // 这时候接着让模型说，它只会看着「待确认」把同一条再提一遍，一轮轮滚下去
+    if (result.pendingApproval || result.quietNotice) {
+        return {
+            ...result,
+            continueConversation: false,
+            persistToHistory: result.persistToHistory ?? true,
+        };
+    }
     return {
         ...result,
         continueConversation: true,
@@ -2959,6 +2970,20 @@ async function executeNoteWallCreateCommentTool(args: Record<string, unknown>, c
     };
 }
 
+// 等用户确认的写入记忆申请，按会话记着内容。卡片还没处理时，模型下一轮
+// 常常把同一条再提一遍，一轮里也会连发几条一样的——同一句只出一张卡。
+// 卡片本身不落库，刷新就没了，这里跟着只放内存。
+const pendingMemoryWrites = new Map<string, Set<string>>();
+
+function memoryWriteKey(content: string): string {
+    return content.replace(/\s+/g, "");
+}
+
+/** 用户点了确认写入或忽略：这条不再算等待中 */
+export function settleMemoryWriteRequest(sessionId: string, content: string): void {
+    pendingMemoryWrites.get(sessionId)?.delete(memoryWriteKey(content));
+}
+
 async function executeMemoryWriteTool(
     args: Record<string, unknown>,
     capability: InternalCapabilityConfig,
@@ -3000,8 +3025,27 @@ async function executeMemoryWriteTool(
     const importance = clampImportance(args.importance);
     const reason = String(args.reason ?? "").trim() || undefined;
 
+    // 一轮里的几条是并发跑的，所以在第一个 await 之前就占上
+    const pendingKey = memoryWriteKey(content);
+    const pendingInSession = pendingMemoryWrites.get(context.sessionId) ?? new Set<string>();
+    if (capability.mode === "confirm") {
+        if (pendingInSession.has(pendingKey)) {
+            return {
+                name: "写入记忆",
+                success: true,
+                data: "这条记忆已经在等用户确认了，不用再提。",
+                continueConversation: false,
+                persistToHistory: false,
+                quietNotice: true,
+            };
+        }
+        pendingInSession.add(pendingKey);
+        pendingMemoryWrites.set(context.sessionId, pendingInSession);
+    }
+
     const duplicate = await isDuplicateLongTermMemory(context.characterId, content);
     if (duplicate) {
+        pendingInSession.delete(pendingKey);
         return {
             name: "写入记忆",
             success: true,
@@ -3025,9 +3069,10 @@ async function executeMemoryWriteTool(
         return {
             name: "写入记忆",
             success: true,
-            data: "这条记忆需要用户确认后才会写入。",
+            data: "已提交给用户确认，用户确认后才会写入。结果出来之前不要再提这条。",
             continueConversation: false,
-            persistToHistory: false,
+            // 不续写，但要留在历史里：模型得知道已经提交过了
+            persistToHistory: true,
             pendingApproval: true,
             pendingRequest: request,
             userNotice: "对方想记住一件事，等待你确认",
@@ -4658,6 +4703,15 @@ function waitForAuthCallback(popup: Window, expectedState: string): Promise<stri
 }
 
 // ── Format results for prompt injection ───────
+
+/** 动作执行完的灰条：一条结果一句，用「；」连起来 */
+export function formatToolNotices(results: ToolResult[]): string {
+    return results
+        .filter(r => !r.quietNotice)
+        .map(r => r.userNotice || (r.success ? `✓ ${r.name} 执行成功` : `✗ ${r.name}: ${r.error}`))
+        .filter(Boolean)
+        .join("；");
+}
 
 export function formatToolResults(results: ToolResult[]): string {
     const items = results.map(r => {

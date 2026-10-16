@@ -58,7 +58,7 @@ import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { setChatActive } from "@/lib/music-action-queue";
 import { getMusicControlBridge } from "@/lib/music-control-bridge";
 import { findPlayableMatch, getNeteaseLyrics, getNeteaseSongDetail } from "@/lib/music-service";
-import { approveMemoryWriteRequest } from "@/lib/tool-executor";
+import { approveMemoryWriteRequest, settleMemoryWriteRequest } from "@/lib/tool-executor";
 import type { MemoryWriteRequest, ToolResult } from "@/lib/tool-executor";
 import { formatChatUiTime } from "@/lib/chat-time";
 import { parseActionTags } from "@/lib/action-parser";
@@ -3131,8 +3131,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
     const handleToolExecution = (results: ToolResult[], guard?: GenerationRunGuard, toolExecutionId?: string) => {
         throwIfGenerationStopped(guard);
-        const pending = results.find(result => result.pendingApproval && result.pendingRequest);
-        if (pending?.pendingRequest) {
+        // 一轮里想记的不止一条时每条一张卡；同一句重复提的已经在写入那边拦掉了
+        for (const pending of results) {
+            if (!pending.pendingApproval || !pending.pendingRequest) continue;
             throwIfGenerationStopped(guard);
             appendTransientMessage("system", pending.pendingRequest.content, "memory_write_request", {
                 memoryContent: pending.pendingRequest.content,
@@ -3175,6 +3176,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         };
 
         const result = await approveMemoryWriteRequest(request);
+        settleMemoryWriteRequest(session.id, request.content);
         if (result.success) {
             updateTransientMessage(msg.id, current => ({
                 ...current,
@@ -3191,6 +3193,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const handleIgnoreMemoryWrite = (msg: ChatMessage) => {
         if (msg.mediaType !== "memory_write_request") return;
         persistHiddenToolResult("忽略写入记忆");
+        settleMemoryWriteRequest(session.id, msg.mediaData?.memoryContent || msg.content);
         updateTransientMessage(msg.id, current => ({
             ...current,
             mediaData: {
