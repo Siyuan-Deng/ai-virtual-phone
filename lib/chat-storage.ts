@@ -1296,6 +1296,26 @@ function rebuildEditableRawFromRemainingBatch(messages: ChatMessage[]): string {
     return [...headerParts, ...bodyParts].join("\n\n").trim();
 }
 
+/** 「编辑回复」打开时用：以前删过同一次回复里的别条，原文里可能已经丢了语音条、表情包这类。
+ *  缺了就按还在的这几条重建；没缺就原样给，不动原文里的其它写法 */
+export function editableRawForResponseBatch(sessionId: string, responseBatchId: string, rawResponseText: string): string {
+    const batch = _messagesCache.filter(message =>
+        message.sessionId === sessionId
+        && message.responseBatchId === responseBatchId
+        && message.role === "assistant"
+    );
+    const missingMedia = batch.some(message => {
+        if (!message.mediaType || message.mediaType === "image" || message.mediaType === "poke") return false;
+        if (message.mediaType === "tool_notice" || message.mediaType === "tool_result" || message.mediaType === "tool_call") return false;
+        const formatted = formatRichMediaForHistory(message, "", "").trim();
+        const label = String(message.mediaData?.label ?? "").trim();
+        if (!formatted && !label) return false;
+        return !(formatted && rawResponseText.includes(formatted)) && !(label && rawResponseText.includes(label));
+    });
+    if (!missingMedia) return rawResponseText;
+    return rebuildEditableRawFromRemainingBatch(batch) || rawResponseText;
+}
+
 function normalizeParsedRawPartForCompare(part: ReturnType<typeof parseAIResponse>["parts"][number]): string {
     if (part.mediaType === "poke") {
         const sender = part.mediaData?.pokeSender?.trim();
