@@ -75,9 +75,10 @@ function isPromptStoryMessage(message: StoryMessage): boolean {
   return message.role !== "system" || message.instruction === true;
 }
 
-/** 上次回复之后发的系统指令，在时间线上挪到这次输入的紧前面。
+/** 上次回复之后发的系统指令，挪到这次输入的紧前面：【前面所有】【系统指令】【新输入】。
  *  剧情历史和私聊、日记这些按时间混排，指令发出去到你输入之间要是有别处的记录，
- *  就会插在两者中间，指令看着像一条旧记录，模型不当回事（聊天里两者总挨着） */
+ *  就会插在两者中间，指令看着像一条旧记录，模型不当回事（聊天里两者总挨着）。
+ *  发完指令点重试时，指令在输入后面，也一样挪到前面 */
 function pinPendingInstructions(history: ChatMessage[]): ChatMessage[] {
   let lastUser = -1;
   let lastAssistant = -1;
@@ -85,15 +86,20 @@ function pinPendingInstructions(history: ChatMessage[]): ChatMessage[] {
     if (message.role === "user") lastUser = index;
     if (message.role === "assistant") lastAssistant = index;
   });
-  if (lastUser < 0) return history;
+  if (lastUser < 0 || lastUser < lastAssistant) return history;
   const anchor = Date.parse(history[lastUser].createdAt);
   if (!Number.isFinite(anchor)) return history;
-  const pending = history
-    .map((message, index) => ({ message, index }))
-    .filter(({ message, index }) => index > lastAssistant && index < lastUser && message.mediaType === "system_instruction");
+  const pending = history.filter((message, index) => index > lastAssistant && message.mediaType === "system_instruction");
   if (pending.length === 0) return history;
-  const pinned = new Map(pending.map(({ message }, order) => [message.id, new Date(anchor - (pending.length - order)).toISOString()]));
-  return history.map(message => pinned.has(message.id) ? { ...message, createdAt: pinned.get(message.id)! } : message);
+  // 时间线按时间排，所以时间改到输入前一点点；数组里也挪过去
+  const pinned = pending.map((message, order) => ({
+    ...message,
+    createdAt: new Date(anchor - (pending.length - order)).toISOString(),
+  }));
+  const pendingIds = new Set(pending.map(message => message.id));
+  const rest = history.filter(message => !pendingIds.has(message.id));
+  const inputAt = rest.indexOf(history[lastUser]);
+  return [...rest.slice(0, inputAt), ...pinned, ...rest.slice(inputAt)];
 }
 
 /** 番外多一个 story_extra 标签：日历、经期这些只进正篇，不进番外 */

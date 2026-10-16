@@ -1262,13 +1262,18 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
     if (retryMessage.role !== "assistant" && retryMessage.role !== "user") return;
     const sessionId = activeSessionId;
     const characterId = activeCharacterId;
-    const contextMessages = retryMessage.role === "user"
+    const keptMessages = retryMessage.role === "user"
       ? messages.slice(0, msgIndex + 1)
       : messages.slice(0, msgIndex);
-    const firstDiscardedMessage = messages[contextMessages.length];
-    if (firstDiscardedMessage) {
-      deleteStoryMessagesFrom(activeSessionId, firstDiscardedMessage.id);
+    // 这条之后发的系统指令留着，重新生成时照样带上（发完指令再点重试，就是想按指令重写这一段）
+    const discarded = messages.slice(keptMessages.length);
+    const keptInstructions = discarded.filter(m => m.instruction === true);
+    if (keptInstructions.length === 0) {
+      if (discarded[0]) deleteStoryMessagesFrom(activeSessionId, discarded[0].id);
+    } else {
+      discarded.filter(m => m.instruction !== true).forEach(m => deleteStoryMessage(m.id));
     }
+    const contextMessages = [...keptMessages, ...keptInstructions];
     setMessages(contextMessages);
     setActiveMessageId(null);
     setStorageVersion(v => v + 1);
