@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Code2, Highlighter, ImagePlus, Palette, Trash2 } from "lucide-react";
 import { ContentDialog } from "@/components/ui/modal";
 import { ReadingSettingsSection } from "./reading-settings-section";
-import { ColorInput, Slider } from "@/components/ui/form";
+import { ColorInput, Select, Slider } from "@/components/ui/form";
 import type { ReadingAnnotationFontFamilyId, ReadingAppearance } from "@/lib/reading-appearance";
 import {
     READING_ANNOTATION_FONT_SIZE_MAX,
@@ -12,6 +12,8 @@ import {
     READING_ANNOTATION_STYLE_DEFAULTS,
     READING_BG_BRIGHTNESS_MAX,
     READING_BG_BRIGHTNESS_MIN,
+    READING_FIRST_LINE_INDENT_MAX,
+    READING_PAGE_PADDING_MAX,
     readingBackgroundOverlay,
     readingMarkColor,
     resolveReadingAnnotationFontFamily,
@@ -178,6 +180,37 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                         onChange={(e) => setDraft((prev) => ({ ...prev, lineHeight: Number(e.target.value) }))}
                         displayValue={draft.lineHeight.toFixed(1)}
                     />
+                    <Slider
+                        label="左右页边距"
+                        min={0}
+                        max={READING_PAGE_PADDING_MAX}
+                        step={2}
+                        value={draft.pagePaddingX ?? 0}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, pagePaddingX: Number(e.target.value) }))}
+                        displayValue={draft.pagePaddingX ? `${draft.pagePaddingX}px` : "默认"}
+                    />
+                    <Slider
+                        label="首行缩进"
+                        min={0}
+                        max={READING_FIRST_LINE_INDENT_MAX}
+                        step={1}
+                        value={draft.firstLineIndent ?? 2}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, firstLineIndent: Number(e.target.value) }))}
+                        displayValue={(draft.firstLineIndent ?? 2) === 0 ? "不缩进" : `${draft.firstLineIndent ?? 2} 字`}
+                    />
+                    <div className="reading-settings-color-row">
+                        <span className="reading-settings-label-inline">正文对齐</span>
+                        <Select
+                            value={draft.textAlign ?? "left"}
+                            onChange={(event) => setDraft((prev) => ({
+                                ...prev,
+                                textAlign: event.target.value === "justify" ? "justify" : "left",
+                            }))}
+                        >
+                            <option value="left">左对齐（默认）</option>
+                            <option value="justify">两端对齐</option>
+                        </Select>
+                    </div>
                     <div className="reading-settings-color-row">
                         <span className="reading-settings-label-inline">文字颜色</span>
                         <ColorInput value={draft.textColor} onChange={(textColor) => setDraft((prev) => ({ ...prev, textColor }))} />

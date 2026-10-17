@@ -17,6 +17,7 @@ import {
     readingBackgroundOverlay,
     readingMarkColor,
     READING_ANNOTATION_STYLE_DEFAULTS,
+    READING_PAGE_PADDING_MAX,
     resolveReadingAnnotationFontFamily,
     resolveReadingFontFamily,
     saveReadingAnnotationFont,
@@ -123,6 +124,48 @@ function blockLayoutCss(): string {
         "  margin: 0.3em 0;",
         "}",
     ].join("\n");
+}
+
+/** 正文排版（页边距 / 两端对齐）。
+ *
+ *  这一项只改 CSS，而且是刻意的：翻页模式下每页能放多少内容是**从真实 DOM 量出来的**
+ *  （reading-viewer 里量 .reading-page-surface 的内边距、.reading-line 的行高与字宽），
+ *  所以把排版写进 CSS，分页会自己跟着变，不必在 JS 里再维护第二套数字。
+ *
+ *  首行缩进不在这里出：它走根节点的 --reading-block-indent 变量（见 appearanceStyle），
+ *  因为原书排版会给个别段落单独指定缩进档位，那条内联变量必须能盖过根变量。
+ *
+ *  一律不加 !important：用户自己的阅读自定义 CSS 仍然盖得动。 */
+function typographyCss(appearance: ReadingAppearance): string {
+    const rules: string[] = [];
+
+    const padding = Math.max(0, Math.min(READING_PAGE_PADDING_MAX, appearance.pagePaddingX ?? 0));
+    if (padding > 0) {
+        rules.push([
+            ".reading-app-surface .reading-page-surface {",
+            `  padding-left: ${padding}px;`,
+            `  padding-right: ${padding}px;`,
+            "}",
+            // 连续滚动模式是整章铺开，边距落在滚动内容容器上
+            ".reading-app-surface .reading-scroll-content {",
+            `  padding-left: ${padding}px;`,
+            `  padding-right: ${padding}px;`,
+            "}",
+        ].join("\n"));
+    }
+
+    if (appearance.textAlign === "justify") {
+        // :not(...) 是为了压过 blockLayoutCss 里的居中/右对齐两条规则——
+        // 原书的题记、署名该居中还是居中，不能被全局对齐方式顶掉。
+        rules.push([
+            ".reading-app-surface .reading-line:not(.reading-line-center):not(.reading-line-right) {",
+            "  text-align: justify;",
+            "  text-justify: inter-ideograph;",
+            "}",
+        ].join("\n"));
+    }
+
+    return rules.join("\n");
 }
 
 export default function ReadingApp({ onClose }: Props) {
@@ -365,6 +408,8 @@ export default function ReadingApp({ onClose }: Props) {
         // 一眼看得出这道线是谁划的。没有 data-author 的老数据算自己划的。
         markColorCss("", appearance.highlightColor, appearance.underlineColor),
         markColorCss('[data-author="character"]', appearance.charHighlightColor, appearance.charUnderlineColor, true),
+        // 正文排版（页边距 / 两端对齐）。放在最后，权重交给各自的 :not() 处理
+        typographyCss(appearance),
     ].filter(Boolean).join("\n");
 
     const appearanceStyle = {
@@ -383,12 +428,20 @@ export default function ReadingApp({ onClose }: Props) {
         ["--reading-text-color" as "--reading-text-color"]: appearance.textColor,
         ["--reading-line-height" as "--reading-line-height"]: String(appearance.lineHeight),
         ["--reading-bg-image" as "--reading-bg-image"]: backgroundLayers,
+        // 首行缩进：根节点给一份全局值，原书排版给个别段落指定的档位以内联变量覆盖它。
+        // 翻页模式的断行也读同一个数（见 reading-viewer 的 resolveBlockMetrics 调用）。
+        ["--reading-block-indent" as "--reading-block-indent"]: `${appearance.firstLineIndent ?? 2}em`,
     } as CSSProperties;
     // 传给阅读器，让它在字体/字号/行距变化后重新分页。批注字体也算进来：
     // 翻页模式连批注块的高度一起量，批注换字体同样会改变每页塞得下多少东西。
     const appearanceKey = [
         appearance.fontSize,
         appearance.lineHeight,
+        // 排版三项：页边距改的是可用宽度，首行缩进改的是断行起点，
+        // 两者都会改变每页塞多少内容，必须让阅读器重新分页。
+        appearance.pagePaddingX ?? 0,
+        appearance.firstLineIndent ?? 2,
+        appearance.textAlign ?? "left",
         resolvedBodyFont,
         resolvedAnnotationFont || "",
         resolvedUserAnnotationFont || "",
@@ -428,7 +481,12 @@ export default function ReadingApp({ onClose }: Props) {
             )}
             {lastBookRef.current && (
                 <div style={activeBook ? undefined : hiddenViewerStyle} aria-hidden={!activeBook}>
-                    <ReadingViewer book={lastBookRef.current} appearanceKey={appearanceKey} onBack={() => setActiveBook(null)} />
+                    <ReadingViewer
+                        book={lastBookRef.current}
+                        appearanceKey={appearanceKey}
+                        firstLineIndent={appearance.firstLineIndent ?? 2}
+                        onBack={() => setActiveBook(null)}
+                    />
                 </div>
             )}
         </div>

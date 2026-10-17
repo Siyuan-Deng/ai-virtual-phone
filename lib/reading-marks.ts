@@ -50,3 +50,12 @@ export function deleteReadingMark(bookId: string, markId: string): void {
     all[bookId] = (all[bookId] || []).filter(item => item.id !== markId);
     kvSet(MARKS_KEY, JSON.stringify(all));
 }
+
+/** 整本书的标记一次性换掉（自定义分章后迁移锚点用）。
+ *  逐条 saveReadingMark 每次都要读一遍整个 kv、再写一遍，一本书几百处划线就是几百次全量读写。 */
+export function replaceReadingMarks(bookId: string, marks: ReadingMark[]): void {
+    if (typeof window === "undefined") return;
+    const all = loadAll();
+    all[bookId] = marks;
+    kvSet(MARKS_KEY, JSON.stringify(all));
+}

@@ -45,7 +45,27 @@ export type ReadingAppearance = {
     charUnderlineColor?: string;
     /** 背景图亮度：1 = 原图，<1 压暗，>1 提亮。缺省即 1（和加这个设置之前一样）。 */
     backgroundBrightness?: number;
+    /** 正文左右页边距（px）。缺省 0 = 用 CSS 里原本那点内边距，和加这个设置之前一模一样。 */
+    pagePaddingX?: number;
+    /** 首行缩进几个字。缺省 2 = 中文书的老规矩（与 reading-viewer 的 DEFAULT_BLOCK_INDENT 一致）。
+     *  注意：这个值同时参与翻页模式的断行计算，两边必须读同一个来源。 */
+    firstLineIndent?: number;
+    /** 正文对齐。缺省 left = 改动前的表现；justify 是两端对齐（不改变行宽，不影响分页） */
+    textAlign?: ReadingTextAlign;
 };
+
+export type ReadingTextAlign = "left" | "justify";
+
+/** 排版的出厂值。每一项都刻意等于「加这个设置之前」的表现，
+ *  这样老配置读出来不需要迁移，也不会因为升级看起来就变了。 */
+export const READING_TYPOGRAPHY_DEFAULTS = {
+    pagePaddingX: 0,
+    firstLineIndent: 2,
+    textAlign: "left",
+} as const;
+
+export const READING_PAGE_PADDING_MAX = 32;
+export const READING_FIRST_LINE_INDENT_MAX = 4;
 
 /** 批注卡片的出厂配色和字号。这几个数原来写死在 chat.css 里，
  *  现在搬出来当默认值：用户没调过时渲染结果和以前一模一样。 */
@@ -271,6 +291,20 @@ function normalizeAppearance(raw: Partial<ReadingAppearance> | null | undefined)
         charHighlightColor: markColor(raw?.charHighlightColor, charCardColor, LEGACY_MARK_DEFAULTS.charHighlight, 0),
         charUnderlineColor: markColor(raw?.charUnderlineColor, charCardColor, LEGACY_MARK_DEFAULTS.charUnderline, 0.45),
         backgroundBrightness,
+        // 排版三项：存储里没有就是出厂值，行为与改动前一致
+        pagePaddingX: clamp(
+            Number(raw?.pagePaddingX ?? READING_TYPOGRAPHY_DEFAULTS.pagePaddingX) || 0,
+            0,
+            READING_PAGE_PADDING_MAX,
+        ),
+        // 末尾的 || 0 是给坏数据兜底：Number("abc") 是 NaN，clamp(NaN) 还是 NaN，
+        // 那样会把缩进写成一个 NaN 变量，CSS 直接整条失效
+        firstLineIndent: clamp(
+            Number(raw?.firstLineIndent ?? READING_TYPOGRAPHY_DEFAULTS.firstLineIndent) || 0,
+            0,
+            READING_FIRST_LINE_INDENT_MAX,
+        ),
+        textAlign: raw?.textAlign === "justify" ? "justify" : "left",
     };
 }
 

@@ -31,7 +31,30 @@ const RETRY_DELAY_MS = [1200, 3000];
 
 /** 这些是配置或参数问题，重试也不会变——直接失败，别浪费时间。 */
 function isFatalUploadError(message: string): boolean {
-    return /缺少 ImgBB API Key|不支持的图片类型|图片文件为空|图片超过|url 不合法/.test(message);
+    return /未启用图床|缺少 ImgBB API Key|不支持的图片类型|图片文件为空|图片超过|url 不合法/.test(message);
+}
+
+/** 图床上传要用的那份凭证，来源是「图像生成 → Image Hosting」里的同一份设置。
+ *
+ *  以前 key 只从服务端环境变量 IMGBB_API_KEY 读：自部署用户明明在设置界面填过
+ *  ImgBB Key，保存卡片时却仍然报「缺少 ImgBB API Key」——两处配置各说各话。
+ *  现在客户端先把设置里的 key 一起提交（服务端也认这个字段，见
+ *  app/api/image-hosting/imgbb/route.ts），环境变量只作为服务端兜底继续保留。
+ *
+ *  每次上传都重新读设置，用户改完 key 不用刷新页面。 */
+function resolveHostingCredentials(): { apiKey: string; expirationSeconds: number } {
+    const hosting = loadImageGenerationSettings()?.imageHosting;
+    if (!hosting || hosting.provider !== "imgbb") {
+        throw new Error("未启用图床：请先在 设置 → 图像生成 → Image Hosting 选择 ImgBB 并填写 API Key");
+    }
+    const apiKey = (hosting.imgbbApiKey || "").trim();
+    if (!apiKey) {
+        throw new Error("缺少 ImgBB API Key：请到 设置 → 图像生成 → Image Hosting 填写");
+    }
+    // 设置里 0 表示「不过期」，但这条通道只是给宿主下载器用的中转，
+    // 图存进相册后再没有留外链的理由，所以仍然按内置的 1 天兜底。
+    const configured = Math.floor(Number(hosting.defaultExpirationSeconds) || 0);
+    return { apiKey, expirationSeconds: configured > 0 ? configured : UPLOAD_EXPIRATION_SECONDS };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -39,10 +62,13 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function uploadOnce(blob: Blob, filename: string): Promise<string> {
+    // 凭证问题在这里就抛，不占一次网络请求；重试逻辑会把它当致命错误直接退出
+    const { apiKey, expirationSeconds } = resolveHostingCredentials();
     const form = new FormData();
     form.set("file", new File([blob], filename, { type: blob.type || "image/png" }));
     form.set("name", filename);
-    form.set("expiration", String(UPLOAD_EXPIRATION_SECONDS));
+    form.set("apiKey", apiKey);
+    form.set("expiration", String(expirationSeconds));
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);

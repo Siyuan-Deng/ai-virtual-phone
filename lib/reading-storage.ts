@@ -188,6 +188,54 @@ export async function loadChapters(bookId: string): Promise<BookChapter[]> {
     return chapters;
 }
 
+/**
+ * 整章重建（自定义分章用）。
+ *
+ * 不能沿用 saveChapters：它是「合并」语义，删不掉已经不存在的章——重建目录后
+ * 那些被并掉的章会留在库里，书架按 bookId 取回来就是一批多余的空章。
+ *
+ * 章节、批注、书签、进度必须一起换：批注锚的是「章号 + 段号」，章号一变，
+ * 只换章节不换批注就会让所有批注挂到错误的段落上。所以这里走同一个事务，
+ * 中途失败就整体回滚，不会留下「章节换了、批注还是旧的」这种半截状态。
+ *
+ * 划线和记忆日志存在 kv 里，不在这个事务范围内，由调用方在事务成功后重写
+ * （见 lib/reading-rechunk-apply.ts）。
+ */
+export async function applyChapterRebuild(input: {
+    bookId: string;
+    chapters: BookChapter[];
+    annotations: ReadingAnnotation[];
+    bookmarks: ReadingBookmark[];
+    progress: ReadingProgress | null;
+}): Promise<void> {
+    const { bookId, chapters, annotations, bookmarks, progress } = input;
+
+    await db.transaction("rw", db.chapters, db.annotations, db.bookmarks, db.progress, async () => {
+        await db.chapters.where("bookId").equals(bookId).delete();
+        if (chapters.length > 0) await db.chapters.bulkPut(chapters);
+
+        await db.annotations
+            .where("[bookId+chapterIndex]")
+            .between([bookId, Dexie.minKey], [bookId, Dexie.maxKey])
+            .delete();
+        if (annotations.length > 0) await db.annotations.bulkPut(annotations);
+
+        await db.bookmarks.where("bookId").equals(bookId).delete();
+        if (bookmarks.length > 0) await db.bookmarks.bulkPut(bookmarks);
+
+        if (progress) await db.progress.put(progress);
+        else await db.progress.delete(bookId);
+    });
+
+    // 缓存跟着换掉：漏掉任何一项，界面都会读到重建前的旧数据
+    _chaptersCache.set(bookId, [...chapters].sort((a, b) => a.index - b.index));
+    for (const key of [..._annotationsCache.keys()]) {
+        if (key.startsWith(`${bookId}:`)) _annotationsCache.delete(key);
+    }
+    _progressCache.delete(bookId);
+    if (progress) _progressCache.set(bookId, progress);
+}
+
 // ── Progress ──
 
 export async function loadProgress(bookId: string): Promise<ReadingProgress | null> {
@@ -214,6 +262,15 @@ export async function loadAnnotations(bookId: string, chapterIndex: number): Pro
     const annots = await db.annotations.where("[bookId+chapterIndex]").equals([bookId, chapterIndex]).toArray();
     _annotationsCache.set(key, annots);
     return annots;
+}
+
+/** 这本书的全部批注（跨所有章节）。自定义分章要整批迁移锚点，
+ *  逐章 loadAnnotations 会让一本几百章的书开几百次事务。 */
+export async function loadAllAnnotations(bookId: string): Promise<ReadingAnnotation[]> {
+    return db.annotations
+        .where("[bookId+chapterIndex]")
+        .between([bookId, Dexie.minKey], [bookId, Dexie.maxKey])
+        .toArray();
 }
 
 export async function saveAnnotation(annotation: ReadingAnnotation): Promise<void> {

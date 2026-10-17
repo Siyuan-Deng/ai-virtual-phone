@@ -53,6 +53,15 @@ import {
     type ReadingImageRef,
 } from "@/lib/reading-inline-image";
 import { loadReadingAsset, loadReadingAssets } from "@/lib/reading-appearance";
+import {
+    BOOK_SLIDER_STEPS,
+    bookFractionToPosition,
+    bookFractionToSliderValue,
+    buildBookPositionIndex,
+    chapterToBookFraction,
+    sliderValueToBookFraction,
+} from "@/lib/reading-progress";
+import { ReadingChapterEditor } from "./reading-chapter-editor";
 
 /** 一行要用的原书排版信息；只在「还原原书排版」开着、且这本书带样式数据时才有值。 */
 type LineBlockStyle = {
@@ -202,6 +211,29 @@ function trimTrailingGaps(items: TxtPageItem[]): TxtPageItem[] {
 /** 行内小图的占位字符（与 lib/reading-parser.ts 的 INLINE_IMAGE_CHAR 一致）。
  *  正文里它占一个字符位，渲染时变成一个 1em 高的小图 + 一个零宽空格。 */
 const INLINE_IMAGE_CHAR = "\uFFFC";
+
+/** 行内小图的对齐样式。
+ *
+ *  缺了 vertical-align 时图片按基线对齐，底边压在文字基线上，看起来整体往下掉
+ *  （EPUB 里的脚注角标、装饰符最明显）。改成 inline-block + middle 让图和文字上下居中。
+ *  高度锁在 1em 内、宽度按原比例并留一点上限，免得一张宽图把整行顶出去
+ *  —— 分页那边是按「一个字宽」估算这个占位的（见 wrapTextToLines 的 symbolWidth），
+ *  图片实际宽度不能远大于一个字符，否则每页会溢出。 */
+const INLINE_IMAGE_BOX_STYLE: CSSProperties = {
+    display: "inline-block",
+    verticalAlign: "middle",
+    height: "1em",
+    lineHeight: 1,
+    padding: "0 0.04em",
+};
+
+const INLINE_IMAGE_IMG_STYLE: CSSProperties = {
+    display: "block",
+    height: "1em",
+    width: "auto",
+    maxWidth: "1.4em",
+    objectFit: "contain",
+};
 
 function countInlineImageChars(text: string): number {
     let count = 0;
@@ -403,6 +435,8 @@ function resolveBlockMetrics(
     style: ReadingBlockStyle | null,
     baseFontSize: number,
     baseLineHeight: number,
+    /** 原书没给缩进信息时用的档位（来自外观设置）。缺省沿用老规矩：两个全角字。 */
+    defaultIndent = DEFAULT_BLOCK_INDENT,
 ): BlockMetrics {
     const scale = blockScaleFor(style);
     const centering = style?.align ?? (style?.epigraph ? "center" : undefined);
@@ -414,7 +448,7 @@ function resolveBlockMetrics(
         scale,
         bold: style?.bold ?? Boolean(style?.heading),
         italic: style?.italic ?? false,
-        indentChars: noIndent ? 0 : (style?.indent ?? DEFAULT_BLOCK_INDENT),
+        indentChars: noIndent ? 0 : (style?.indent ?? defaultIndent),
         quote: Boolean(style?.quote),
         footnote: Boolean(style?.footnote),
         ...(centering ? { align: centering } : {}),
@@ -527,10 +561,13 @@ type Props = {
     /** 正文字体 / 字号 / 行距的指纹。变了就得重排——翻页模式的断行是按当时的
      *  字体量出来的，阅读器返回书架时又不卸载，不重排就会用旧字体的断行位置。 */
     appearanceKey?: string;
+    /** 正文首行缩进字数（阅读外观设置）。分页断行和滚动模式的逐段缩进都读它，
+     *  与根节点的 --reading-block-indent 是同一个来源，不接受第二套数字。 */
+    firstLineIndent?: number;
     onBack: () => void;
 };
 
-export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
+export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: Props) {
     const isPdf = book.format === "pdf";
     const [readingConfig, setReadingConfig] = useState(() => loadReadingInteractionConfig());
     // 阅读器保持挂载（返回书架不卸载），书架设置页保存后通过事件同步最新配置
@@ -627,6 +664,8 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         pdfPreloadEnabled: readingConfig.pdfPreloadEnabled !== false,
     }));
     const [showNavigationDialog, setShowNavigationDialog] = useState(false);
+    /** 目录与分章工作台（重命名章节、调整分章边界） */
+    const [showChapterEditor, setShowChapterEditor] = useState(false);
     const [bookmarks, setBookmarks] = useState<ReadingBookmark[]>([]);
     const [showBookmarks, setShowBookmarks] = useState(false);
     const [pdfJumpPage, setPdfJumpPage] = useState<number | undefined>(undefined);
@@ -715,6 +754,9 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     const flipAnimationEnabled = readingConfig.pageFlipAnimation !== false;
     const defaultTranslationExpanded = readingConfig.collapseBilingualTranslation !== true;
     const isScrollMode = !isPdf && readingConfig.readingMode === "scroll";
+    /** 首行缩进字数（外观设置）。分页断行的起点、滚动模式逐段的缩进都用这一个值，
+     *  与根节点上的 --reading-block-indent 同源，不在别处再写一个数。 */
+    const defaultIndentChars = Math.max(0, firstLineIndent ?? DEFAULT_BLOCK_INDENT);
     // 保持 ref 与最新状态同步（供长生命周期滚动回调读取）
     chapterIndexRef.current = chapterIndex;
     chaptersLenRef.current = chapters.length;
@@ -1147,10 +1189,17 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         // -1 = 这个占位字符没有对得上的图（数据缺项）。仍然要渲染那一个零宽空格，
         // 否则这一行的 DOM 文字会比段落文字短一个字符，选区偏移整体错位。
         const url = imageIndex >= 0 ? inlineImageUrls[imageIndex] : undefined;
+        // 对齐方式写在 INLINE_IMAGE_BOX_STYLE / INLINE_IMAGE_IMG_STYLE 里（含原因说明）：
+        // 这里只负责把样式挂上去，JSX 里不写注释，免得又踩「注释位置非法」那个坑。
         return (
-            <span key={key} className="reading-inline-image-inline" data-inline-image={imageIndex}>
+            <span
+                key={key}
+                className="reading-inline-image-inline"
+                data-inline-image={imageIndex}
+                style={INLINE_IMAGE_BOX_STYLE}
+            >
                 {"\u200B"}
-                {url ? <img src={url} alt="" /> : null}
+                {url ? <img src={url} alt="" style={INLINE_IMAGE_IMG_STYLE} /> : null}
             </span>
         );
     };
@@ -1358,14 +1407,14 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                     italic: style?.italic ?? false,
                     quote: Boolean(style?.quote),
                     footnote: Boolean(style?.footnote),
-                    indentChars: noIndent ? 0 : (style?.indent ?? DEFAULT_BLOCK_INDENT),
+                    indentChars: noIndent ? 0 : (style?.indent ?? defaultIndentChars),
                     ...(align ? { align } : {}),
                     spans: spansList?.[index] ?? null,
                 } satisfies LineBlockStyle;
             }));
         }
         return map;
-    }, [isScrollMode, readingConfig.restoreOriginalLayout, windowChapters]);
+    }, [defaultIndentChars, isScrollMode, readingConfig.restoreOriginalLayout, windowChapters]);
 
     /** 一张正文插图。图还没读出来时先占住位置（有原始尺寸就按比例占），
      *  否则图片加载完会把正文顶得一跳一跳。 */
@@ -2095,11 +2144,11 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         } else {
             if (chapters.length === 0) return;
 
-            const maxSliderValue = chapters.length + 1;
-            const boundedValue = Math.max(1, Math.min(maxSliderValue, value));
-            const rawPosition = boundedValue - 1;
-            const targetChapterIndex = Math.min(chapters.length - 1, Math.floor(rawPosition));
-            const pageFraction = Math.max(0, Math.min(1, rawPosition - targetChapterIndex));
+            // 滑块读数是全书比例，反解成「第几章 + 章内比例」——和显示的百分比同一套换算，
+            // 所以拖到多少就跳到多少，读过的、跳过的都算在里面。
+            const position = bookFractionToPosition(sliderValueToBookFraction(value), bookIndex);
+            const targetChapterIndex = position.chapterIndex;
+            const pageFraction = position.within;
 
             if (targetChapterIndex === chapterIndex) {
                 if (isScrollMode) {
@@ -2800,6 +2849,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             Math.round(maxHeight),
             lineHeight,
             gapHeight,
+            defaultIndentChars,
             fontSize,
             lineStyle.fontFamily,
             lineStyle.fontWeight,
@@ -2858,10 +2908,10 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         /** 第 index 段的排版参数。没还原时等价于改动前那一套（首行缩进两字、统一字号行距）。 */
         const metricsAt = (index: number): BlockMetrics => (
             restoreLayout
-                ? resolveBlockMetrics(chapterStyles?.[index] ?? null, fontSize, lineHeight)
+                ? resolveBlockMetrics(chapterStyles?.[index] ?? null, fontSize, lineHeight, defaultIndentChars)
                 : {
                     fontSize, lineHeight, scale: 1, bold: false, italic: false,
-                    indentChars: DEFAULT_BLOCK_INDENT, quote: false, footnote: false,
+                    indentChars: defaultIndentChars, quote: false, footnote: false,
                 }
         );
         /** 第 index 段与下一段之间的空白。没还原时返回 undefined，渲染层用回原来的 gapHeight。 */
@@ -3017,28 +3067,18 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
 
     // 全书进度按字数加权：章节长度差距很大（几十字的版权页 vs 一万多字的正文章），
     // 用「第几章 / 总章数」会让进度条和实际读了多少完全对不上。
-    const chapterCharStats = useMemo(() => {
-        const lengths = chapters.map(ch => ch.paragraphs.reduce((sum, p) => sum + p.length, 0));
-        const offsets: number[] = [];
-        let acc = 0;
-        for (const len of lengths) {
-            offsets.push(acc);
-            acc += len;
-        }
-        return { lengths, offsets, total: acc };
-    }, [chapters]);
+    /** 全书进度换算表（按字数加权）。百分比、进度条、书签、分享卡片共用这一份，
+     *  换算规则见 lib/reading-progress.ts 开头那段说明。 */
+    const bookIndex = useMemo(() => buildBookPositionIndex(chapters), [chapters]);
+    /** 旧名字保留：分享卡片按「章节字符数」取用，与换算表是同一份数据 */
+    const chapterCharStats = bookIndex;
 
     /** 章内比例 → 全书比例。字数统计不可用时回退到按章数平均，保持旧行为。 */
-    const toBookFraction = useCallback((targetChapterIndex: number, withinChapter: number) => {
-        const within = Math.min(1, Math.max(0, withinChapter));
-        const { lengths, offsets, total } = chapterCharStats;
-        const chapterLength = lengths[targetChapterIndex];
-        if (total > 0 && chapterLength !== undefined) {
-            const read = (offsets[targetChapterIndex] ?? 0) + chapterLength * within;
-            return Math.min(1, Math.max(0, read / total));
-        }
-        return Math.min(1, Math.max(0, (targetChapterIndex + within) / Math.max(1, chapters.length)));
-    }, [chapterCharStats, chapters.length]);
+    const toBookFraction = useCallback(
+        (targetChapterIndex: number, withinChapter: number) =>
+            chapterToBookFraction(targetChapterIndex, withinChapter, bookIndex),
+        [bookIndex],
+    );
 
     const navigateWithFlip = useCallback((direction: 'forward' | 'backward') => {
         if (flipAnim || isPdf) return;
@@ -3082,15 +3122,10 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     })();
     const txtDisplayedPage = Math.min(txtPage + 1, txtTotalPages);
     const currentPageCount = isPdf ? Math.max(1, pdfTotalPages || 1) : Math.max(1, txtTotalPages);
-    const txtBookSliderMax = chapters.length > 0 ? chapters.length + 1 : 1;
-    const txtBookSliderValue = (() => {
-        if (chapters.length === 0) return 1;
-        const boundedChapterIndex = Math.max(0, Math.min(chapters.length - 1, chapterIndex));
-        const pageFraction = isScrollMode
-            ? Math.max(0, Math.min(1, scrollFraction))
-            : (txtTotalPages > 1 ? Math.max(0, Math.min(txtPage, txtTotalPages - 1)) / (txtTotalPages - 1) : 0);
-        return Math.max(1, Math.min(txtBookSliderMax, boundedChapterIndex + 1 + pageFraction));
-    })();
+    // 滑块刻度直接就是全书比例（0-1000），不再按「第几章 + 章内比例」铺开：
+    // 按章等分时，章节长短不均的书里滑块位置和百分比必然错开。
+    const txtBookSliderMax = chapters.length > 0 ? BOOK_SLIDER_STEPS + 1 : 1;
+    const txtBookSliderValue = Math.max(1, Math.min(txtBookSliderMax, bookFractionToSliderValue(bookProgressFraction)));
     useEffect(() => {
         if (isPdf || isScrollMode) return;
         const pendingFraction = pendingTxtPageFractionRef.current;
@@ -4523,12 +4558,55 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                 </ContentDialog>
             )}
 
+            {showChapterEditor && (
+                <ReadingChapterEditor
+                    book={book}
+                    chapters={chapters}
+                    current={{
+                        chapterIndex,
+                        within: isScrollMode
+                            ? scrollFraction
+                            : (txtTotalPages > 0 ? txtPage / txtTotalPages : 0),
+                    }}
+                    onClose={() => setShowChapterEditor(false)}
+                    onApplied={(nextChapters, position) => {
+                        setShowChapterEditor(false);
+                        setChapters(nextChapters);
+                        // 划线与批注都换了锚点，内存里的副本必须重新读，否则会指着旧章号
+                        setMarks(loadReadingMarks(book.id));
+                        generatedBatchesRef.current.clear();
+                        prefetchedBatchStartRef.current = -1;
+                        const nextIndex = position ? position.chapterIndex : 0;
+                        setChapterIndex(nextIndex);
+                        setTxtPage(0);
+                        if (isScrollMode) {
+                            // 滚动模式按章内比例恢复位置
+                            const within = position ? position.within : 0;
+                            initialScrollFractionRef.current = within;
+                            pendingScrollFractionRef.current = within;
+                        }
+                    }}
+                />
+            )}
+
             {showNavigationDialog && (
                 <>
                     <div className="reading-nav-backdrop" onClick={() => setShowNavigationDialog(false)} />
                     <aside className="reading-nav-drawer">
                         <header className="reading-nav-header">
                             <span className="reading-nav-title">导航</span>
+                            {!isPdf && (
+                                <button
+                                    type="button"
+                                    className="reading-footer-text-btn"
+                                    onClick={() => {
+                                        setShowNavigationDialog(false);
+                                        setShowChapterEditor(true);
+                                    }}
+                                >
+                                    编辑目录
+                                </button>
+                            )}
                             <button type="button" className="reading-nav-close" onClick={() => setShowNavigationDialog(false)} aria-label="关闭">
                                 <X size={18} strokeWidth={2} />
                             </button>

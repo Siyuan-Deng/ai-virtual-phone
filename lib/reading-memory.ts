@@ -82,6 +82,47 @@ export function deleteReadingAnnotationMemo(annotationId: string): void {
     if (next.length !== existing.length) persist(next);
 }
 
+/**
+ * 自定义分章之后，把这本书的记忆日志跟着搬到新章号上。
+ *
+ * 日志里只存了章号 + 章名（没有段号），所以要按「旧章第一段落在新哪一章」来定位。
+ * 定位不到说明那一章本来就没有正文（重建时被并掉了），这条日志就删掉——
+ * 留着它会让角色引用一个不存在的章节，比删掉更容易出问题。
+ */
+export function remapReadingAnnotationMemos(
+    bookId: string,
+    bookTitle: string,
+    resolve: (chapterIndex: number) => { chapterIndex: number; chapterTitle: string } | null,
+): { updated: number; dropped: number } {
+    if (typeof window === "undefined") return { updated: 0, dropped: 0 };
+    const existing = loadReadingAnnotationMemos();
+    let updated = 0;
+    let dropped = 0;
+    const next: ReadingAnnotationMemo[] = [];
+
+    for (const memo of existing) {
+        const belongs = memo.bookId ? memo.bookId === bookId : memo.bookTitle === bookTitle;
+        if (!belongs) {
+            next.push(memo);
+            continue;
+        }
+        const target = resolve(memo.chapterIndex);
+        if (!target) {
+            dropped += 1;
+            continue;
+        }
+        if (target.chapterIndex === memo.chapterIndex && target.chapterTitle === memo.chapterTitle) {
+            next.push(memo);
+            continue;
+        }
+        updated += 1;
+        next.push({ ...memo, chapterIndex: target.chapterIndex, chapterTitle: target.chapterTitle });
+    }
+
+    if (updated > 0 || dropped > 0) persist(next);
+    return { updated, dropped };
+}
+
 /** 记忆区里的标签，交给 formatStoredPromptEventContent 补时间戳 */
 export function readingMemoLabel(memo: ReadingAnnotationMemo): string {
     return memo.kind === "summary" ? "共读摘要" : "批注";
