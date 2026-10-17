@@ -7962,3 +7962,19 @@
   height: 100%;
   object-fit: cover;
 }
+/* 片刻纪事合并分享：左边一列写是谁的话，右边是这个人的对齐、淡化 */
+.reading-share-who-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.reading-share-who {
+  min-width: 0;
+  max-width: 5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(10.8px*var(--app-text-scale,1));
+  color: var(--reading-warm-ink, #111);
+}

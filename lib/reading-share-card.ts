@@ -66,10 +66,22 @@ export type ReadingSharePalette = {
     accent: string;
 };
 
+/** 片刻纪事合并分享：几段各自的正文。caption 是「出处 · 时间」那行小字，speaker 是谁说的 */
+export type ReadingShareSegment = { paragraphs: string[]; caption?: string; speaker?: "user" | "char" };
+/** 段与段之间：一行「……」/ 每段上面一行出处小字 / 不隔开直接接上 */
+export type ReadingShareJoin = "ellipsis" | "caption" | "none";
+
 export type ReadingShareCardInput = {
     template: ReadingShareTemplate;
     /** 摘抄正文，一段一条 */
     quoteParagraphs: string[];
+    /** 合并分享时代替 quoteParagraphs */
+    quoteSegments?: ReadingShareSegment[];
+    segmentJoin?: ReadingShareJoin;
+    /** 自己说的那几段颜色淡一点，看得出谁说的 */
+    tintUserSegments?: boolean;
+    /** 自己说的那几段单独对齐（比如他靠左、自己靠右）；不给就和 align 一样 */
+    userAlign?: ReadingShareAlign;
     bookTitle: string;
     bookAuthor: string;
     chapterTitle: string;
@@ -511,6 +523,35 @@ function anchor(x: number, width: number, align: ReadingShareAlign): { x: number
     return { x, textAlign: "left" };
 }
 
+type QuoteItem = { text: string; note?: boolean; tint?: boolean; align: ReadingShareAlign };
+
+/** 正文拆成一条条：正文段落，加上段与段之间的「……」或出处小字（note）。
+ *  自己说的那几段可以单独对齐、淡一点；小字跟着它领起的那一段对齐 */
+function quoteItems(ctx: Ctx): QuoteItem[] {
+    const { input } = ctx;
+    const segments = input.quoteSegments?.length ? input.quoteSegments : [{ paragraphs: input.quoteParagraphs }];
+    const join = input.quoteSegments?.length ? input.segmentJoin ?? "none" : "none";
+    const items: QuoteItem[] = [];
+    segments.forEach((segment, index) => {
+        const user = "speaker" in segment && segment.speaker === "user";
+        const align = user && input.userAlign ? input.userAlign : ctx.align;
+        const caption = "caption" in segment ? segment.caption : undefined;
+        if (join === "caption" && caption) items.push({ text: caption, note: true, align });
+        else if (join === "ellipsis" && index > 0) items.push({ text: "……", note: true, align });
+        const tint = user && input.tintUserSegments === true;
+        for (const paragraph of segment.paragraphs.map(p => p.trim()).filter(Boolean)) {
+            items.push({ text: paragraph, align, ...(tint ? { tint: true } : {}) });
+        }
+    });
+    return items;
+}
+
+/** 小字（出处、「……」）的字号：正文的六成 */
+function noteType(size: number): { size: number; lineHeight: number } {
+    const noteSize = Math.max(16, Math.round(size * 0.6));
+    return { size: noteSize, lineHeight: Math.round(noteSize * 1.7) };
+}
+
 /** 一段文字按当前对齐方式逐行落笔，返回落笔后的 y */
 function drawLines(
     ctx: Ctx,
@@ -541,16 +582,22 @@ function drawQuote(
     rawSize: number,
     rawLineHeight: number,
     color: string,
-    align: ReadingShareAlign = ctx.align,
 ): number {
-    const { pen, input } = ctx;
+    const { pen } = ctx;
     const { size, lineHeight } = scaleType(ctx, rawSize, rawLineHeight);
-    pen.font(size, ctx.fonts.body);
+    const note = noteType(size);
     let cursor = y;
-    const paragraphs = input.quoteParagraphs.map(p => p.trim()).filter(Boolean);
-    paragraphs.forEach((paragraph, index) => {
-        cursor = drawLines(ctx, wrapText(pen.ctx, paragraph, width), x, cursor, width, size, lineHeight, color, align);
-        if (index < paragraphs.length - 1) cursor += Math.round(lineHeight * 0.4);
+    const items = quoteItems(ctx);
+    items.forEach((item, index) => {
+        if (item.note) {
+            pen.font(note.size, ctx.fonts.body);
+            cursor = drawLines(ctx, wrapText(pen.ctx, item.text, width), x, cursor, width, note.size, note.lineHeight, ctx.palette.sub, item.align);
+        } else {
+            pen.font(size, ctx.fonts.body);
+            const tone = item.tint ? readingMarkColor(color, 0.6) : color;
+            cursor = drawLines(ctx, wrapText(pen.ctx, item.text, width), x, cursor, width, size, lineHeight, tone, item.align);
+        }
+        if (index < items.length - 1) cursor += Math.round(lineHeight * 0.4);
     });
     return cursor;
 }
@@ -689,8 +736,9 @@ function renderPoster(ctx: Ctx): number {
     const { pen, input, palette } = ctx;
     const pad = 72;
     const inner = WIDTH - pad * 2;
-    const paragraphs = input.quoteParagraphs.map(p => p.trim()).filter(Boolean);
-    const [lead, ...rest] = paragraphs;
+    // 第一段正文放大当主视觉，后面的（和合并时的小字）照常
+    const items = quoteItems(ctx);
+    const leadIndex = items.findIndex(item => !item.note);
     let y = pad;
 
     pen.font(21, ctx.fonts.body);
@@ -699,19 +747,24 @@ function renderPoster(ctx: Ctx): number {
 
     y += ctx.padTop;
     const leadType = scaleType(ctx, 50, 76);
-    if (lead) {
-        pen.font(leadType.size, ctx.fonts.body, "600");
-        y = drawLines(ctx, wrapText(pen.ctx, lead, inner), pad, y, inner, leadType.size, leadType.lineHeight, palette.ink);
-    }
-    if (rest.length > 0) {
-        const restType = scaleType(ctx, 26, 50);
-        y += 20;
-        pen.font(restType.size, ctx.fonts.body);
-        for (const paragraph of rest) {
-            y = drawLines(ctx, wrapText(pen.ctx, paragraph, inner), pad, y, inner, restType.size, restType.lineHeight, palette.sub);
-            y += 16;
+    const restType = scaleType(ctx, 26, 50);
+    const posterNote = noteType(restType.size);
+    items.forEach((item, index) => {
+        if (index === leadIndex) {
+            pen.font(leadType.size, ctx.fonts.body, "600");
+            y = drawLines(ctx, wrapText(pen.ctx, item.text, inner), pad, y, inner, leadType.size, leadType.lineHeight, item.tint ? readingMarkColor(palette.ink, 0.6) : palette.ink, item.align);
+            y += 20;
+            return;
         }
-    }
+        if (item.note) {
+            pen.font(posterNote.size, ctx.fonts.body);
+            y = drawLines(ctx, wrapText(pen.ctx, item.text, inner), pad, y, inner, posterNote.size, posterNote.lineHeight, readingMarkColor(palette.sub, 0.8), item.align);
+        } else {
+            pen.font(restType.size, ctx.fonts.body);
+            y = drawLines(ctx, wrapText(pen.ctx, item.text, inner), pad, y, inner, restType.size, restType.lineHeight, item.tint ? readingMarkColor(palette.sub, 0.6) : palette.sub, item.align);
+        }
+        y += 16;
+    });
 
     y += ctx.fillGap;
 
@@ -867,11 +920,14 @@ function renderCollage(ctx: Ctx): number {
     const collageType = scaleType(ctx, 26, 54);
     pen.font(collageType.size, ctx.fonts.body);
     const quoteWidth = blockWidth - quotePad * 2;
-    const lines: string[] = [];
-    const paragraphs = input.quoteParagraphs.map(p => p.trim()).filter(Boolean);
-    paragraphs.forEach((paragraph, index) => {
-        lines.push(...wrapText(pen.ctx, paragraph, quoteWidth));
-        if (index < paragraphs.length - 1) lines.push("");
+    const collageNote = noteType(collageType.size);
+    const lines: Array<Partial<QuoteItem> & { text: string }> = [];
+    const items = quoteItems(ctx);
+    items.forEach((item, index) => {
+        if (item.note) pen.font(collageNote.size, ctx.fonts.body);
+        lines.push(...wrapText(pen.ctx, item.text, quoteWidth).map(text => ({ ...item, text })));
+        if (item.note) pen.font(collageType.size, ctx.fonts.body);
+        if (index < items.length - 1) lines.push({ text: "" });
     });
     const lineHeight = collageType.lineHeight;
     const blockHeight = quotePad * 2 + lines.length * lineHeight;
@@ -880,7 +936,15 @@ function renderCollage(ctx: Ctx): number {
     pen.rect(pad, blockTop + 84, 128, 128, readingMarkColor(palette.accent, 0.3));
 
     let y = blockTop + quotePad;
-    drawLines(ctx, lines, blockLeft + quotePad, y, quoteWidth, collageType.size, lineHeight, palette.ink);
+    for (const line of lines) {
+        if (line.text) {
+            const collageSpot = anchor(blockLeft + quotePad, quoteWidth, line.align ?? ctx.align);
+            pen.font(line.note ? collageNote.size : collageType.size, ctx.fonts.body);
+            const tone = line.note || line.tint ? readingMarkColor(palette.ink, 0.6) : palette.ink;
+            pen.text(line.text, collageSpot.x, y + (line.note ? collageNote.size : collageType.size), tone, collageSpot.textAlign);
+        }
+        y += lineHeight;
+    }
     y = blockTop + blockHeight + 52 + ctx.fillGap;
 
     if (input.annotations.length > 0) {
@@ -914,16 +978,23 @@ function renderLetter(ctx: Ctx): number {
 
     y += ctx.padTop;
     pen.font(letterType.size, ctx.fonts.body);
-    const lines: string[] = [];
-    const paragraphs = input.quoteParagraphs.map(p => p.trim()).filter(Boolean);
-    paragraphs.forEach((paragraph, index) => {
-        lines.push(...wrapText(pen.ctx, paragraph, inner));
-        if (index < paragraphs.length - 1) lines.push("");
+    const letterNote = noteType(letterType.size);
+    const lines: Array<Partial<QuoteItem> & { text: string }> = [];
+    const items = quoteItems(ctx);
+    items.forEach((item, index) => {
+        if (item.note) pen.font(letterNote.size, ctx.fonts.body);
+        lines.push(...wrapText(pen.ctx, item.text, inner).map(text => ({ ...item, text })));
+        if (item.note) pen.font(letterType.size, ctx.fonts.body);
+        if (index < items.length - 1) lines.push({ text: "" });
     });
-    const letterSpot = anchor(pad, inner, ctx.align);
     for (const line of lines) {
         pen.rect(pad, y + ruleGap - 10, inner, 1, palette.accent);
-        if (line) pen.text(line, letterSpot.x, y + letterType.size + 8, palette.ink, letterSpot.textAlign);
+        if (line.text) {
+            const letterSpot = anchor(pad, inner, line.align ?? ctx.align);
+            pen.font(line.note ? letterNote.size : letterType.size, ctx.fonts.body);
+            const tone = line.note ? palette.sub : line.tint ? readingMarkColor(palette.ink, 0.6) : palette.ink;
+            pen.text(line.text, letterSpot.x, y + letterType.size + 8, tone, letterSpot.textAlign);
+        }
         y += ruleGap;
     }
 

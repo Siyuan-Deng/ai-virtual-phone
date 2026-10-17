@@ -101,24 +101,35 @@ export type MomentProfiles = {
   user: { name: string };
   /** 角色 id → 署名；没有的用角色本来的名字 */
   characters: Record<string, { name: string }>;
+  /** 角色 id → 自己在这一本里的署名；没有的用上面 user 的 */
+  userByCharacter: Record<string, { name: string }>;
 };
 
 function cleanName(value: unknown): string {
   return typeof value === "string" ? value.trim().slice(0, 40) : "";
 }
 
+function cleanNames(value: unknown): Record<string, { name: string }> {
+  const names: Record<string, { name: string }> = {};
+  if (!value || typeof value !== "object") return names;
+  for (const [id, profile] of Object.entries(value as Record<string, { name?: unknown }>)) {
+    const name = cleanName(profile?.name);
+    if (name) names[id] = { name };
+  }
+  return names;
+}
+
 export function loadMomentProfiles(): MomentProfiles {
   try {
     const raw = kvGet(PROFILES_KEY);
     const parsed = raw ? JSON.parse(raw) as Partial<MomentProfiles> : {};
-    const characters: MomentProfiles["characters"] = {};
-    for (const [id, profile] of Object.entries(parsed.characters ?? {})) {
-      const name = cleanName(profile?.name);
-      if (name) characters[id] = { name };
-    }
-    return { user: { name: cleanName(parsed.user?.name) }, characters };
+    return {
+      user: { name: cleanName(parsed.user?.name) },
+      characters: cleanNames(parsed.characters),
+      userByCharacter: cleanNames(parsed.userByCharacter),
+    };
   } catch {
-    return { user: { name: "" }, characters: {} };
+    return { user: { name: "" }, characters: {}, userByCharacter: {} };
   }
 }
 
@@ -128,11 +139,17 @@ export function saveMomentProfiles(profiles: MomentProfiles): void {
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(MOMENT_PROFILES_UPDATED_EVENT, { detail: "names" }));
 }
 
-/** "user" 是自己，别的是角色 id */
+/** "user" 是外面那个自己，"user:角色id" 是自己在那一本里的，别的是角色 id */
 export type MomentProfileOwner = "user" | string;
 
+export function momentUserOwner(characterId: string): MomentProfileOwner {
+  return `user:${characterId}`;
+}
+
 function avatarKey(owner: MomentProfileOwner): string {
-  return owner === "user" ? "moment-avatar-user" : `moment-avatar-char-${owner}`;
+  if (owner === "user") return "moment-avatar-user";
+  if (owner.startsWith("user:")) return `moment-avatar-user-${owner.slice(5)}`;
+  return `moment-avatar-char-${owner}`;
 }
 
 /** 头像存在阅读的图片库里（和阅读账号头像同一处），按 key 区分 */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { ContentDialog } from "@/components/ui/modal";
 import { Toggle } from "@/components/ui/form";
 import { downloadFile } from "@/lib/download-utils";
@@ -15,7 +15,9 @@ import {
     type ReadingShareAnnotation,
     type ReadingShareAvatarShape,
     type ReadingShareFonts,
+    type ReadingShareJoin,
     type ReadingSharePalette,
+    type ReadingShareSegment,
     READING_SHARE_RATIOS,
     type ReadingShareRatio,
     type ReadingShareTemplate,
@@ -29,6 +31,8 @@ import {
 
 type Props = {
     quoteParagraphs: string[];
+    /** 片刻纪事合并分享：几段各自带出处和说话人。给了就能选怎么隔开；你我都有时还能分开对齐 */
+    quoteSegments?: ReadingShareSegment[];
     bookTitle: string;
     bookAuthor: string;
     chapterTitle: string;
@@ -43,8 +47,8 @@ type Props = {
     signatureChoices?: {
         char: { name: string; avatar?: string };
         user: { name: string; avatar?: string };
-        /** 打开时默认选谁：说这句话的人 */
-        initial: "char" | "user";
+        /** 打开时默认选谁：说这句话的人（合并时你我都有就是两人） */
+        initial: "char" | "user" | "both";
     };
     /** 字体直接给；不给就去阅读界面里量 */
     fonts?: ReadingShareFonts;
@@ -107,8 +111,11 @@ function resolveRenderedFonts(): ReadingShareFonts {
     };
 }
 
+const SEGMENT_JOINS: Array<[string, ReadingShareJoin]> = [["「……」", "ellipsis"], ["出处", "caption"], ["直接接上", "none"]];
+const ALIGNS: Array<[string, ReadingShareAlign]> = [["左对齐", "left"], ["居中", "center"], ["右对齐", "right"]];
+
 export function ReadingShareDialog({
-    quoteParagraphs, bookTitle, bookAuthor, chapterTitle, progressPercent, annotations, onClose,
+    quoteParagraphs, quoteSegments, bookTitle, bookAuthor, chapterTitle, progressPercent, annotations, onClose,
     progressLabel, signature, signatureChoices, fonts, title = "分享摘抄", filePrefix = "摘抄",
 }: Props) {
     const [signer, setSigner] = useState<"char" | "user" | "both">(signatureChoices?.initial ?? "char");
@@ -118,6 +125,14 @@ export function ReadingShareDialog({
     const [align, setAlign] = useState<ReadingShareAlign>(READING_SHARE_TEMPLATE_PRESETS.poster.align);
     const [avatarShape, setAvatarShape] = useState<ReadingShareAvatarShape>("circle");
     const [ratio, setRatio] = useState<ReadingShareRatio>("auto");
+    const [segmentJoin, setSegmentJoin] = useState<ReadingShareJoin>("ellipsis");
+    const [tintUser, setTintUser] = useState(false);
+    /** 自己的话默认靠右，他的话跟模板走（就是上面那个 align） */
+    const [userAlign, setUserAlign] = useState<ReadingShareAlign>("right");
+    const merged = (quoteSegments?.length ?? 0) > 1;
+    const mixed = merged
+        && quoteSegments!.some(segment => segment.speaker === "user")
+        && quoteSegments!.some(segment => segment.speaker !== "user");
 
     /** 换模板时配色和对齐回到那个模板的出厂值——深色版面套上浅色底会直接糊掉 */
     const pickTemplate = (next: ReadingShareTemplate) => {
@@ -156,7 +171,7 @@ export function ReadingShareDialog({
     /** 片刻纪事两个人的头像，按地址缓存，切署名时不用重新解码 */
     const choiceAvatarsRef = useRef(new Map<string, CanvasImageSource | null>());
     /** 摘抄内容在弹窗打开期间不会变；钉住，免得父组件重渲染就重画一遍 */
-    const contentRef = useRef({ quoteParagraphs, annotations, bookTitle, bookAuthor, chapterTitle, progressPercent, progressLabel, signature, signatureChoices, fonts });
+    const contentRef = useRef({ quoteParagraphs, quoteSegments, annotations, bookTitle, bookAuthor, chapterTitle, progressPercent, progressLabel, signature, signatureChoices, fonts });
 
     useEffect(() => {
         let cancelled = false;
@@ -199,6 +214,8 @@ export function ReadingShareDialog({
                 const canvas = renderReadingShareCard({
                     template,
                     quoteParagraphs: content.quoteParagraphs,
+                    ...(merged ? { quoteSegments: content.quoteSegments, segmentJoin } : {}),
+                    ...(mixed ? { userAlign, tintUserSegments: tintUser } : {}),
                     bookTitle: content.bookTitle,
                     bookAuthor: content.bookAuthor,
                     chapterTitle: content.chapterTitle,
@@ -232,7 +249,7 @@ export function ReadingShareDialog({
         };
         void draw();
         return () => { cancelled = true; };
-    }, [align, avatarShape, palette, ratio, template, withMine, withTheirs, signer, signerOrder]);
+    }, [align, avatarShape, palette, ratio, template, withMine, withTheirs, signer, signerOrder, merged, mixed, segmentJoin, userAlign, tintUser]);
 
     const handleDownload = async () => {
         const canvas = canvasRef.current;
@@ -313,16 +330,66 @@ export function ReadingShareDialog({
                             </label>
                         ))}
                     </div>
-                    <div className="reading-share-aligns">
-                        {([["左对齐", "left"], ["居中", "center"], ["右对齐", "right"]] as Array<[string, ReadingShareAlign]>).map(([label, value]) => (
-                            <button
-                                key={value}
-                                type="button"
-                                className={`reading-share-template${align === value ? " is-active" : ""}`}
-                                onClick={() => setAlign(value)}
-                            >{label}</button>
-                        ))}
-                    </div>
+                    {mixed && signatureChoices ? (
+                        // 你我都有：名字一列，右边各一排对齐；自己那排底下再一排原色/淡化
+                        <div className="reading-share-who-grid">
+                            {([
+                                [signatureChoices.char.name, align, setAlign],
+                                [signatureChoices.user.name, userAlign, setUserAlign],
+                            ] as Array<[string, ReadingShareAlign, (value: ReadingShareAlign) => void]>).map(([who, current, set], row) => (
+                                <Fragment key={row}>
+                                    <span className="reading-share-who">{who}</span>
+                                    <div className="reading-share-aligns">
+                                        {ALIGNS.map(([label, value]) => (
+                                            <button
+                                                key={value}
+                                                type="button"
+                                                className={`reading-share-template${current === value ? " is-active" : ""}`}
+                                                onClick={() => set(value)}
+                                            >{label}</button>
+                                        ))}
+                                    </div>
+                                </Fragment>
+                            ))}
+                            <span aria-hidden="true" />
+                            <div className="reading-share-aligns">
+                                {([["原色", false], ["淡化", true]] as Array<[string, boolean]>).map(([label, value]) => (
+                                    <button
+                                        key={label}
+                                        type="button"
+                                        className={`reading-share-template${tintUser === value ? " is-active" : ""}`}
+                                        onClick={() => setTintUser(value)}
+                                    >{label}</button>
+                                ))}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="reading-share-aligns">
+                            {ALIGNS.map(([label, value]) => (
+                                <button
+                                    key={value}
+                                    type="button"
+                                    className={`reading-share-template${align === value ? " is-active" : ""}`}
+                                    onClick={() => setAlign(value)}
+                                >{label}</button>
+                            ))}
+                        </div>
+                    )}
+                    {merged && (
+                        <>
+                            <span className="reading-settings-label-inline">段与段之间</span>
+                            <div className="reading-share-aligns">
+                                {SEGMENT_JOINS.map(([label, value]) => (
+                                    <button
+                                        key={value}
+                                        type="button"
+                                        className={`reading-share-template${segmentJoin === value ? " is-active" : ""}`}
+                                        onClick={() => setSegmentJoin(value)}
+                                    >{label}</button>
+                                ))}
+                            </div>
+                        </>
+                    )}
                     <div className="reading-share-aligns">
                         {READING_SHARE_RATIOS.map(({ id, label }) => (
                             <button

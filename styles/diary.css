@@ -769,6 +769,46 @@
   margin-top: 22px;
 }
 
+/* 片刻纪事 · 合并：勾选时顶栏左「取消」右「分享」，手写字，和纸条详情里的「分享 关闭」一路 */
+.moment-pick-action {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: rgba(47, 42, 35, 0.78);
+  font-family: var(--diary-entry-font-family);
+  font-size: calc(15px*var(--app-text-scale,1));
+  line-height: 1;
+  cursor: pointer;
+}
+
+.moment-pick-action:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* 选中的那张：胶带换成夹子夹住（和日记详情顶上那个夹子同一张图） */
+.diary-entry-list.is-picking .moment-card.is-picked::before {
+  opacity: 0;
+}
+
+.diary-entry-list.is-picking .moment-card.is-picked::after {
+  content: "";
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  background: url("/diary/diary-clip.png") center / contain no-repeat;
+  transform: translateX(-50%) rotate(-3deg);
+  filter: drop-shadow(0 2px 3px rgba(43, 34, 22, 0.18));
+  pointer-events: none;
+}
+
 .diary-entry-card-meta {
   display: flex;
   align-items: center;
