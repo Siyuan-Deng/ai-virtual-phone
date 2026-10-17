@@ -308,7 +308,10 @@ class Pen {
             ctx.closePath();
         }
         ctx.clip();
-        ctx.drawImage(image, x, y, size, size);
+        // 头像不一定是方的（角色档案里常是竖图）：取中间那块正方形，不然会被压扁拉长
+        const { width, height } = imageSourceSize(image, size);
+        const side = Math.min(width, height);
+        ctx.drawImage(image, (width - side) / 2, (height - side) / 2, side, side, x, y, size, size);
         ctx.restore();
     }
 
@@ -394,6 +397,21 @@ function annotationFont(ctx: Ctx, annotation: ReadingShareAnnotation): string {
 }
 
 /** 书名带上书名号 */
+/** 图片的原始宽高；拿不到就当成正方形 */
+function imageSourceSize(image: CanvasImageSource, fallback: number): { width: number; height: number } {
+    if (typeof HTMLImageElement !== "undefined" && image instanceof HTMLImageElement) {
+        return { width: image.naturalWidth || fallback, height: image.naturalHeight || fallback };
+    }
+    if (typeof HTMLVideoElement !== "undefined" && image instanceof HTMLVideoElement) {
+        return { width: image.videoWidth || fallback, height: image.videoHeight || fallback };
+    }
+    const sized = image as { width?: unknown; height?: unknown };
+    return {
+        width: typeof sized.width === "number" && sized.width > 0 ? sized.width : fallback,
+        height: typeof sized.height === "number" && sized.height > 0 ? sized.height : fallback,
+    };
+}
+
 function bookTitleText(input: ReadingShareCardInput): string {
     const title = input.bookTitle.trim();
     if (!title) return "";

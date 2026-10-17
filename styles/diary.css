@@ -685,6 +685,85 @@
   color: rgba(42, 39, 34, 0.78);
 }
 
+/* 片刻纪事 · 署名设置：一行一个人，左边头像点了换，右边填 ID */
+.moment-profile-list {
+  display: grid;
+  gap: 10px;
+}
+
+.moment-profile-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  min-height: 60px;
+  padding: 8px 11px;
+  border: 1px solid rgba(67, 54, 35, 0.1);
+  background: rgba(67, 54, 35, 0.024);
+}
+
+.moment-profile-avatar {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid rgba(67, 54, 35, 0.14);
+  background: #f3efe6;
+  color: rgba(52, 39, 29, 0.62);
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.moment-profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.moment-profile-fields {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.moment-profile-fields > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: calc(14px*var(--app-text-scale,1));
+  color: rgba(52, 39, 29, 0.6);
+}
+
+.moment-profile-fields input {
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  border-bottom: 1px solid rgba(67, 54, 35, 0.44);
+  border-radius: 0;
+  background: transparent;
+  color: #34271d;
+  font: inherit;
+  font-size: calc(16px*var(--app-text-scale,1));
+  outline: none;
+}
+
+.moment-profile-reset {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgba(52, 39, 29, 0.5);
+  font: inherit;
+  font-size: calc(13px*var(--app-text-scale,1));
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* 片刻纪事的纸条没有标题，正文接在小字下面，空出标题那段距离 */
 .moment-card .diary-entry-card-text {
   margin-top: 22px;

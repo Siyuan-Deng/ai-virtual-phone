@@ -91,3 +91,61 @@ export function addMoment(input: Omit<Moment, "id" | "createdAt">): Moment | nul
 export function deleteMoment(id: string): void {
   saveMoments(loadMoments().filter(moment => moment.id !== id));
 }
+
+// ── 署名：分享摘抄时用的 ID 和头像，片刻纪事自己的一套（和阅读账号一样，不动角色档案） ──
+
+const PROFILES_KEY = "ai_phone_moment_profiles_v1";
+registerKvMigration(PROFILES_KEY);
+
+export const MOMENT_PROFILES_UPDATED_EVENT = "moment-profiles-updated";
+
+export type MomentProfiles = {
+  /** 空字符串表示没设置，用身份里的名字 */
+  user: { name: string };
+  /** 角色 id → 署名；没有的用角色本来的名字 */
+  characters: Record<string, { name: string }>;
+};
+
+function cleanName(value: unknown): string {
+  return typeof value === "string" ? value.trim().slice(0, 40) : "";
+}
+
+export function loadMomentProfiles(): MomentProfiles {
+  try {
+    const raw = kvGet(PROFILES_KEY);
+    const parsed = raw ? JSON.parse(raw) as Partial<MomentProfiles> : {};
+    const characters: MomentProfiles["characters"] = {};
+    for (const [id, profile] of Object.entries(parsed.characters ?? {})) {
+      const name = cleanName(profile?.name);
+      if (name) characters[id] = { name };
+    }
+    return { user: { name: cleanName(parsed.user?.name) }, characters };
+  } catch {
+    return { user: { name: "" }, characters: {} };
+  }
+}
+
+/** 事件 detail："names" 只改了 ID，"avatar" 换了头像（要重读图片） */
+export function saveMomentProfiles(profiles: MomentProfiles): void {
+  kvSet(PROFILES_KEY, JSON.stringify(profiles));
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(MOMENT_PROFILES_UPDATED_EVENT, { detail: "names" }));
+}
+
+/** "user" 是自己，别的是角色 id */
+export type MomentProfileOwner = "user" | string;
+
+function avatarKey(owner: MomentProfileOwner): string {
+  return owner === "user" ? "moment-avatar-user" : `moment-avatar-char-${owner}`;
+}
+
+/** 头像存在阅读的图片库里（和阅读账号头像同一处），按 key 区分 */
+export async function loadMomentAvatar(owner: MomentProfileOwner): Promise<Blob | null> {
+  const { loadReadingAsset } = await import("./reading-appearance");
+  return loadReadingAsset(avatarKey(owner)).catch(() => null);
+}
+
+export async function saveMomentAvatar(owner: MomentProfileOwner, blob: Blob | null): Promise<void> {
+  const { saveReadingAsset } = await import("./reading-appearance");
+  await saveReadingAsset(avatarKey(owner), blob);
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(MOMENT_PROFILES_UPDATED_EVENT, { detail: "avatar" }));
+}

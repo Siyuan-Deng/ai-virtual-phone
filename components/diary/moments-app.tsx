@@ -1,12 +1,26 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bookmark, Bot, ChevronLeft, Trash2 } from "lucide-react";
+import { Bookmark, Bot, ChevronLeft, Trash2, X } from "lucide-react";
+import { DotsThree } from "@phosphor-icons/react";
 
 import { ReadingShareDialog } from "@/components/reading/reading-share-dialog";
 import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
-import { MOMENTS_UPDATED_EVENT, deleteMoment, loadMoments, type Moment } from "@/lib/moment-storage";
+import {
+  MOMENTS_UPDATED_EVENT,
+  MOMENT_PROFILES_UPDATED_EVENT,
+  deleteMoment,
+  loadMomentAvatar,
+  loadMomentProfiles,
+  loadMoments,
+  saveMomentAvatar,
+  saveMomentProfiles,
+  type Moment,
+  type MomentProfileOwner,
+  type MomentProfiles,
+} from "@/lib/moment-storage";
+import { READING_AVATAR_MAX_SIZE, compressReadingImage } from "@/lib/reading-image";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { DiaryEntryFontPanel } from "./diary-entries-app";
 import { useDiaryFont } from "./use-diary-font";
@@ -70,6 +84,10 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
   const [sharingMoment, setSharingMoment] = useState<Moment | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Moment | null>(null);
   const [fontPanelOpen, setFontPanelOpen] = useState(false);
+  const [profilePanelOpen, setProfilePanelOpen] = useState(false);
+  const [profiles, setProfiles] = useState<MomentProfiles>(() => ({ user: { name: "" }, characters: {} }));
+  // 自己设的署名头像（阅读图片库里的 blob → objectURL），没设的不在这里
+  const [profileAvatars, setProfileAvatars] = useState<Record<MomentProfileOwner, string>>({});
   const mainRef = useRef<HTMLElement | null>(null);
   const fontFileRef = useRef<HTMLInputElement | null>(null);
 
@@ -83,6 +101,39 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
     scrollRef: mainRef,
     onDrop: setDeleteCandidate,
   });
+
+  useEffect(() => {
+    let cancelled = false;
+    let current: string[] = [];
+    const loadAvatars = async () => {
+      const owners: MomentProfileOwner[] = ["user", ...loadCharacters().map(character => character.id)];
+      const entries = await Promise.all(owners.map(async owner => [owner, await loadMomentAvatar(owner)] as const));
+      if (cancelled) return;
+      const next: Record<MomentProfileOwner, string> = {};
+      const urls: string[] = [];
+      for (const [owner, blob] of entries) {
+        if (!blob) continue;
+        const url = URL.createObjectURL(blob);
+        urls.push(url);
+        next[owner] = url;
+      }
+      current.forEach(url => URL.revokeObjectURL(url));
+      current = urls;
+      setProfileAvatars(next);
+    };
+    setProfiles(loadMomentProfiles());
+    void loadAvatars();
+    const onUpdated = (event: Event) => {
+      if ((event as CustomEvent).detail === "avatar") void loadAvatars();
+      else setProfiles(loadMomentProfiles());
+    };
+    window.addEventListener(MOMENT_PROFILES_UPDATED_EVENT, onUpdated);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(MOMENT_PROFILES_UPDATED_EVENT, onUpdated);
+      current.forEach(url => URL.revokeObjectURL(url));
+    };
+  }, []);
 
   useEffect(() => {
     const refresh = () => setMoments(loadMoments());
@@ -122,11 +173,21 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
     notify("已从片刻纪事里删掉这一段。");
   }, [notify]);
 
-  /** 分享图的署名：说这句话的人，头像跟着 */
-  const speakerAvatar = useCallback((moment: Moment): string | undefined => {
-    if (moment.speaker === "user") return resolveUserIdentity(moment.characterId, "story")?.avatarUrl || undefined;
-    return characters.find(item => item.id === moment.characterId)?.avatar || undefined;
-  }, [characters]);
+  /** 署名：片刻纪事里自己设的 ID / 头像优先，没设就用角色档案、聊天身份里的 */
+  const charSignature = useCallback((characterId: string, fallbackName: string) => {
+    const character = characters.find(item => item.id === characterId);
+    return {
+      name: profiles.characters[characterId]?.name || character?.name || fallbackName,
+      avatar: profileAvatars[characterId] || character?.avatar || undefined,
+    };
+  }, [characters, profileAvatars, profiles]);
+  const userSignature = useCallback((characterId: string) => {
+    const identity = resolveUserIdentity(characterId, "story");
+    return {
+      name: profiles.user.name || identity?.name || "我",
+      avatar: profileAvatars.user || identity?.avatarUrl || undefined,
+    };
+  }, [profileAvatars, profiles]);
 
   return (
     <section className={`diary-app diary-entry-app ${trash.drag ? "is-entry-dragging" : ""}`} style={font.style}>
@@ -159,6 +220,14 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
             title="片刻纪事字体设置"
           >
             <span className="diary-font-upload-mark" aria-hidden="true">Aa</span>
+          </button>
+          <button
+            type="button"
+            className="note-wall-menu-btn"
+            onClick={() => setProfilePanelOpen(true)}
+            aria-label={activeBook ? `${activeBook.characterName} 的署名` : "署名设置"}
+          >
+            <DotsThree size={28} weight="bold" />
           </button>
         </span>
       </header>
@@ -235,15 +304,31 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
           title="分享片段"
           filePrefix="片刻纪事"
           quoteParagraphs={sharingMoment.paragraphs}
-          bookTitle={sharingMoment.source === "extra" && sharingMoment.sourceTitle ? sharingMoment.sourceTitle : sharingMoment.characterName}
-          bookAuthor={sharingMoment.speakerName}
-          chapterTitle={sharingMoment.source === "extra" ? "番外" : "正篇"}
+          // 出处一行写成「《正篇》· 我 · 角色」，名字都用署名
+          bookTitle={sharingMoment.source === "extra"
+            ? (sharingMoment.sourceTitle ? `番外·${sharingMoment.sourceTitle}` : "番外")
+            : "正篇"}
+          bookAuthor={`${userSignature(sharingMoment.characterId).name} · ${charSignature(sharingMoment.characterId, sharingMoment.characterName).name}`}
+          chapterTitle=""
           progressPercent={0}
           progressLabel={momentDate(sharingMoment)}
           annotations={[]}
-          signature={{ name: sharingMoment.speakerName, avatar: speakerAvatar(sharingMoment) }}
+          signature={sharingMoment.speaker === "user"
+            ? userSignature(sharingMoment.characterId)
+            : charSignature(sharingMoment.characterId, sharingMoment.characterName)}
           fonts={{ body: font.family, userAnnotation: font.family, charAnnotation: font.family }}
           onClose={() => setSharingMoment(null)}
+        />
+      ) : null}
+
+      {profilePanelOpen ? (
+        <MomentProfilePanel
+          characters={activeBook ? characters.filter(item => item.id === activeBook.characterId) : characters}
+          bookCharacterName={activeBook?.characterName}
+          profiles={profiles}
+          avatars={profileAvatars}
+          onClose={() => setProfilePanelOpen(false)}
+          notify={notify}
         />
       ) : null}
 
@@ -375,6 +460,128 @@ function MomentDetail({ moment, onClose, onShare }: { moment: Moment; onClose: (
           </footer>
         </div>
       </article>
+    </div>
+  );
+}
+
+/** 署名设置：最外面是自己 + 所有角色；点进某一本就只管这个角色（和日记的定时设置一样分两层） */
+function MomentProfilePanel({ characters, bookCharacterName, profiles, avatars, onClose, notify }: {
+  characters: Character[];
+  bookCharacterName?: string;
+  profiles: MomentProfiles;
+  avatars: Record<MomentProfileOwner, string>;
+  onClose: () => void;
+  notify: (message: string) => void;
+}) {
+  const [draft, setDraft] = useState(profiles);
+  const save = (next: MomentProfiles) => {
+    setDraft(next);
+    saveMomentProfiles(next);
+  };
+  const setCharacterName = (characterId: string, name: string) => {
+    const characters = { ...draft.characters };
+    if (name.trim()) characters[characterId] = { name };
+    else delete characters[characterId];
+    save({ ...draft, characters });
+  };
+  const pickAvatar = async (owner: MomentProfileOwner, file: File | null) => {
+    try {
+      await saveMomentAvatar(owner, file ? await compressReadingImage(file, READING_AVATAR_MAX_SIZE) : null);
+    } catch (error) {
+      notify("头像保存失败：" + String(error));
+    }
+  };
+
+  return (
+    <div className="nw-modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <section className="diary-entry-settings" onClick={event => event.stopPropagation()}>
+        <header>
+          <div>
+            <h2>{bookCharacterName ? `${bookCharacterName} 的署名` : "署名"}</h2>
+            <p>分享摘抄时用的 ID 和头像。不填就用原来的名字和头像。</p>
+          </div>
+          <button type="button" className="diary-icon-btn" onClick={onClose} aria-label="关闭">
+            <X size={18} />
+          </button>
+        </header>
+        <div className="moment-profile-list">
+          {bookCharacterName ? null : (
+            <MomentProfileRow
+              label="我"
+              placeholder="默认用你在这个角色那里的身份名"
+              name={draft.user.name}
+              avatar={avatars.user}
+              initial="我"
+              onName={name => save({ ...draft, user: { name } })}
+              onAvatar={file => void pickAvatar("user", file)}
+            />
+          )}
+          {characters.map(character => (
+            <MomentProfileRow
+              key={character.id}
+              label={character.name}
+              placeholder={character.name}
+              name={draft.characters[character.id]?.name ?? ""}
+              avatar={avatars[character.id]}
+              fallbackAvatar={character.avatar || undefined}
+              initial={Array.from(character.name)[0] || "?"}
+              onName={name => setCharacterName(character.id, name)}
+              onAvatar={file => void pickAvatar(character.id, file)}
+            />
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MomentProfileRow({ label, placeholder, name, avatar, fallbackAvatar, initial, onName, onAvatar }: {
+  label: string;
+  placeholder: string;
+  name: string;
+  /** 自己设的头像 */
+  avatar?: string;
+  /** 没设时显示的原头像 */
+  fallbackAvatar?: string;
+  initial: string;
+  onName: (name: string) => void;
+  onAvatar: (file: File | null) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const shown = avatar || fallbackAvatar;
+  return (
+    <div className="moment-profile-row">
+      <button type="button" className="moment-profile-avatar" onClick={() => fileRef.current?.click()} aria-label={`更换${label}的头像`}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {shown ? <img src={shown} alt="" /> : <span>{initial}</span>}
+      </button>
+      <label className="moment-profile-fields">
+        <span>
+          {label}
+          {avatar ? (
+            <button type="button" className="moment-profile-reset" onClick={(event) => { event.preventDefault(); onAvatar(null); }}>
+              用回原头像
+            </button>
+          ) : null}
+        </span>
+        <input
+          value={name}
+          maxLength={40}
+          placeholder={placeholder}
+          onChange={event => onName(event.target.value)}
+        />
+      </label>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0] || null;
+          event.target.value = "";
+          if (file) onAvatar(file);
+        }}
+      />
     </div>
   );
 }
