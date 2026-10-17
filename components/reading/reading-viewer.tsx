@@ -61,7 +61,13 @@ import {
     chapterToBookFraction,
     sliderValueToBookFraction,
 } from "@/lib/reading-progress";
-import { ReadingChapterEditor } from "./reading-chapter-editor";
+import { ReadingBookSettings } from "./reading-book-settings";
+import {
+    addReadingSplitNode,
+    loadReadingBookSettings,
+    READING_BOOK_SETTINGS_EVENT,
+    type ReadingSplitNode,
+} from "@/lib/reading-book-settings";
 
 /** 一行要用的原书排版信息；只在「还原原书排版」开着、且这本书带样式数据时才有值。 */
 type LineBlockStyle = {
@@ -92,6 +98,10 @@ type TxtPageItem =
         block?: LineBlockStyle;
         /** 这一行里的行内小图（脚注角标之类），按出现顺序给出插图序号 */
         inlineImages?: number[];
+        /** 这一行是段落的最后一行、而这一段有批注时给：批注条数与是否已展开。
+         *  收起时正文里只在段末画一个 💬 图标，点开才在段下展开批注卡片。 */
+        annotationCount?: number;
+        annotationsExpanded?: boolean;
     }
     | { kind: "gap"; chapterIndex: number; paragraphIndex: number; height?: number }
     | { kind: "image"; image: ReadingImageRef; chapterIndex: number; paragraphIndex: number }
@@ -212,27 +222,75 @@ function trimTrailingGaps(items: TxtPageItem[]): TxtPageItem[] {
  *  正文里它占一个字符位，渲染时变成一个 1em 高的小图 + 一个零宽空格。 */
 const INLINE_IMAGE_CHAR = "\uFFFC";
 
-/** 行内小图的对齐样式。
+/** 行内小图的对齐样式。EPUB 里那些嵌在句子里的脚注角标 / 装饰符用它。
  *
- *  缺了 vertical-align 时图片按基线对齐，底边压在文字基线上，看起来整体往下掉
- *  （EPUB 里的脚注角标、装饰符最明显）。改成 inline-block + middle 让图和文字上下居中。
- *  高度锁在 1em 内、宽度按原比例并留一点上限，免得一张宽图把整行顶出去
- *  —— 分页那边是按「一个字宽」估算这个占位的（见 wrapTextToLines 的 symbolWidth），
- *  图片实际宽度不能远大于一个字符，否则每页会溢出。 */
-const INLINE_IMAGE_BOX_STYLE: CSSProperties = {
+ *  这里踩过两个坑，两条都必须照现在这样写：
+ *  ① 外层不能定高、里面也不能放 display:block 的图。原来的写法是「外层 span 定高 1em，
+ *     里面排 零宽空格 + block 图」：零宽空格先占掉一行（行高 1em），块级图再往下一格，
+ *     盒子却只有 1em 高，图被顶出盒子——看起来就是整张小图往下掉了大半行。
+ *     现在让 img 自己当 inline-block，零宽空格排在它后面当文本基线，不再产生额外行盒。
+ *  ② 必须写 vertical-align: middle。缺了它图片按基线对齐，底边压在文字基线上，
+ *     同样显得偏低。middle 让图和同一行的文字上下居中。
+ *
+ *  高度锁在 1em 内、宽度按原比例并留一点上限，免得一张宽图把整行顶出去——
+ *  分页那边是按「一个字宽」估算这个占位的（见 wrapTextToLines 的 symbolWidth）。 */
+const INLINE_IMAGE_IMG_STYLE: CSSProperties = {
     display: "inline-block",
     verticalAlign: "middle",
-    height: "1em",
-    lineHeight: 1,
-    padding: "0 0.04em",
-};
-
-const INLINE_IMAGE_IMG_STYLE: CSSProperties = {
-    display: "block",
     height: "1em",
     width: "auto",
     maxWidth: "1.4em",
     objectFit: "contain",
+    padding: "0 0.04em",
+};
+
+/** 包住行内小图的外层。只当「一个字符位的容器」，不参与排版决策：
+ *  display 固定 inline，绝不 block（否则就是整行一张图那个老问题）。 */
+const INLINE_IMAGE_WRAPPER_STYLE: CSSProperties = {
+    display: "inline",
+};
+
+/** 段末那个「💬」图标。自己画 SVG 而不是塞 emoji 文本：
+ *  emoji 在安卓各家字体里大小和基线差别很大；更重要的是它会被算进这一行的
+ *  textContent 长度，而选区偏移正是按 textContent 换算的（reading-selection.ts），
+ *  多出一个字，这一行后面的划线和批注就会整体错位。SVG 不产生文本节点。 */
+function AnnotationBubbleIcon({ filled }: { filled: boolean }) {
+    return (
+        <svg
+            width="1em"
+            height="1em"
+            viewBox="0 0 24 24"
+            fill={filled ? "currentColor" : "none"}
+            stroke="currentColor"
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            focusable="false"
+        >
+            <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 9.1 9.1 0 0 1-3.9-.86L4 20.5l1.5-4.2A8.2 8.2 0 0 1 4.5 11.5 8.4 8.4 0 0 1 13 3.1a8.4 8.4 0 0 1 8 8.4Z" />
+        </svg>
+    );
+}
+
+/** 段末批注图标的样式。尺寸用 em 跟着正文走；vertical-align: middle 让它和同一行
+ *  的文字上下居中。高度 1.05em 小于一行（行距通常 2 左右），所以不会把行撑高——
+ *  分页量的是 .reading-line 的 line-height，行高不变，分页就不会算错。 */
+const ANNOTATION_BUBBLE_STYLE: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "1.05em",
+    height: "1.05em",
+    margin: "0 0.16em",
+    padding: 0,
+    border: "none",
+    background: "transparent",
+    color: "var(--reading-warm-brown, #a9764a)",
+    opacity: 0.82,
+    verticalAlign: "middle",
+    lineHeight: 1,
+    cursor: "pointer",
 };
 
 function countInlineImageChars(text: string): number {
@@ -664,8 +722,15 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
         pdfPreloadEnabled: readingConfig.pdfPreloadEnabled !== false,
     }));
     const [showNavigationDialog, setShowNavigationDialog] = useState(false);
-    /** 目录与分章工作台（重命名章节、调整分章边界） */
-    const [showChapterEditor, setShowChapterEditor] = useState(false);
+    /** 本书「更多设置」：正文排版 + 自定义章节目录 + 章节重命名。
+     *  分章节点本身不在这里设，而是在正文里划线、点菜单里的「设置节点」标出来。 */
+    const [showBookSettings, setShowBookSettings] = useState(false);
+    /** 这本书标出来的分章节点（锚点是章号 + 段号） */
+    const [splitNodes, setSplitNodes] = useState<ReadingSplitNode[]>([]);
+    /** 设置完节点的一次性提示 */
+    const [splitNodeNote, setSplitNodeNote] = useState("");
+    /** 已展开批注的段落（`章:段`）。收起时正文里只有一个 💬 图标 */
+    const [expandedAnnotationParagraphs, setExpandedAnnotationParagraphs] = useState<string[]>([]);
     const [bookmarks, setBookmarks] = useState<ReadingBookmark[]>([]);
     const [showBookmarks, setShowBookmarks] = useState(false);
     const [pdfJumpPage, setPdfJumpPage] = useState<number | undefined>(undefined);
@@ -901,6 +966,19 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
 
     useEffect(() => { setMarks(loadReadingMarks(book.id)); }, [book.id]);
 
+    /** 分章节点存在 kv 里；「更多设置」保存后派发事件，这里跟着重读（两边同一个来源）。 */
+    useEffect(() => {
+        const reload = () => setSplitNodes(loadReadingBookSettings(book.id).splitNodes || []);
+        reload();
+        window.addEventListener(READING_BOOK_SETTINGS_EVENT, reload);
+        return () => window.removeEventListener(READING_BOOK_SETTINGS_EVENT, reload);
+    }, [book.id]);
+
+    /** 换书/换章时把展开过的批注收起来：上一章的段号套到这一章上是错的 */
+    useEffect(() => {
+        setExpandedAnnotationParagraphs([]);
+    }, [book.id, chapterIndex]);
+
     useEffect(() => {
         const el = footerRef.current;
         if (!el) return;
@@ -993,6 +1071,28 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
         created.forEach(saveReadingMark);
         setMarks(prev => [...prev, ...created]);
         clearSelection();
+    };
+
+    /** 划完句子的菜单里也能直接设节点（不用先划成高亮再点它）：
+     *  以这一组划选的第一段作为新一章的开头。 */
+    const splitNodeAtSelection = () => {
+        if (!selectionInfo || selectionInfo.segments.length === 0) return;
+        const first = selectionInfo.segments[0];
+        const node: ReadingSplitNode = {
+            id: `sn_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            chapterIndex: first.chapterIndex,
+            paragraphIndex: first.paragraphIndex,
+            quote: selectionInfo.text.slice(0, 40),
+            createdAt: new Date().toISOString(),
+        };
+        const next = addReadingSplitNode(book.id, node);
+        setSplitNodes(next.splitNodes || []);
+        clearSelection();
+        setSplitNodeNote(
+            `已在这一段开头设好分章节点（第 ${first.chapterIndex + 1} 章 · 第 ${first.paragraphIndex + 1} 段）。`
+            + "到「更多设置 → 自定义章节目录」里改章名、一起应用。",
+        );
+        window.setTimeout(() => setSplitNodeNote(""), 6000);
     };
 
     const clearSelection = () => {
@@ -1096,6 +1196,38 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
         setPendingQuote(null);
     };
 
+    /** 段末 💬 图标：展开 / 收起这一段的批注。
+     *  展开会多出批注卡片的实际高度，翻页模式必须重新分页，所以顺手推一次 txtLayoutVersion。 */
+    const toggleParagraphAnnotations = useCallback((targetChapterIndex: number, paragraphIndex: number) => {
+        const key = `${targetChapterIndex}:${paragraphIndex}`;
+        setExpandedAnnotationParagraphs((prev) => (
+            prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
+        ));
+        setTxtLayoutVersion((version) => version + 1);
+    }, []);
+
+    /** 划线后菜单里的「设置节点」：以这组划线的第一段为「新一章的开头」。
+     *  只记锚点，不改任何正文；真正切成几章在「更多设置 → 自定义章节目录」里统一应用。 */
+    const markSplitNodeAt = (mark: ReadingMark) => {
+        const group = readingMarkGroup(marks, mark);
+        const first = group[0] || mark;
+        const node: ReadingSplitNode = {
+            id: `sn_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            chapterIndex: first.chapterIndex,
+            paragraphIndex: first.paragraphIndex,
+            quote: first.text.slice(0, 40),
+            createdAt: new Date().toISOString(),
+        };
+        const next = addReadingSplitNode(book.id, node);
+        setSplitNodes(next.splitNodes || []);
+        setMarkMenu(null);
+        setSplitNodeNote(
+            `已在这一段开头设好分章节点（第 ${first.chapterIndex + 1} 章 · 第 ${first.paragraphIndex + 1} 段）。`
+            + "到「更多设置 → 自定义章节目录」里改章名、一起应用。",
+        );
+        window.setTimeout(() => setSplitNodeNote(""), 6000);
+    };
+
     /** 手动改批注。记忆区那条要一起改，否则角色嘴上记得的还是旧话。 */
     const saveEditedAnnotation = async () => {
         if (!editingAnnotation) return;
@@ -1196,10 +1328,12 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
                 key={key}
                 className="reading-inline-image-inline"
                 data-inline-image={imageIndex}
-                style={INLINE_IMAGE_BOX_STYLE}
+                // 外层显式 inline：万一别处的 CSS 把它改成 block，这一格就会独占一行，
+                // 行内小图立刻变成「整段大图」——那个老问题就是这么回来的。
+                style={INLINE_IMAGE_WRAPPER_STYLE}
             >
-                {"\u200B"}
                 {url ? <img src={url} alt="" style={INLINE_IMAGE_IMG_STYLE} /> : null}
+                {"\u200B"}
             </span>
         );
     };
@@ -1379,6 +1513,28 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
                 style={Object.keys(style).length > 0 ? style : undefined}
             >
                 {renderLineContent(item)}
+                {item.annotationCount ? (
+                    <button
+                        type="button"
+                        className="reading-annotation-bubble"
+                        data-no-nav="true"
+                        data-open={item.annotationsExpanded ? "" : undefined}
+                        style={ANNOTATION_BUBBLE_STYLE}
+                        aria-label={item.annotationsExpanded
+                            ? "收起这一段的批注"
+                            : `展开这一段的 ${item.annotationCount} 条批注`}
+                        aria-expanded={Boolean(item.annotationsExpanded)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onPointerUp={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            event.preventDefault();
+                            toggleParagraphAnnotations(item.chapterIndex, item.paragraphIndex);
+                        }}
+                    >
+                        <AnnotationBubbleIcon filled={Boolean(item.annotationsExpanded)} />
+                    </button>
+                ) : null}
             </p>
         );
     };
@@ -2842,6 +2998,8 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
             currentChapter.paragraphs.length,
             paragraphCharCount,
             annotationSignature,
+            // 哪几段的批注展开了：展开了才有卡片占高度，必须重排
+            expandedAnnotationParagraphs.slice().sort().join(","),
             bilingualTranslationEnabled ? 1 : 0,
             // 切换「还原原书排版」会改变逐行高度，必须触发重新分页
             readingConfig.restoreOriginalLayout !== false ? 1 : 0,
@@ -3013,8 +3171,20 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
                 if (segmentIndex < segments.length - 1) tokens.push({ kind: "gap", chapterIndex, paragraphIndex: index });
             });
             const paragraphAnnotations = annotationMap.get(index) || [];
-            for (const annotation of paragraphAnnotations) {
-                tokens.push({ kind: "annotation", annotation, chapterIndex, paragraphIndex: index });
+            if (paragraphAnnotations.length > 0) {
+                // 批注默认收起：只在段落最后一行挂一个 💬 图标（图标在行内，不占额外高度），
+                // 展开后才把批注卡片作为独立条目排进这一页，参与高度累加。
+                const expanded = expandedAnnotationParagraphs.includes(`${chapterIndex}:${index}`);
+                const lastToken = tokens[tokens.length - 1];
+                if (lastToken && lastToken.kind === "line") {
+                    lastToken.annotationCount = paragraphAnnotations.length;
+                    lastToken.annotationsExpanded = expanded;
+                }
+                if (expanded) {
+                    for (const annotation of paragraphAnnotations) {
+                        tokens.push({ kind: "annotation", annotation, chapterIndex, paragraphIndex: index });
+                    }
+                }
             }
             pushGapAfter();
         });
@@ -3061,7 +3231,7 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
         lastTxtPaginationSignatureRef.current = paginationSignature;
         setImageMaxHeight((prev) => (prev === maxHeight ? prev : maxHeight));
         setTxtPages(pages);
-    }, [annotations, bilingualTranslationEnabled, chapterIndex, currentChapter, isAnnotationTranslationExpanded, isPdf, isScrollMode, readingConfig.restoreOriginalLayout, txtLayoutVersion]);
+    }, [annotations, bilingualTranslationEnabled, chapterIndex, currentChapter, expandedAnnotationParagraphs, isAnnotationTranslationExpanded, isPdf, isScrollMode, readingConfig.restoreOriginalLayout, txtLayoutVersion]);
 
     const txtTotalPages = txtPagesReadyForCurrentChapter ? txtPages.length : 1;
 
@@ -3143,6 +3313,10 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
         let progressCurrent: number;
         let progressTotal: number;
         let progressScope: "book" | "chapter";
+        // 章内位置（翻页：第几页/共几页；滚动：本章百分比）。与全书百分比分开存：
+        // 界面上「全书 62%」和「第 7 章 3/20 页」是两件事，混成一个数就会互相打架。
+        let chapterPageCurrent = 0;
+        let chapterPageTotal = 0;
         if (isPdf) {
             scrollPosition = Math.max(0, pdfCurrentPage - 1);
             progressFraction = pdfTotalPages > 0 ? Math.min(1, Math.max(0, pdfCurrentPage / pdfTotalPages)) : 0;
@@ -3153,17 +3327,24 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
             const fraction = Math.max(0, Math.min(1, scrollFraction));
             scrollPosition = fraction;
             progressFraction = toBookFraction(chapterIndex, fraction);
-            progressCurrent = Math.max(1, Math.round(fraction * 100));
+            // 全书口径：跳过的部分本来就在 chapterIndex 之前，按字数加权自然算进去了
+            progressCurrent = Math.max(1, Math.round(progressFraction * 100));
             progressTotal = 100;
-            progressScope = "chapter";
+            progressScope = "book";
+            chapterPageCurrent = Math.max(1, Math.round(fraction * 100));
+            chapterPageTotal = 100;
         } else {
-            const chapterPageCurrent = Math.max(1, txtPage + 1);
-            const chapterPageTotal = Math.max(1, txtTotalPages);
+            chapterPageCurrent = Math.max(1, txtPage + 1);
+            chapterPageTotal = Math.max(1, txtTotalPages);
             scrollPosition = txtPage;
             progressFraction = toBookFraction(chapterIndex, chapterPageCurrent / chapterPageTotal);
-            progressCurrent = chapterPageCurrent;
-            progressTotal = chapterPageTotal;
-            progressScope = "chapter";
+            // ── 这里以前存的是「本章第几页 / 本章共几页」，scope 又标成 chapter ──
+            // 书架和进度文案照着它显示，于是跳到后面某一章时，前面跳过的部分一个数都不占：
+            // 百分比（全书口径）说 62%，旁边的位置文案却说「第 7 章 · 3/20」，
+            // 两者自然对不上。现在统一存全书口径，章内页码另存两个字段，两件事都说得清。
+            progressCurrent = Math.max(1, Math.round(progressFraction * 100));
+            progressTotal = 100;
+            progressScope = "book";
         }
 
         const progress: ReadingProgress = {
@@ -3175,6 +3356,7 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
             progressCurrent,
             progressTotal,
             progressScope,
+            ...(isPdf ? {} : { chapterPageCurrent, chapterPageTotal }),
             readingMode: isPdf ? undefined : (isScrollMode ? "scroll" : "page"),
             lastReadAt: new Date().toISOString(),
         };
@@ -3471,6 +3653,9 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
                 {annotationError && (
                     <div className="reading-header-status" style={{ color: "var(--c-danger)" }}>{annotationError}</div>
                 )}
+                {splitNodeNote && (
+                    <div className="reading-header-status">{splitNodeNote}</div>
+                )}
             </header>
 
             {generating && (
@@ -3576,6 +3761,8 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
                                     const paragraphAnnotations = annotations.filter(
                                         (annotation) => annotation.chapterIndex === chapter.index && annotation.paragraphIndex === pIndex
                                     );
+                                    // 批注默认收起，段末只挂一个 💬 图标（与翻页模式同一套交互）
+                                    const paragraphExpanded = expandedAnnotationParagraphs.includes(`${chapter.index}:${pIndex}`);
                                     return (
                                         <div key={pIndex} className="reading-scroll-block">
                                             {(() => {
@@ -3601,10 +3788,18 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
                                                         charStart,
                                                         ...(block ? { block } : {}),
                                                         ...(lineInline && lineInline.length > 0 ? { inlineImages: lineInline } : {}),
+                                                        ...(sIndex === segmentCount - 1 && paragraphAnnotations.length > 0
+                                                            ? {
+                                                                annotationCount: paragraphAnnotations.length,
+                                                                annotationsExpanded: paragraphExpanded,
+                                                            }
+                                                            : {}),
                                                     }, sIndex);
                                                 });
                                             })()}
-                                            {paragraphAnnotations.map((annotation) => renderAnnotationItem(annotation))}
+                                            {paragraphExpanded
+                                                ? paragraphAnnotations.map((annotation) => renderAnnotationItem(annotation))
+                                                : null}
                                         </div>
                                     );
                                 })}
@@ -4022,6 +4217,7 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
                 >
                     <button type="button" onClick={() => addMark("highlight")}>高亮</button>
                     <button type="button" onClick={() => addMark("underline")}>划线</button>
+                    <button type="button" onClick={splitNodeAtSelection}>设为章节节点</button>
                     <button type="button" onClick={clearSelection}>取消</button>
                 </div>
             )}
@@ -4045,6 +4241,9 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
                         setMarkMenu(null);
                         setShowMyAnnotation(true);
                     }}>批注</button>
+                    {/* 分章节点的入口就放在这儿：划线之后出现的菜单里，
+                        而不是阅读页上到处摆按钮——设节点是「读到某一章该在这里开始」时才做的事 */}
+                    <button type="button" onClick={() => markSplitNodeAt(markMenu.mark)}>设置节点</button>
                     <button type="button" onClick={() => removeMark(markMenu.mark)}>删除</button>
                     <button type="button" onClick={() => setMarkMenu(null)}>取消</button>
                 </div>
@@ -4435,6 +4634,13 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
                         >
                             批注翻译
                         </button>
+                        <button
+                            type="button"
+                            className="ui-btn ui-btn-outline"
+                            onClick={() => { setShowReadingSettings(false); setShowBookSettings(true); }}
+                        >
+                            本书更多设置（排版 · 章节{isPdf ? "" : ` · 节点 ${splitNodes.length}`}）
+                        </button>
                         <div className="reading-settings-inline-note">
                             <span>批注密度</span>
                             <span className="reading-interval-row">
@@ -4558,8 +4764,8 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
                 </ContentDialog>
             )}
 
-            {showChapterEditor && (
-                <ReadingChapterEditor
+            {showBookSettings && (
+                <ReadingBookSettings
                     book={book}
                     chapters={chapters}
                     current={{
@@ -4568,9 +4774,17 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
                             ? scrollFraction
                             : (txtTotalPages > 0 ? txtPage / txtTotalPages : 0),
                     }}
-                    onClose={() => setShowChapterEditor(false)}
+                    onClose={() => setShowBookSettings(false)}
+                    onChaptersRenamed={(nextChapters) => {
+                        // 只改了章名：章节对象换掉即可，阅读位置、分页、批注锚点都不受影响
+                        setChapters(nextChapters);
+                    }}
+                    onJumpToNode={(targetChapterIndex) => {
+                        setShowBookSettings(false);
+                        goToChapter(targetChapterIndex);
+                    }}
                     onApplied={(nextChapters, position) => {
-                        setShowChapterEditor(false);
+                        setShowBookSettings(false);
                         setChapters(nextChapters);
                         // 划线与批注都换了锚点，内存里的副本必须重新读，否则会指着旧章号
                         setMarks(loadReadingMarks(book.id));
@@ -4601,10 +4815,10 @@ export function ReadingViewer({ book, appearanceKey, firstLineIndent, onBack }: 
                                     className="reading-footer-text-btn"
                                     onClick={() => {
                                         setShowNavigationDialog(false);
-                                        setShowChapterEditor(true);
+                                        setShowBookSettings(true);
                                     }}
                                 >
-                                    编辑目录
+                                    更多设置
                                 </button>
                             )}
                             <button type="button" className="reading-nav-close" onClick={() => setShowNavigationDialog(false)} aria-label="关闭">

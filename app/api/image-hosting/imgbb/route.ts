@@ -50,8 +50,11 @@ export async function POST(request: Request) {
         if (file.size <= 0) return jsonError("图片文件为空。");
         if (file.size > MAX_SERVER_UPLOAD_BYTES) return jsonError("图片超过 ImgBB 32MB 限制。", 413);
 
-        const apiKey = process.env.IMGBB_API_KEY || (typeof form.get("apiKey") === "string" ? String(form.get("apiKey")) : "");
-        if (!apiKey.trim()) return jsonError("缺少 ImgBB API Key。");
+        // 图床凭证只有一个来源：设置 → 图像生成 → 图床 里那份配置，由客户端随请求带上。
+        // 以前这里还读 IMGBB_API_KEY 环境变量：自部署用户明明在设置里填过了，
+        // 部署平台没配那个变量就一律报「缺少 ImgBB API Key」，两处配置各说各话。
+        const apiKey = typeof form.get("apiKey") === "string" ? String(form.get("apiKey")).trim() : "";
+        if (!apiKey) return jsonError("缺少 ImgBB API Key：请在 设置 → 图像生成 → 图床 里填写 ImgBB API Key。");
 
         const upload = new FormData();
         upload.set("image", file, file.name || "asset.png");

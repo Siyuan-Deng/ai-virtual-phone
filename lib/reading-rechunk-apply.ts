@@ -129,6 +129,7 @@ export async function applyRechunk(
     let progress: ReadingProgress | null = null;
     if (position) {
         const index = buildBookPositionIndex(plan.chapters);
+        const fraction = chapterToBookFraction(position.chapterIndex, position.within, index);
         progress = {
             bookId: book.id,
             chapterIndex: position.chapterIndex,
@@ -136,7 +137,11 @@ export async function applyRechunk(
             // 所以落到新章开头（0），由阅读器重新分页后接管；滚动模式存的就是比例，直接沿用。
             scrollPosition: oldProgress?.readingMode === "scroll" ? position.within : 0,
             companionCharacterId: oldProgress?.companionCharacterId,
-            progressFraction: chapterToBookFraction(position.chapterIndex, position.within, index),
+            progressFraction: fraction,
+            // 全书口径的两个数：和阅读器存盘时同一套（跳过的部分也算在里面）
+            progressCurrent: Math.max(1, Math.round(fraction * 100)),
+            progressTotal: 100,
+            progressScope: "book",
             readingMode: oldProgress?.readingMode,
             lastReadAt: new Date().toISOString(),
         };

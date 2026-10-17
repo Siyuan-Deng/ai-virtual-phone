@@ -1,5 +1,7 @@
 "use client";
 
+import { loadImageGenerationSettings } from "./settings-storage";
+
 /**
  * 分享图片的「图床」出口——用户在选择弹窗里主动选「通过图床保存」时才会走到这里。
  *
@@ -38,8 +40,9 @@ function isFatalUploadError(message: string): boolean {
  *
  *  以前 key 只从服务端环境变量 IMGBB_API_KEY 读：自部署用户明明在设置界面填过
  *  ImgBB Key，保存卡片时却仍然报「缺少 ImgBB API Key」——两处配置各说各话。
- *  现在客户端先把设置里的 key 一起提交（服务端也认这个字段，见
- *  app/api/image-hosting/imgbb/route.ts），环境变量只作为服务端兜底继续保留。
+ *  现在只认设置里这一份：客户端把 key 一起提交，服务端不再读 IMGBB_API_KEY 环境变量
+ *  （见 app/api/image-hosting/imgbb/route.ts）。配置只有一处，就不会再出现
+ *  「设置里填了、保存图片还报缺 key」。
  *
  *  每次上传都重新读设置，用户改完 key 不用刷新页面。 */
 function resolveHostingCredentials(): { apiKey: string; expirationSeconds: number } {

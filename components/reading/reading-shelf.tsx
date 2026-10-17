@@ -102,7 +102,12 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
         chapterIndex: number;
         total: number;
         hasProgress: boolean;
+        /** 全书比例（0-1）。跳过的部分也算在里面。 */
         fraction?: number;
+        /** 章内位置：翻页=第几页 / 滚动=本章百分之几。缺省就没有这一段文案。 */
+        chapterPage?: number;
+        chapterPageTotal?: number;
+        /** 老数据（scope=chapter）里那对「章内」数字，仅用于兼容显示 */
         current?: number;
         pageTotal?: number;
         scope?: "book" | "chapter";
@@ -157,6 +162,8 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                     total: b.totalChapters,
                     hasProgress: !!p,
                     fraction: p?.progressFraction,
+                    chapterPage: p?.chapterPageCurrent,
+                    chapterPageTotal: p?.chapterPageTotal,
                     current: p?.progressCurrent,
                     pageTotal: p?.progressTotal,
                     scope: p?.progressScope,
@@ -664,13 +671,21 @@ export function ReadingShelf({ onOpenBook, onClose, appearance, backgroundUrl, l
                                 ? Math.min(1, Math.max(0, prog.fraction ?? fallbackFraction))
                                 : 0;
                             const progressPct = Math.round(progressFraction * 100);
+                            // 百分比是全书口径（跳过的章节也算在里面）；这里只标「人在哪一章、
+                            // 章内到什么位置」，两个数各说一件事，不再互相打架。
                             const progressMeta = !prog?.hasProgress
                                 ? null
-                                : prog.scope === "book" && prog.current && prog.pageTotal
-                                    ? `${prog.current}/${prog.pageTotal}`
-                                    : prog.current && prog.pageTotal
-                                        ? `第${Math.max(1, prog.chapterIndex + 1)}章 · ${prog.current}/${prog.pageTotal}`
-                                        : `第${Math.max(1, prog.chapterIndex + 1)}/${Math.max(1, prog.total)}章`;
+                                : (() => {
+                                    const chapterLabel = `第${Math.max(1, prog.chapterIndex + 1)}章`;
+                                    if (prog.chapterPage && prog.chapterPageTotal) {
+                                        return `${chapterLabel} · ${prog.chapterPage}/${prog.chapterPageTotal}`;
+                                    }
+                                    // 老数据：scope=chapter 的那对数字本来就是章内位置
+                                    if (prog.scope === "chapter" && prog.current && prog.pageTotal) {
+                                        return `${chapterLabel} · ${prog.current}/${prog.pageTotal}`;
+                                    }
+                                    return `${chapterLabel}/${Math.max(1, prog.total)}章`;
+                                })();
                             const gradient = coverGradients[book.title.length % coverGradients.length];
                             const layout = coverLayouts[(book.title.length + (book.author?.length || 0)) % coverLayouts.length];
                             return (

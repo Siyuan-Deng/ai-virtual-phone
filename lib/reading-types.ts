@@ -80,9 +80,15 @@ export type ReadingProgress = {
     scrollPosition: number;
     companionCharacterId?: string;
     progressFraction?: number;
+    /** 进度的两个数：scope=book 时是「全书百分之几 / 100」，scope=chapter 时是章内页数。
+     *  现在是全书口径——跳过的章节也算在里面，百分比和滑块是同一个数。 */
     progressCurrent?: number;
     progressTotal?: number;
     progressScope?: "book" | "chapter";
+    /** 章内位置，单独存一份（翻页=第几页/共几页；滚动=本章百分之几）。
+     *  老数据没有这两个字段，界面上就不显示这一段。 */
+    chapterPageCurrent?: number;
+    chapterPageTotal?: number;
     /** 保存进度时的阅读模式；滚动模式下 scrollPosition 存的是章节内滚动比例(0-1) */
     readingMode?: "page" | "scroll";
     lastReadAt: string;

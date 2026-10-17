@@ -28,6 +28,12 @@ import {
     type ReadingAppearance,
 } from "@/lib/reading-appearance";
 import type { ReadingAppearanceSaveOptions } from "./reading-appearance-dialog";
+import {
+    loadReadingBookSettings,
+    resolveReadingAppearance,
+    READING_BOOK_SETTINGS_EVENT,
+    type ReadingBookTypography,
+} from "@/lib/reading-book-settings";
 
 type Props = { onClose: () => void };
 
@@ -190,6 +196,21 @@ export default function ReadingApp({ onClose }: Props) {
     const userAnnotationFontFaceRef = useRef<FontFace | null>(null);
     if (activeBook) lastBookRef.current = activeBook;
 
+    /** 打开着的这本书自己的排版覆盖（更多设置 → 正文排版）。没有 open 的书时是 undefined。 */
+    const [bookTypography, setBookTypography] = useState<ReadingBookTypography | undefined>(undefined);
+    useEffect(() => {
+        if (!activeBook) {
+            setBookTypography(undefined);
+            return;
+        }
+        const reload = () => setBookTypography(loadReadingBookSettings(activeBook.id).typography);
+        reload();
+        // 阅读器里的「更多设置」改完排版就派发这个事件；这里重新读一遍，
+        // 下面的字号/行距变量与 appearanceKey 跟着变，翻页模式自动重新分页。
+        window.addEventListener(READING_BOOK_SETTINGS_EVENT, reload);
+        return () => window.removeEventListener(READING_BOOK_SETTINGS_EVENT, reload);
+    }, [activeBook]);
+
     const updateBackgroundUrl = (nextUrl: string | null) => {
         if (backgroundUrlRef.current && backgroundUrlRef.current !== nextUrl) {
             URL.revokeObjectURL(backgroundUrlRef.current);
@@ -325,6 +346,13 @@ export default function ReadingApp({ onClose }: Props) {
     const backgroundLayers = backgroundUrl
         ? (backgroundOverlay ? `${backgroundOverlay}, url("${backgroundUrl}")` : `url("${backgroundUrl}")`)
         : "none";
+    /** 这本书实际生效的外观 = 全局外观 + 本书覆盖（字号/行距/缩进/页边距/对齐）。
+     *  只在这里合成一次，下面所有变量、注入的 CSS、appearanceKey 都读它，
+     *  免得「设置页显示一套、正文渲染另一套」。 */
+    const effectiveAppearance = activeBook
+        ? resolveReadingAppearance(appearance, bookTypography)
+        : appearance;
+
     const resolvedAnnotationFont = resolveReadingAnnotationFontFamily(appearance.annotationFontFamily, annotationFontFamily);
     const resolvedUserAnnotationFont = resolveReadingAnnotationFontFamily(appearance.userAnnotationFontFamily, userAnnotationFontFamily);
     const resolvedBodyFont = resolveReadingFontFamily(appearance.fontFamily, customFontFamily);
@@ -408,8 +436,9 @@ export default function ReadingApp({ onClose }: Props) {
         // 一眼看得出这道线是谁划的。没有 data-author 的老数据算自己划的。
         markColorCss("", appearance.highlightColor, appearance.underlineColor),
         markColorCss('[data-author="character"]', appearance.charHighlightColor, appearance.charUnderlineColor, true),
-        // 正文排版（页边距 / 两端对齐）。放在最后，权重交给各自的 :not() 处理
-        typographyCss(appearance),
+        // 正文排版（页边距 / 两端对齐）。放在最后，权重交给各自的 :not() 处理。
+        // 读的是「这本书实际生效」的那一份，更多设置里的覆盖才会落到 CSS 上。
+        typographyCss(effectiveAppearance),
     ].filter(Boolean).join("\n");
 
     const appearanceStyle = {
@@ -424,24 +453,24 @@ export default function ReadingApp({ onClose }: Props) {
         ...(resolvedUserAnnotationFont
             ? { ["--reading-user-annotation-font-family" as "--reading-user-annotation-font-family"]: resolvedUserAnnotationFont }
             : {}),
-        ["--reading-font-size" as "--reading-font-size"]: `${appearance.fontSize}px`,
-        ["--reading-text-color" as "--reading-text-color"]: appearance.textColor,
-        ["--reading-line-height" as "--reading-line-height"]: String(appearance.lineHeight),
+        ["--reading-font-size" as "--reading-font-size"]: `${effectiveAppearance.fontSize}px`,
+        ["--reading-text-color" as "--reading-text-color"]: effectiveAppearance.textColor,
+        ["--reading-line-height" as "--reading-line-height"]: String(effectiveAppearance.lineHeight),
         ["--reading-bg-image" as "--reading-bg-image"]: backgroundLayers,
-        // 首行缩进：根节点给一份全局值，原书排版给个别段落指定的档位以内联变量覆盖它。
+        // 首行缩进：根节点给一份默认值，原书排版给个别段落指定的档位以内联变量覆盖它。
         // 翻页模式的断行也读同一个数（见 reading-viewer 的 resolveBlockMetrics 调用）。
-        ["--reading-block-indent" as "--reading-block-indent"]: `${appearance.firstLineIndent ?? 2}em`,
+        ["--reading-block-indent" as "--reading-block-indent"]: `${effectiveAppearance.firstLineIndent ?? 2}em`,
     } as CSSProperties;
     // 传给阅读器，让它在字体/字号/行距变化后重新分页。批注字体也算进来：
     // 翻页模式连批注块的高度一起量，批注换字体同样会改变每页塞得下多少东西。
     const appearanceKey = [
-        appearance.fontSize,
-        appearance.lineHeight,
+        effectiveAppearance.fontSize,
+        effectiveAppearance.lineHeight,
         // 排版三项：页边距改的是可用宽度，首行缩进改的是断行起点，
         // 两者都会改变每页塞多少内容，必须让阅读器重新分页。
-        appearance.pagePaddingX ?? 0,
-        appearance.firstLineIndent ?? 2,
-        appearance.textAlign ?? "left",
+        effectiveAppearance.pagePaddingX ?? 0,
+        effectiveAppearance.firstLineIndent ?? 2,
+        effectiveAppearance.textAlign ?? "left",
         resolvedBodyFont,
         resolvedAnnotationFont || "",
         resolvedUserAnnotationFont || "",
@@ -484,7 +513,7 @@ export default function ReadingApp({ onClose }: Props) {
                     <ReadingViewer
                         book={lastBookRef.current}
                         appearanceKey={appearanceKey}
-                        firstLineIndent={appearance.firstLineIndent ?? 2}
+                        firstLineIndent={effectiveAppearance.firstLineIndent ?? 2}
                         onBack={() => setActiveBook(null)}
                     />
                 </div>

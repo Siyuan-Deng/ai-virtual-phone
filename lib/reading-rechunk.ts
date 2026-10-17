@@ -95,6 +95,99 @@ export function buildRechunkDrafts(chapters: BookChapter[]): RechunkDraft[] {
     return drafts;
 }
 
+/** 用户标出来的一个分章节点（划线 → 设置节点）。锚点和批注一样是「章号 + 段号」。 */
+export type CustomSplitAnchor = { chapterIndex: number; paragraphIndex: number; title?: string };
+
+/** 每章的第一段在全书里的连续段号。 */
+export function chapterFlatOffsets(chapters: BookChapter[]): number[] {
+    const offsets: number[] = new Array(chapters.length);
+    let acc = 0;
+    chapters.forEach((chapter, index) => {
+        offsets[index] = acc;
+        acc += chapter.paragraphs.length;
+    });
+    return offsets;
+}
+
+/** 节点锚点 → 全书连续段号。锚点落在空章节/越界位置时返回 null（这种节点没法落地）。 */
+export function anchorToFlatIndex(chapters: BookChapter[], anchor: CustomSplitAnchor): number | null {
+    const chapter = chapters[anchor.chapterIndex];
+    if (!chapter || chapter.paragraphs.length === 0) return null;
+    const within = Math.max(0, Math.min(chapter.paragraphs.length - 1, Math.trunc(anchor.paragraphIndex)));
+    return chapterFlatOffsets(chapters)[anchor.chapterIndex] + within;
+}
+
+/**
+ * 把「自动目录 + 用户节点」合成一份切分草稿。
+ *
+ * 两种模式：
+ *  · merge（默认）：保留自动分章的所有边界，用户节点作为**额外的**边界插进去——
+ *    这样在一本几百章的书里标几处，不会把其余章节全并成一章；
+ *  · only：完全按用户节点切，自动边界全部丢掉（节点太少时会切出很长的章，界面上有提示）。
+ *
+ * 节点上写的章名只作用于「从这一段开头的那一章」；merge 模式下如果自动边界正好落在同一段，
+ * 以用户的章名为准。
+ */
+export function buildDraftsFromNodes(
+    chapters: BookChapter[],
+    nodes: CustomSplitAnchor[],
+    mode: "merge" | "only",
+): { drafts: RechunkDraft[]; warnings: string[] } {
+    const warnings: string[] = [];
+    const nodeStarts = new Map<number, string>();
+    for (const node of nodes) {
+        const flat = anchorToFlatIndex(chapters, node);
+        if (flat === null) {
+            warnings.push(`有一处节点落在空章节里（第${node.chapterIndex + 1}章），已忽略`);
+            continue;
+        }
+        const title = (node.title || "").trim();
+        // 同一段上两处节点：保留第一个有名字的
+        if (!nodeStarts.has(flat) || (title && !nodeStarts.get(flat))) nodeStarts.set(flat, title);
+    }
+
+    if (mode === "only") {
+        if (nodeStarts.size === 0) {
+            return { drafts: [{ start: 0, title: "" }], warnings: ["还没有设置任何节点，暂时只能切成全文一章"] };
+        }
+        const drafts = [...nodeStarts.entries()]
+            .sort((a, b) => a[0] - b[0])
+            .map(([start, title]) => ({ start, title }));
+        return { drafts, warnings };
+    }
+
+    const auto = buildRechunkDrafts(chapters);
+    const merged = new Map<number, string>();
+    for (const draft of auto) merged.set(draft.start, draft.title);
+    for (const [start, title] of nodeStarts) {
+        if (title) merged.set(start, title);
+        else if (!merged.has(start)) merged.set(start, "");
+    }
+    const drafts = [...merged.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([start, title]) => ({ start, title }));
+    return { drafts, warnings };
+}
+
+/** 分章应用后，把节点锚点搬到新目录上（否则列表里那几个节点会指着旧章号）。 */
+export function remapCustomSplitNodes<T extends CustomSplitAnchor>(
+    plan: RechunkPlan,
+    nodes: T[],
+): { nodes: T[]; dropped: number } {
+    const next: T[] = [];
+    let dropped = 0;
+    for (const node of nodes) {
+        const anchor = plan.remap.get(anchorKey(node.chapterIndex, node.paragraphIndex));
+        if (!anchor) {
+            dropped += 1;
+            continue;
+        }
+        // 连同 id / quote / createdAt 一起搬：列表里那几行改完目录还得是同一批节点
+        next.push({ ...node, chapterIndex: anchor.chapterIndex, paragraphIndex: anchor.paragraphIndex });
+    }
+    return { nodes: next, dropped };
+}
+
 /** 清洗用户改过的草稿：夹到合法范围、去重、排序、补第一段。
  *  返回的 warnings 是给用户看的说明，不是异常——这些情况都能安全继续。 */
 export function normalizeRechunkDrafts(
