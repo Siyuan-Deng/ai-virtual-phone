@@ -39,6 +39,13 @@ type Props = {
     progressLabel?: string;
     /** 署名换成说这句话的人；不给就是阅读账号 */
     signature?: { name: string; avatar?: string };
+    /** 片刻纪事：署名可以选角色、自己或两人（两人时再选谁在前，默认自己在前）。给了它就不看 signature */
+    signatureChoices?: {
+        char: { name: string; avatar?: string };
+        user: { name: string; avatar?: string };
+        /** 打开时默认选谁：说这句话的人 */
+        initial: "char" | "user";
+    };
     /** 字体直接给；不给就去阅读界面里量 */
     fonts?: ReadingShareFonts;
     title?: string;
@@ -48,15 +55,14 @@ type Props = {
 
 /** 头像地址（data URL 或图片地址）读成能画到 canvas 上的图 */
 async function loadAvatarImage(src: string): Promise<CanvasImageSource | null> {
-    try {
+    // 用 onload 不用 decode()：页面在后台（切走、锁屏）时 decode() 会一直等着，图就出不来
+    return new Promise((resolve) => {
         const image = new Image();
         image.crossOrigin = "anonymous";
+        image.onload = () => resolve(image);
+        image.onerror = () => resolve(null);
         image.src = src;
-        await image.decode();
-        return image;
-    } catch {
-        return null;
-    }
+    });
 }
 
 /** 阅读界面实际渲染用的三档字体。直接问 DOM 最准——自定义上传的字体在这里是
@@ -103,8 +109,10 @@ function resolveRenderedFonts(): ReadingShareFonts {
 
 export function ReadingShareDialog({
     quoteParagraphs, bookTitle, bookAuthor, chapterTitle, progressPercent, annotations, onClose,
-    progressLabel, signature, fonts, title = "分享摘抄", filePrefix = "摘抄",
+    progressLabel, signature, signatureChoices, fonts, title = "分享摘抄", filePrefix = "摘抄",
 }: Props) {
+    const [signer, setSigner] = useState<"char" | "user" | "both">(signatureChoices?.initial ?? "char");
+    const [signerOrder, setSignerOrder] = useState<"user" | "char">("user");
     const [template, setTemplate] = useState<ReadingShareTemplate>("poster");
     const [palette, setPalette] = useState<ReadingSharePalette>(READING_SHARE_TEMPLATE_PRESETS.poster);
     const [align, setAlign] = useState<ReadingShareAlign>(READING_SHARE_TEMPLATE_PRESETS.poster.align);
@@ -145,15 +153,31 @@ export function ReadingShareDialog({
     const previewRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const avatarRef = useRef<CanvasImageSource | null>(null);
+    /** 片刻纪事两个人的头像，按地址缓存，切署名时不用重新解码 */
+    const choiceAvatarsRef = useRef(new Map<string, CanvasImageSource | null>());
     /** 摘抄内容在弹窗打开期间不会变；钉住，免得父组件重渲染就重画一遍 */
-    const contentRef = useRef({ quoteParagraphs, annotations, bookTitle, bookAuthor, chapterTitle, progressPercent, progressLabel, signature, fonts });
+    const contentRef = useRef({ quoteParagraphs, annotations, bookTitle, bookAuthor, chapterTitle, progressPercent, progressLabel, signature, signatureChoices, fonts });
 
     useEffect(() => {
         let cancelled = false;
         const draw = async () => {
             try {
                 const given = contentRef.current;
-                if (avatarRef.current === null) {
+                // 片刻纪事：按选的署名排出「第一个 / 第二个」
+                const choices = given.signatureChoices;
+                const signers = choices
+                    ? (signer === "both"
+                        ? (signerOrder === "user" ? [choices.user, choices.char] : [choices.char, choices.user])
+                        : [signer === "user" ? choices.user : choices.char])
+                    : null;
+                const loadChoiceAvatar = async (src?: string) => {
+                    if (!src) return null;
+                    const cache = choiceAvatarsRef.current;
+                    if (!cache.has(src)) cache.set(src, await loadAvatarImage(src));
+                    return cache.get(src) ?? null;
+                };
+                const choiceAvatars = signers ? await Promise.all(signers.map(item => loadChoiceAvatar(item.avatar))) : [];
+                if (!signers && avatarRef.current === null) {
                     if (given.signature) {
                         avatarRef.current = given.signature.avatar ? await loadAvatarImage(given.signature.avatar) : null;
                     } else {
@@ -178,8 +202,9 @@ export function ReadingShareDialog({
                     bookTitle: content.bookTitle,
                     bookAuthor: content.bookAuthor,
                     chapterTitle: content.chapterTitle,
-                    userName: content.signature ? content.signature.name : loadReadingProfile().name,
-                    avatar: avatarRef.current,
+                    userName: signers ? signers[0].name : content.signature ? content.signature.name : loadReadingProfile().name,
+                    avatar: signers ? choiceAvatars[0] : avatarRef.current,
+                    ...(signers && signers[1] ? { coSigner: { name: signers[1].name, avatar: choiceAvatars[1] } } : {}),
                     progressPercent: content.progressPercent,
                     progressLabel: content.progressLabel,
                     annotations: content.annotations.filter((annotation) => (
@@ -207,7 +232,7 @@ export function ReadingShareDialog({
         };
         void draw();
         return () => { cancelled = true; };
-    }, [align, avatarShape, palette, ratio, template, withMine, withTheirs]);
+    }, [align, avatarShape, palette, ratio, template, withMine, withTheirs, signer, signerOrder]);
 
     const handleDownload = async () => {
         const canvas = canvasRef.current;
@@ -318,6 +343,40 @@ export function ReadingShareDialog({
                             >{label}</button>
                         ))}
                     </div>
+                    {signatureChoices && (
+                        <>
+                            <span className="reading-settings-label-inline">署名</span>
+                            <div className="reading-share-aligns">
+                                {([
+                                    [signatureChoices.char.name, "char"],
+                                    [signatureChoices.user.name, "user"],
+                                    ["两人", "both"],
+                                ] as Array<[string, "char" | "user" | "both"]>).map(([label, value]) => (
+                                    <button
+                                        key={value}
+                                        type="button"
+                                        className={`reading-share-template${signer === value ? " is-active" : ""}`}
+                                        onClick={() => setSigner(value)}
+                                    >{label}</button>
+                                ))}
+                            </div>
+                            {signer === "both" && (
+                                <div className="reading-share-aligns">
+                                    {([
+                                        [`${signatureChoices.user.name}在前`, "user"],
+                                        [`${signatureChoices.char.name}在前`, "char"],
+                                    ] as Array<[string, "user" | "char"]>).map(([label, value]) => (
+                                        <button
+                                            key={value}
+                                            type="button"
+                                            className={`reading-share-template${signerOrder === value ? " is-active" : ""}`}
+                                            onClick={() => setSignerOrder(value)}
+                                        >{label}</button>
+                                    ))}
+                                </div>
+                            )}
+                        </>
+                    )}
                     <ReadingPresetBar<ShareStyle>
                         kind="share"
                         current={() => ({ template, palette, align, avatarShape, ratio })}

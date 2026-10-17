@@ -76,6 +76,8 @@ export type ReadingShareCardInput = {
     /** 阅读账号里的 ID；空着就写「读者」，署名位始终在 */
     userName: string;
     avatar: CanvasImageSource | null;
+    /** 第二个署名（片刻纪事选「两人」）：头像叠在后面，名字写成「甲 & 乙」 */
+    coSigner?: { name: string; avatar: CanvasImageSource | null };
     /** 这段话在全书的位置，0-100 */
     progressPercent: number;
     /** 不是读书摘的（片刻纪事）：进度位改写这个（日期），大数字也换成它，时间戳不再另写 */
@@ -280,7 +282,8 @@ class Pen {
         ctx.fill();
     }
 
-    circleText(cx: number, cy: number, radius: number, label: string, fill: string, color: string, family: string, shape: ReadingShareAvatarShape = "circle"): void {
+    /** textCx：字不放在正中时（叠头像被压住一块）往露出来的那块挪 */
+    circleText(cx: number, cy: number, radius: number, label: string, fill: string, color: string, family: string, shape: ReadingShareAvatarShape = "circle", textCx = cx): void {
         if (this.dry) return;
         const ctx = this.ctx;
         if (shape === "square") this.tracePath(cx - radius, cy - radius, radius * 2, radius * 2, AVATAR_CORNER);
@@ -293,7 +296,7 @@ class Pen {
         ctx.font = `${Math.round(radius)}px ${family}`;
         ctx.fillStyle = color;
         ctx.textAlign = "center";
-        ctx.fillText(label, cx, cy + radius / 3);
+        ctx.fillText(label, textCx, cy + radius / 3);
         ctx.textAlign = "left";
     }
 
@@ -339,6 +342,19 @@ class Pen {
         ctx.lineTo(x2, y + 0.5);
         ctx.stroke();
         ctx.restore();
+    }
+
+    /** 实心圆 / 圆角方块：叠头像时垫在后一个头像下面，和前一个隔开一圈 */
+    disc(cx: number, cy: number, radius: number, color: string, shape: ReadingShareAvatarShape): void {
+        if (this.dry) return;
+        const ctx = this.ctx;
+        if (shape === "square") this.tracePath(cx - radius, cy - radius, radius * 2, radius * 2, AVATAR_CORNER + 2);
+        else {
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        }
+        ctx.fillStyle = color;
+        ctx.fill();
     }
 
     circleOutline(cx: number, cy: number, radius: number, color: string): void {
@@ -442,8 +458,12 @@ function progressStamp(input: ReadingShareCardInput): string {
     return [progressText(input), stampText(input)].filter(Boolean).join(" · ");
 }
 
-function displayName(input: ReadingShareCardInput): string {
+function primaryName(input: ReadingShareCardInput): string {
     return input.userName.trim() || "读者";
+}
+
+function displayName(input: ReadingShareCardInput): string {
+    return input.coSigner ? `${primaryName(input)} & ${input.coSigner.name.trim() || "TA"}` : primaryName(input);
 }
 
 /** 颜色深浅：用来决定纸该是白的还是深的 */
@@ -593,6 +613,40 @@ function drawAnnotations(
 }
 
 /** 头像 + ID。没设 ID 就写「读者」——署名位每个模板都有。 */
+/** 署名头像从 x 开始画；两个人时后一个往右叠、压住前一个三分之一，垫一圈底色隔开。返回占的宽度 */
+function drawSignatureAvatars(
+    ctx: Ctx,
+    x: number,
+    centerY: number,
+    size: number,
+    fallbackInk: string,
+    surface: string,
+    /** 没头像时那个字底下的颜色；不给就是 fallbackInk 淡一点 */
+    fallbackFill = readingMarkColor(fallbackInk, 0.3),
+): number {
+    const { pen, input } = ctx;
+    const signers = [
+        { name: primaryName(input), avatar: input.avatar },
+        ...(input.coSigner ? [input.coSigner] : []),
+    ];
+    const step = size * 0.68;
+    signers.forEach((signer, index) => {
+        const left = x + index * step;
+        if (index > 0) pen.disc(left + size / 2, centerY, size / 2 + 4, surface, ctx.avatarShape);
+        if (signer.avatar) {
+            pen.avatar(signer.avatar, left, centerY - size / 2, size, ctx.avatarShape);
+        } else {
+            // 前一个被后一个压住右边一块：字挪到露出来那块的中间
+            const covered = index < signers.length - 1 ? (size - step) / 2 : 0;
+            pen.circleText(
+                left + size / 2, centerY, size / 2, Array.from(signer.name.trim() || "?")[0],
+                fallbackFill, fallbackInk, ctx.fonts.body, ctx.avatarShape, left + size / 2 - covered,
+            );
+        }
+    });
+    return size + (signers.length - 1) * step;
+}
+
 function drawSignature(
     ctx: Ctx,
     x: number,
@@ -604,19 +658,15 @@ function drawSignature(
     avatarFallbackInk = ctx.palette.accent,
     /** 文字最多占多宽；超了截断加省略号，免得撞上右边的东西 */
     maxTextWidth = Infinity,
+    /** 署名底下是什么颜色（两人叠头像时那圈隔开用的） */
+    surface = ctx.palette.background,
 ): void {
-    const { pen, input } = ctx;
-    const name = displayName(input);
-    if (input.avatar) {
-        pen.avatar(input.avatar, x, centerY - size / 2, size, ctx.avatarShape);
-    } else {
-        pen.circleText(
-            x + size / 2, centerY, size / 2, Array.from(name)[0],
-            readingMarkColor(avatarFallbackInk, 0.3), avatarFallbackInk, ctx.fonts.body, ctx.avatarShape,
-        );
-    }
+    const { pen } = ctx;
+    const name = displayName(ctx.input);
+    const avatarsWidth = drawSignatureAvatars(ctx, x, centerY, size, avatarFallbackInk, surface);
+    maxTextWidth -= avatarsWidth - size;
 
-    const textX = x + size + 20;
+    const textX = x + avatarsWidth + 20;
     pen.font(28, ctx.fonts.body);
     if (subline) {
         pen.text(truncateToWidth(pen, name, maxTextWidth), textX, centerY - 2, nameColor);
@@ -625,6 +675,12 @@ function drawSignature(
     } else {
         pen.text(truncateToWidth(pen, name, maxTextWidth), textX, centerY + 10, nameColor);
     }
+}
+
+/** 竖着居中的署名（留白、书签条）：头像以 centerX 居中，两个人时整组居中 */
+function drawCenteredSignatureAvatars(ctx: Ctx, centerX: number, top: number, size: number, fallbackInk: string, fallbackFill?: string): void {
+    const width = size + (ctx.input.coSigner ? size * 0.68 : 0);
+    drawSignatureAvatars(ctx, centerX - width / 2, top + size / 2, size, fallbackInk, ctx.palette.background, fallbackFill);
 }
 
 // ── 模板 ────────────────────────────────────────────────
@@ -671,6 +727,7 @@ function renderPoster(ctx: Ctx): number {
     drawSignature(
         { ...ctx, palette: { ...palette, accent: palette.background } },
         pad, centerY, 58, palette.background, readingMarkColor(palette.background, 0.7), null, palette.background,
+        Infinity, palette.accent,
     );
     pen.font(21, ctx.fonts.body);
     pen.text(progressStamp(input), WIDTH - pad, centerY + 8, palette.background, "right");
@@ -704,8 +761,7 @@ function renderBookmark(ctx: Ctx): number {
     y += 40;
 
     const avatarSize = 62;
-    if (input.avatar) pen.avatar(input.avatar, cardX + cardWidth / 2 - avatarSize / 2, y, avatarSize, ctx.avatarShape);
-    else pen.circleText(cardX + cardWidth / 2, y + avatarSize / 2, avatarSize / 2, Array.from(displayName(input))[0], readingMarkColor(palette.accent, 0.3), palette.accent, ctx.fonts.body, ctx.avatarShape);
+    drawCenteredSignatureAvatars(ctx, cardX + cardWidth / 2, y, avatarSize, palette.accent);
     y += avatarSize + 20;
 
     pen.font(25, ctx.fonts.body);
@@ -787,8 +843,7 @@ function renderMinimal(ctx: Ctx): number {
     y += 96;
 
     const avatarSize = 58;
-    if (input.avatar) pen.avatar(input.avatar, WIDTH / 2 - avatarSize / 2, y, avatarSize, ctx.avatarShape);
-    else pen.circleText(WIDTH / 2, y + avatarSize / 2, avatarSize / 2, Array.from(displayName(input))[0], readingMarkColor(palette.accent, 0.5), palette.sub, ctx.fonts.body, ctx.avatarShape);
+    drawCenteredSignatureAvatars(ctx, WIDTH / 2, y, avatarSize, palette.sub, readingMarkColor(palette.accent, 0.5));
     y += avatarSize + 22;
 
     pen.font(25, ctx.fonts.body);
@@ -970,7 +1025,7 @@ function renderSticky(ctx: Ctx): number {
     pen.text(stampText(input), rightEdge, centerY + 26, palette.sub, "right");
     drawSignature(
         ctx, paperX + pad, centerY, 54, palette.ink, palette.sub, metaLine(input),
-        palette.accent, inner - 54 - 20 - rightWidth - 28,
+        palette.accent, inner - 54 - 20 - rightWidth - 28, paperColor,
     );
     y = centerY + 40 + pad;
 

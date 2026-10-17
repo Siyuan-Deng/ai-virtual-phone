@@ -65,10 +65,9 @@ function momentDate(moment: Moment): string {
   return formatDate(moment.messageAt) || formatDate(moment.createdAt);
 }
 
-/** 纸条右上角那枚小标：正篇 / 番外 · 名字 */
+/** 纸条右上角那枚小标 */
 function sourceLabel(moment: Moment): string {
-  if (moment.source !== "extra") return "正篇";
-  return moment.sourceTitle ? `番外 · ${moment.sourceTitle}` : "番外";
+  return moment.source === "extra" ? "番外" : "正篇";
 }
 
 function clipText(value: string, maxLength: number): string {
@@ -305,17 +304,17 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
           filePrefix="片刻纪事"
           quoteParagraphs={sharingMoment.paragraphs}
           // 出处一行写成「《正篇》· 我 · 角色」，名字都用署名
-          bookTitle={sharingMoment.source === "extra"
-            ? (sharingMoment.sourceTitle ? `番外·${sharingMoment.sourceTitle}` : "番外")
-            : "正篇"}
+          bookTitle={sourceLabel(sharingMoment)}
           bookAuthor={`${userSignature(sharingMoment.characterId).name} · ${charSignature(sharingMoment.characterId, sharingMoment.characterName).name}`}
           chapterTitle=""
           progressPercent={0}
           progressLabel={momentDate(sharingMoment)}
           annotations={[]}
-          signature={sharingMoment.speaker === "user"
-            ? userSignature(sharingMoment.characterId)
-            : charSignature(sharingMoment.characterId, sharingMoment.characterName)}
+          signatureChoices={{
+            char: charSignature(sharingMoment.characterId, sharingMoment.characterName),
+            user: userSignature(sharingMoment.characterId),
+            initial: sharingMoment.speaker === "user" ? "user" : "char",
+          }}
           fonts={{ body: font.family, userAnnotation: font.family, charAnnotation: font.family }}
           onClose={() => setSharingMoment(null)}
         />
@@ -441,13 +440,6 @@ function MomentDetail({ moment, onClose, onShare }: { moment: Moment; onClose: (
                 <button type="button" onClick={onClose}>关闭</button>
               </div>
             </div>
-            {moment.source === "extra" && moment.sourceTitle ? (
-              <div className="diary-entry-detail-titleline">
-                <span className="diary-entry-detail-markers">
-                  <span className="diary-entry-marker">{sourceLabel(moment)}</span>
-                </span>
-              </div>
-            ) : null}
           </header>
           <div className="diary-entry-blocks">
             {moment.paragraphs.map((paragraph, index) => (

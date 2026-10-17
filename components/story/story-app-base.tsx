@@ -1230,17 +1230,6 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
     setActiveMessageId(null);
     setStorageVersion(v => v + 1);
   }
-  /** 番外的名字：往前找最近一条用模板发的指令，取它填的内容第一行 */
-  function storyExtraTitle(msgId: string): string | undefined {
-    const index = messages.findIndex(m => m.id === msgId);
-    for (let i = index; i >= 0; i -= 1) {
-      const content = messages[i].extraOrder?.content?.trim();
-      if (!content) continue;
-      const line = content.split("\n").map(item => item.trim()).find(Boolean) || "";
-      return line.length > 16 ? `${line.slice(0, 16)}…` : line;
-    }
-    return undefined;
-  }
   /** selected：「自己选取」选中的字，按换行拆段；不给就是整条 */
   function handleStoryCollect(msg: StoryMessage, selected?: string) {
     setActiveMessageId(null);
@@ -1256,7 +1245,6 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
       characterId: currentCharacter.id,
       characterName: currentCharacter.name,
       source: isExtra ? "extra" : "story",
-      sourceTitle: isExtra ? storyExtraTitle(msg.id) : undefined,
       speaker: msg.role === "user" ? "user" : "char",
       speakerName: msg.role === "user" ? storyUserName : currentCharacter.name,
       paragraphs,

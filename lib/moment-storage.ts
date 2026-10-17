@@ -16,8 +16,6 @@ export type Moment = {
   characterId: string;
   characterName: string;
   source: MomentSource;
-  /** 番外的名字（番外模板里填的内容，取第一行）；正篇、没填的不写 */
-  sourceTitle?: string;
   /** 这句话是谁说的 */
   speaker: "char" | "user";
   speakerName: string;
@@ -46,7 +44,6 @@ function normalizeMoment(raw: unknown): Moment | null {
     characterId: text(value.characterId),
     characterName: text(value.characterName),
     source: value.source === "extra" ? "extra" : "story",
-    ...(text(value.sourceTitle).trim() ? { sourceTitle: text(value.sourceTitle).trim() } : {}),
     speaker: value.speaker === "user" ? "user" : "char",
     speakerName: text(value.speakerName),
     paragraphs,
