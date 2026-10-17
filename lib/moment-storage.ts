@@ -74,14 +74,11 @@ function saveMoments(moments: Moment[]): void {
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(MOMENTS_UPDATED_EVENT));
 }
 
-export function isMomentCollected(messageId: string): boolean {
-  return loadMoments().some(moment => moment.messageId === messageId);
-}
-
-/** 同一条消息只收一次；收过了返回 null */
+/** 同一条消息里同样的字只收一次（整条和自己选的几段可以都收）；收过了返回 null */
 export function addMoment(input: Omit<Moment, "id" | "createdAt">): Moment | null {
   const moments = loadMoments();
-  if (input.messageId && moments.some(moment => moment.messageId === input.messageId)) return null;
+  const text = input.paragraphs.join("\n");
+  if (input.messageId && moments.some(moment => moment.messageId === input.messageId && moment.paragraphs.join("\n") === text)) return null;
   const moment: Moment = {
     ...input,
     id: `moment_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,

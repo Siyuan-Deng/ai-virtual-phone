@@ -985,6 +985,39 @@
         .story-ctx-btn-danger {
           color: var(--c-danger, #e74c3c);
         }
+        /* 收藏「自己选取」：只有这一条能选字，虚线框标出来 */
+        .story-row.is-selecting,
+        .story-row.is-selecting .story-richtext {
+          -webkit-user-select: text;
+          user-select: text;
+          -webkit-touch-callout: default;
+        }
+        .story-row.is-selecting .story-bubble {
+          outline: 1px dashed var(--c-story-sub, #94a3b8);
+          outline-offset: 6px;
+        }
+        /* 选字时的收藏条：和长按菜单同一个样子，钉在离选区远的那一头 */
+        .story-select-bar {
+          position: fixed;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 50;
+          display: flex;
+          align-items: center;
+          padding: 4px 0;
+          background: var(--ctx-menu-bg, #2c2c2c);
+          box-shadow:
+            0 2px 8px rgba(0, 0, 0, 0.12),
+            0 10px 26px rgba(0, 0, 0, 0.08);
+          white-space: nowrap;
+        }
+        .story-select-hint {
+          color: rgba(255, 255, 255, 0.72);
+          font-size: calc(13px*var(--app-text-scale,1));
+          padding: 0 12px;
+          line-height: 36px;
+          border-right: 1px solid rgba(255,255,255,0.1);
+        }
         .story-ctx-triangle {
           display: none;
           position: absolute;
