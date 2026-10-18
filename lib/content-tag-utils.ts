@@ -283,6 +283,16 @@ export function matchesActiveTags(requiredTags: string[] | null | undefined, act
     return requiredTags.every((tag) => activeTags.includes(tag));
 }
 
+/** 正则这种能多选范围的：tagSets 里任意一组满足就算；没有 tagSets 照旧看 tags */
+export function matchesActiveTagSets(
+    tags: string[] | null | undefined,
+    tagSets: string[][] | null | undefined,
+    activeTags: string[],
+): boolean {
+    if (tagSets && tagSets.length > 0) return tagSets.some((set) => matchesActiveTags(set, activeTags));
+    return matchesActiveTags(tags, activeTags);
+}
+
 export function filterTagScopedItems<T extends { tags?: string[] }>(items: T[], activeTags: string[]): T[] {
     return items.filter((item) => matchesActiveTags(item.tags, activeTags));
 }

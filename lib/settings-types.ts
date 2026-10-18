@@ -130,6 +130,8 @@ export type RegexRule = {
     replaceString: string;
     /** Multi-tag filtering. Rule is included only when ALL its tags are present in the active appTags. Empty/undefined = universal. */
     tags?: string[];
+    /** 适用范围多选：满足其中任意一组就生效（组内还是全部满足）。有它就以它为准，tags 留着第一组给旧版本看 */
+    tagSets?: string[][];
     trimStrings?: string[];       // Strings to remove from each capture-group match before replacement
     disabled: boolean;
     placement: number[];          // 1=USER_INPUT, 2=AI_OUTPUT, 3=SLASH_COMMAND, 5=WORLD_INFO, 6=REASONING
@@ -145,6 +147,8 @@ export type RegexRule = {
 export type RegexConfig = SettingItemMeta & {
     builtIn?: boolean;
     rules: RegexRule[];
+    /** 所在文件夹（lib/regex-folders）；没有或文件夹已删就是未分类 */
+    folderId?: string;
 };
 
 // --- ApiConfig (migrated from api-settings.tsx) ---

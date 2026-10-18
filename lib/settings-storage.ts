@@ -43,6 +43,7 @@ import { pinnedFirst, withSortIndex } from "./list-order";
 import { orderLikeFolders } from "./item-folders";
 import { loadApiConfigFolders, loadApiConfigRootOrder } from "./api-config-folders";
 import { loadWorldBookFolders, loadWorldBookRootOrder } from "./worldbook-folders";
+import { loadRegexFolders, loadRegexRootOrder } from "./regex-folders";
 import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
 import { isGenerationParameterKey } from "./generation-parameters";
 
@@ -500,7 +501,28 @@ function normalizeRegexRuleTags(tags: unknown): string[] | undefined {
     return normalized;
 }
 
+/** 多选范围的每一组照单组那样迁移、去重 */
+function normalizeRegexRuleTagSets(value: unknown): string[][] {
+    if (!Array.isArray(value)) return [];
+    const sets: string[][] = [];
+    for (const raw of value) {
+        const set = normalizeRegexRuleTags(raw);
+        if (set && !sets.some((existing) => areTagsEqual(existing, set))) sets.push(set);
+    }
+    return sets;
+}
+
 function normalizeRegexRuleScope(rule: RegexRule): RegexRule {
+    if (rule.tagSets !== undefined) {
+        const tagSets = normalizeRegexRuleTagSets(rule.tagSets);
+        // 只剩一组就退回单选；两组以上 tags 放第一组，旧版本至少还认得这一组
+        if (tagSets.length < 2) return normalizeRegexRuleScope({ ...rule, tags: tagSets[0] ?? rule.tags, tagSets: undefined });
+        const same = rule.tagSets.length === tagSets.length
+            && rule.tagSets.every((set, index) => areTagsEqual(set, tagSets[index]))
+            && !!rule.tags && areTagsEqual(rule.tags, tagSets[0]);
+        return same ? rule : { ...rule, tags: tagSets[0], tagSets };
+    }
+
     const currentTags = normalizeTags(rule.tags);
     const nextTags = normalizeRegexRuleTags(rule.tags);
 
@@ -523,7 +545,8 @@ function normalizeRegexGroupScopes(group: RegexConfig): RegexConfig {
 export function loadRegexes(): RegexConfig[] {
     if (typeof window === "undefined") return [];
     try {
-        return readRegexesCache().map(normalizeRegexGroupScopes);
+        // 和世界书一样：置顶的在前，按设置页里拖出来的顺序（IndexedDB 读回来是按 id 排的）
+        return orderLikeFolders(pinnedFirst(readRegexesCache().map(normalizeRegexGroupScopes)), loadRegexFolders(), loadRegexRootOrder());
     } catch {
         return [];
     }
@@ -531,7 +554,7 @@ export function loadRegexes(): RegexConfig[] {
 
 export function saveRegexes(regexes: RegexConfig[]): void {
     if (typeof window === "undefined") return;
-    writeRegexesCache(regexes);
+    writeRegexesCache(withSortIndex(regexes));
     window.dispatchEvent(new CustomEvent("settings-regexes-updated"));
 }
 
@@ -595,6 +618,7 @@ export function parseRegexFromJson(text: string, fallbackName: string = "导入�
                 findRegex: String(r.findRegex || r.regex || ""),
                 replaceString: String(r.replaceString || r.replace || ""),
                 tags: normalizeRegexRuleTags(r.tags),
+                ...(Array.isArray(r.tagSets) ? { tagSets: r.tagSets } : {}),
                 disabled: Boolean(r.disabled || false),
                 placement,
                 trimStrings,

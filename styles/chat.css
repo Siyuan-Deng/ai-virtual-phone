@@ -1246,8 +1246,18 @@
   padding-left: 36px;
   cursor: pointer;
 }
+/* 选中的底色画在伪元素上，上下各多出一点，不贴着气泡；不占位置，列表不会跳 */
 .chat-msg-wrapper[data-multi-select][data-selected] {
+  isolation: isolate;
+}
+.chat-msg-wrapper[data-multi-select][data-selected]::before {
+  content: "";
+  position: absolute;
+  inset: -6px 0;
+  z-index: -1;
+  border-radius: 12px;
   background: color-mix(in srgb, var(--c-icon-active) 10%, transparent);
+  pointer-events: none;
 }
 .chat-multi-select-check {
   position: absolute;
@@ -1279,8 +1289,8 @@
   z-index: 35;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+  gap: 6px;
+  padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px));
   background: color-mix(in srgb, var(--c-card-bg) 92%, transparent);
   border-top: 0.5px solid var(--c-card-border);
   box-shadow: 0 -8px 28px rgba(0,0,0,0.08);
@@ -1288,6 +1298,7 @@
   backdrop-filter: blur(18px);
 }
 .chat-multi-select-icon-btn,
+.chat-multi-select-save-btn,
 .chat-multi-select-delete-btn {
   border: 0;
   min-width: 44px;
@@ -1306,7 +1317,8 @@
   color: var(--c-text);
 }
 .chat-multi-select-delete-btn {
-  padding: 0 16px;
+  padding: 0 10px;
+  gap: 4px;
   background: color-mix(in srgb, var(--c-danger) 14%, transparent);
   color: var(--c-danger);
   font-size: calc(14px*var(--app-text-scale,1));
@@ -1316,6 +1328,45 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+.chat-multi-select-save-btn {
+  padding: 0 10px;
+  gap: 4px;
+  background: var(--c-input);
+  color: var(--c-text);
+  font-size: calc(14px*var(--app-text-scale,1));
+  font-weight: 600;
+}
+.chat-multi-select-save-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* 聊天截图的台子（屏幕外搭的，截完就拆）：背景已经截成一块块接上，
+   外层和列表原来的伪元素背景不再画一遍；动画一律停在最后的样子 */
+.chat-capture-stage::before,
+.chat-capture-stage::after,
+.chat-capture-stage > .page-body::before,
+.chat-capture-stage > .page-body::after {
+  content: none !important;
+}
+.chat-capture-stage *,
+.chat-capture-stage *::before,
+.chat-capture-stage *::after,
+.chat-capture-probe * {
+  animation: none !important;
+  transition: none !important;
+}
+/* 截好的长图先在弹窗里看一眼，再点保存（iPhone 上系统分享要一次新的点按才能打开） */
+.chat-capture-preview {
+  max-height: 58vh;
+  overflow-y: auto;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.05);
+}
+.chat-capture-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
 .chat-multi-select-summary {
   min-width: 0;
   flex: 1;
@@ -1324,6 +1375,7 @@
   gap: 2px;
 }
 .chat-multi-select-summary strong {
+  white-space: nowrap;
   font-size: calc(14px*var(--app-text-scale,1));
   color: var(--c-text-title);
   line-height: 1.2;
@@ -7961,4 +8013,20 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+/* 片刻纪事合并分享：左边一列写是谁的话，右边是这个人的对齐、淡化 */
+.reading-share-who-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.reading-share-who {
+  min-width: 0;
+  max-width: 5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(10.8px*var(--app-text-scale,1));
+  color: var(--reading-warm-ink, #111);
 }

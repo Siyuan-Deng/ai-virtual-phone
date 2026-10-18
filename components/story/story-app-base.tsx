@@ -37,7 +37,8 @@ function SolidBackIcon({ size = 17 }: { size?: number }) {
 }
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { Avatar } from "@/components/ui/primitives";
-import { StoryHtmlRenderer } from "@/components/ui/story-html-renderer";
+import { StoryHtmlRenderer, storyProseParagraphs } from "@/components/ui/story-html-renderer";
+import { addMoment } from "@/lib/moment-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import { maybeRunSummarization } from "@/lib/memory-summarizer";
 import { getLastSummarizedTimestamp, incrementEventCounter } from "@/lib/memory-storage";
@@ -105,6 +106,7 @@ import { MacroEngine } from "@/lib/macro-engine";
 
 type StoryAppProps = {
   onClose: () => void;
+  onNotice?: (message: string) => void;
 };
 
 type StoryGenerationRun = {
@@ -449,7 +451,7 @@ const StoryComposer = memo(function StoryComposer({
   );
 });
 
-export function StoryApp({ onClose }: StoryAppProps) {
+export function StoryApp({ onClose, onNotice }: StoryAppProps) {
   const [ready, setReady] = useState(false);
   // 剧情库这次没读出来（iOS 偶尔会）：不新建会话，提示重试
   const [loadFailed, setLoadFailed] = useState(false);
@@ -505,6 +507,11 @@ export function StoryApp({ onClose }: StoryAppProps) {
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
   const [contextMenuPoint, setContextMenuPoint] = useState<{ x: number; y: number } | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  // 长按菜单点了「收藏」：菜单换成「收藏整条 / 自己选取」
+  const [collectChoiceId, setCollectChoiceId] = useState<string | null>(null);
+  // 「自己选取」：只有这一条能选字，期间长按不出菜单
+  const [selectingMessageId, setSelectingMessageId] = useState<string | null>(null);
+  const [selectionDraft, setSelectionDraft] = useState<{ text: string; atTop: boolean; top: number; bottom: number } | null>(null);
   const [editingContent, setEditingContent] = useState("");
   const [cssModalOpen, setCssModalOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -783,6 +790,50 @@ export function StoryApp({ onClose }: StoryAppProps) {
     composerAppendIdRef.current += 1;
     setComposerAppendRequest({ id: composerAppendIdRef.current, text });
   }, []);
+
+  useEffect(() => {
+    if (!activeMessageId) setCollectChoiceId(null);
+  }, [activeMessageId]);
+
+  useEffect(() => {
+    setSelectingMessageId(null);
+  }, [activeSessionId]);
+
+  // 选字时跟着选区走：收藏条钉在离选区远的那一头（和阅读一样），不和系统的「拷贝」条撞
+  useEffect(() => {
+    if (!selectingMessageId) {
+      setSelectionDraft(null);
+      return;
+    }
+    // 和长按菜单一样按屏幕坐标钉（fixed）：页眉滚走了就贴屏幕顶，底下让开输入栏
+    const place = (selectionCenterY?: number) => {
+      const shell = shellInnerRef.current;
+      const headerRect = shell?.querySelector(".story-header")?.getBoundingClientRect();
+      const composerRect = shell?.querySelector(".story-composer")?.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      return {
+        atTop: selectionCenterY !== undefined && selectionCenterY > viewportHeight / 2,
+        top: Math.max(headerRect && headerRect.bottom > 0 ? headerRect.bottom : 0, 0) + 12,
+        bottom: (composerRect && composerRect.top < viewportHeight ? viewportHeight - composerRect.top : 0) + 12,
+      };
+    };
+    const update = () => {
+      const sel = window.getSelection();
+      const row = shellInnerRef.current?.querySelector(`[data-story-msg-id="${selectingMessageId}"] .story-bubble`);
+      const inside = !!sel && !sel.isCollapsed && sel.rangeCount > 0 && !!row
+        && row.contains(sel.anchorNode) && row.contains(sel.focusNode);
+      if (!inside) {
+        setSelectionDraft(prev => ({ ...(prev ?? place()), text: "" }));
+        return;
+      }
+      const rect = sel!.getRangeAt(0).getBoundingClientRect();
+      setSelectionDraft({ text: sel!.toString(), ...place((rect.top + rect.bottom) / 2) });
+    };
+    update();
+    const onChange = () => { window.setTimeout(update, 10); };
+    document.addEventListener("selectionchange", onChange);
+    return () => document.removeEventListener("selectionchange", onChange);
+  }, [selectingMessageId]);
 
   // Close context menu when clicking outside (delay to avoid the opening tap closing it)
   useEffect(() => {
@@ -1137,6 +1188,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
   }
 
   function handleMsgPointerDown(e: React.PointerEvent, msgId: string) {
+    if (selectingMessageId) return; // 选字中：长按交给系统选字，不出菜单
     if (e.pointerType === "mouse" && e.button !== 0) return;
     // Don't preventDefault — it blocks clicks on <details>, <summary>, <input> etc. inside messages
     startPosRef.current = { x: e.clientX, y: e.clientY };
@@ -1177,6 +1229,46 @@ export function StoryApp({ onClose }: StoryAppProps) {
     setMessages(prev => { const idx = prev.findIndex(m => m.id === msgId); return idx >= 0 ? prev.slice(0, idx) : prev; });
     setActiveMessageId(null);
     setStorageVersion(v => v + 1);
+  }
+  /** selected：「自己选取」选中的字，按换行拆段；不给就是整条 */
+  function handleStoryCollect(msg: StoryMessage, selected?: string) {
+    setActiveMessageId(null);
+    if (!currentSession || !currentCharacter) return;
+    const paragraphs = selected !== undefined
+      ? selected.split(/\n+/).map(line => line.trim()).filter(Boolean)
+      : storyProseParagraphs(msg.renderedContent || msg.rawContent);
+    if (paragraphs.length === 0) {
+      onNotice?.("这条没有能收的正文");
+      return;
+    }
+    const moment = addMoment({
+      characterId: currentCharacter.id,
+      characterName: currentCharacter.name,
+      source: isExtra ? "extra" : "story",
+      speaker: msg.role === "user" ? "user" : "char",
+      speakerName: msg.role === "user" ? storyUserName : currentCharacter.name,
+      paragraphs,
+      sessionId: currentSession.id,
+      messageId: msg.id,
+      messageAt: msg.createdAt,
+    });
+    onNotice?.(moment ? "已收进片刻纪事" : (selected !== undefined ? "这段已经收过了" : "这条已经收过了"));
+  }
+  function startStorySelecting(msgId: string) {
+    setActiveMessageId(null);
+    try { window.getSelection()?.removeAllRanges(); } catch { /* ignore */ }
+    setSelectingMessageId(msgId);
+  }
+  function stopStorySelecting() {
+    try { window.getSelection()?.removeAllRanges(); } catch { /* ignore */ }
+    setSelectingMessageId(null);
+  }
+  function collectStorySelection() {
+    const message = messages.find(m => m.id === selectingMessageId);
+    const text = selectionDraft?.text.trim();
+    if (!message || !text) return;
+    handleStoryCollect(message, text);
+    stopStorySelecting();
   }
   function handleStoryEditStart(msg: StoryMessage) {
     setEditingMessageId(msg.id);
@@ -1227,13 +1319,18 @@ export function StoryApp({ onClose }: StoryAppProps) {
     if (retryMessage.role !== "assistant" && retryMessage.role !== "user") return;
     const sessionId = activeSessionId;
     const characterId = activeCharacterId;
-    const contextMessages = retryMessage.role === "user"
+    const keptMessages = retryMessage.role === "user"
       ? messages.slice(0, msgIndex + 1)
       : messages.slice(0, msgIndex);
-    const firstDiscardedMessage = messages[contextMessages.length];
-    if (firstDiscardedMessage) {
-      deleteStoryMessagesFrom(activeSessionId, firstDiscardedMessage.id);
+    // 这条之后发的系统指令留着，重新生成时照样带上（发完指令再点重试，就是想按指令重写这一段）
+    const discarded = messages.slice(keptMessages.length);
+    const keptInstructions = discarded.filter(m => m.instruction === true);
+    if (keptInstructions.length === 0) {
+      if (discarded[0]) deleteStoryMessagesFrom(activeSessionId, discarded[0].id);
+    } else {
+      discarded.filter(m => m.instruction !== true).forEach(m => deleteStoryMessage(m.id));
     }
+    const contextMessages = [...keptMessages, ...keptInstructions];
     setMessages(contextMessages);
     setActiveMessageId(null);
     setStorageVersion(v => v + 1);
@@ -1812,13 +1909,15 @@ export function StoryApp({ onClose }: StoryAppProps) {
                   return (
                     <article
                       key={message.id}
-                      className="story-row"
+                      className={`story-row${selectingMessageId === message.id ? " is-selecting" : ""}`}
                       data-role={message.role}
+                      data-story-msg-id={message.id}
                       onPointerDown={(e) => handleMsgPointerDown(e, message.id)}
                       onPointerMove={handleMsgPointerMove}
                       onPointerUp={handleMsgPointerUp}
                       onPointerCancel={handleMsgPointerCancel}
                       onContextMenu={(e) => {
+                        if (selectingMessageId) return; // 选字中：右键/长按交给系统
                         e.preventDefault();
                         setContextMenuPoint(getClampedContextMenuPoint(e.clientX, e.clientY));
                         setActiveMessageId(message.id);
@@ -1887,17 +1986,29 @@ export function StoryApp({ onClose }: StoryAppProps) {
                               style={contextMenuPoint ? { left: contextMenuPoint.x, top: contextMenuPoint.y } : undefined}
                               onPointerDown={(e) => e.stopPropagation()}
                             >
-                              <div style={{ display: "flex" }}>
-                                <button onClick={() => handleStoryCopy(message.rawContent)} className="story-ctx-btn">复制</button>
-                                <button onClick={() => handleStoryEditStart(message)} className="story-ctx-btn">编辑</button>
-                                {(message.role === "assistant" || message.role === "user") && (
-                                  <button onClick={() => { void handleStoryRetry(message.id); }} className="story-ctx-btn story-ctx-btn-danger">重试</button>
-                                )}
-                              </div>
-                              <div style={{ display: "flex" }}>
-                                <button onClick={() => handleStoryDelete(message.id)} className="story-ctx-btn story-ctx-btn-danger">删除</button>
-                                <button onClick={() => handleStoryDeleteFrom(message.id)} className="story-ctx-btn story-ctx-btn-danger">删除以下</button>
-                              </div>
+                              {collectChoiceId === message.id ? (
+                                <div style={{ display: "flex" }}>
+                                  <button onClick={() => handleStoryCollect(message)} className="story-ctx-btn">收藏整条</button>
+                                  <button onClick={() => startStorySelecting(message.id)} className="story-ctx-btn">自己选取</button>
+                                </div>
+                              ) : (
+                                <>
+                                  <div style={{ display: "flex" }}>
+                                    <button onClick={() => handleStoryCopy(message.rawContent)} className="story-ctx-btn">复制</button>
+                                    <button onClick={() => handleStoryEditStart(message)} className="story-ctx-btn">编辑</button>
+                                    {(message.role === "assistant" || message.role === "user") && !message.instruction && (
+                                      <button onClick={() => setCollectChoiceId(message.id)} className="story-ctx-btn">收藏</button>
+                                    )}
+                                  </div>
+                                  <div style={{ display: "flex" }}>
+                                    {(message.role === "assistant" || message.role === "user") && (
+                                      <button onClick={() => { void handleStoryRetry(message.id); }} className="story-ctx-btn story-ctx-btn-danger">重试</button>
+                                    )}
+                                    <button onClick={() => handleStoryDelete(message.id)} className="story-ctx-btn story-ctx-btn-danger">删除</button>
+                                    <button onClick={() => handleStoryDeleteFrom(message.id)} className="story-ctx-btn story-ctx-btn-danger">删除以下</button>
+                                  </div>
+                                </>
+                              )}
                               <div className="story-ctx-triangle" />
                             </div>
                           );
@@ -1909,6 +2020,23 @@ export function StoryApp({ onClose }: StoryAppProps) {
                 })}
               </>
             )}
+            {selectingMessageId && selectionDraft && shellInnerRef.current ? createPortal(
+              <div
+                className="story-select-bar"
+                style={selectionDraft.atTop
+                  ? { top: `max(${selectionDraft.top}px, calc(env(safe-area-inset-top, 0px) + 12px))` }
+                  : { bottom: `max(${selectionDraft.bottom}px, calc(env(safe-area-inset-bottom, 0px) + 12px))` }}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                {selectionDraft.text.trim() ? (
+                  <button type="button" className="story-ctx-btn" onClick={collectStorySelection}>收藏选中</button>
+                ) : (
+                  <span className="story-select-hint">长按拖动，选要收的字</span>
+                )}
+                <button type="button" className="story-ctx-btn" onClick={stopStorySelecting}>取消</button>
+              </div>,
+              shellInnerRef.current,
+            ) : null}
             {isGenerating ? (
               <StoryGeneratingIndicator
                 characterName={currentCharacter.name}

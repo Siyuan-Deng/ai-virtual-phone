@@ -40,6 +40,9 @@ export function CustomStatusFrame({ html, raw }: { html: string; raw: string }) 
   function send(){parent.postMessage({source:'chat-status-frame',type:'resize',id:frameId,height:measure()},'*');}
   function sched(){requestAnimationFrame(function(){send();requestAnimationFrame(send);});}
   window.addEventListener('load',sched);window.addEventListener('resize',sched);
+  // 聊天截图要用：外面读不到沙盒里的 DOM，问到了就把当下画好的 HTML 交出去
+  window.addEventListener('message',function(e){var d=e.data;if(!d||d.source!=='chat-status-frame'||d.type!=='snapshot')return;
+    parent.postMessage({source:'chat-status-frame',type:'snapshot',id:frameId,html:document.documentElement.outerHTML},'*');});
   if(window.MutationObserver)new MutationObserver(sched).observe(document.documentElement,{attributes:true,childList:true,subtree:true,characterData:true});
   setTimeout(send,60);setTimeout(send,400);
 })();</` + `script>`;

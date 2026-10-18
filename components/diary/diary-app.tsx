@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { BookOpenText, ChevronLeft, NotebookPen, StickyNote } from "lucide-react";
+import { BookOpenText, Bookmark, ChevronLeft, NotebookPen, StickyNote } from "lucide-react";
 
 import { DiaryEntriesApp } from "./diary-entries-app";
+import { MomentsApp } from "./moments-app";
 import { NoteWallApp } from "./note-wall-app";
 
 type DiaryAppProps = {
@@ -11,7 +12,7 @@ type DiaryAppProps = {
   onNotice?: (message: string) => void;
 };
 
-type DiaryView = "home" | "entries" | "myEntries" | "notewall";
+type DiaryView = "home" | "entries" | "myEntries" | "moments" | "notewall";
 
 const NOTE_WALL_UI_ENABLED = false;
 
@@ -34,6 +35,10 @@ export function DiaryApp({ onClose, onNotice }: DiaryAppProps) {
     return <DiaryEntriesApp kind="user" onBack={() => setView("home")} onNotice={onNotice} />;
   }
 
+  if (view === "moments") {
+    return <MomentsApp onBack={() => setView("home")} onNotice={onNotice} />;
+  }
+
   return (
     <section className="diary-app">
       <header className="diary-app-header">
@@ -52,7 +57,7 @@ export function DiaryApp({ onClose, onNotice }: DiaryAppProps) {
           <span className="diary-feature-punches diary-feature-punches-left" aria-hidden="true" />
           <span className="diary-feature-punches diary-feature-punches-right" aria-hidden="true" />
           <span className="diary-feature-card-head">
-            <span className="diary-feature-label">DIARY</span>
+            <span className="diary-feature-label">THEIR DIARY</span>
             <span className="diary-feature-number">{todayLabel}</span>
           </span>
           <span className="diary-feature-main">
@@ -89,6 +94,28 @@ export function DiaryApp({ onClose, onNotice }: DiaryAppProps) {
           <span className="diary-feature-bottom" aria-hidden="true">
             <span className="diary-feature-barcode" />
             <span className="diary-feature-weather">PRIVATE NOTES / FOR YOU</span>
+          </span>
+        </button>
+
+        <button type="button" className="diary-feature-card diary-feature-card-entry" onClick={() => setView("moments")}>
+          <span className="diary-feature-punches diary-feature-punches-left" aria-hidden="true" />
+          <span className="diary-feature-punches diary-feature-punches-right" aria-hidden="true" />
+          <span className="diary-feature-card-head">
+            <span className="diary-feature-label">OUR DIARY</span>
+            <span className="diary-feature-number">{todayLabel}</span>
+          </span>
+          <span className="diary-feature-main">
+            <span className="diary-feature-icon">
+              <Bookmark size={20} strokeWidth={1.55} />
+            </span>
+            <span>
+              <strong>片刻纪事</strong>
+              <em>我们写下的纸页和片段</em>
+            </span>
+          </span>
+          <span className="diary-feature-bottom" aria-hidden="true">
+            <span className="diary-feature-barcode" />
+            <span className="diary-feature-weather">MOMENTS / BETWEEN US</span>
           </span>
         </button>
 

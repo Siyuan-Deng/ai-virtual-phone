@@ -10,6 +10,7 @@ import {
   type DiaryEntryTimerSettings,
   type DiaryEntryTodoItem,
   type DiaryEntryTrigger,
+  type DiaryFontKind,
   type DiaryReplyMode,
   type DiaryReplyRules,
 } from "./diary-entry-types";
@@ -23,6 +24,10 @@ export const DIARY_ENTRY_FONT_ASSET_KEY = "ai_phone_diary_entry_font_asset_v1";
 export const DIARY_ENTRY_FONT_SCALE_KEY = "ai_phone_diary_entry_font_scale_v1";
 export const DIARY_ENTRY_USER_FONT_ASSET_KEY = "ai_phone_diary_entry_user_font_asset_v1";
 export const DIARY_ENTRY_USER_FONT_SCALE_KEY = "ai_phone_diary_entry_user_font_scale_v1";
+export const MOMENT_FONT_ASSET_KEY = "ai_phone_moment_font_asset_v1";
+export const MOMENT_FONT_SCALE_KEY = "ai_phone_moment_font_scale_v1";
+export const MOMENT_USER_FONT_ASSET_KEY = "ai_phone_moment_user_font_asset_v1";
+export const MOMENT_CHAR_FONT_ASSET_KEY = "ai_phone_moment_char_font_asset_v1";
 
 registerKvMigration(ENTRIES_KEY);
 registerKvMigration(TIMER_KEY);
@@ -31,12 +36,21 @@ registerKvMigration(DIARY_ENTRY_FONT_ASSET_KEY);
 registerKvMigration(DIARY_ENTRY_FONT_SCALE_KEY);
 registerKvMigration(DIARY_ENTRY_USER_FONT_ASSET_KEY);
 registerKvMigration(DIARY_ENTRY_USER_FONT_SCALE_KEY);
+registerKvMigration(MOMENT_FONT_ASSET_KEY);
+registerKvMigration(MOMENT_FONT_SCALE_KEY);
+registerKvMigration(MOMENT_USER_FONT_ASSET_KEY);
+registerKvMigration(MOMENT_CHAR_FONT_ASSET_KEY);
 
-function fontAssetKey(kind: DiaryEntryAuthorType): string {
+function fontAssetKey(kind: DiaryFontKind): string {
+  if (kind === "moment") return MOMENT_FONT_ASSET_KEY;
+  if (kind === "moment-user") return MOMENT_USER_FONT_ASSET_KEY;
+  if (kind === "moment-char") return MOMENT_CHAR_FONT_ASSET_KEY;
   return kind === "user" ? DIARY_ENTRY_USER_FONT_ASSET_KEY : DIARY_ENTRY_FONT_ASSET_KEY;
 }
 
-function fontScaleKey(kind: DiaryEntryAuthorType): string {
+/** 片刻纪事的三份字体共用一个字号 */
+function fontScaleKey(kind: DiaryFontKind): string {
+  if (kind === "moment" || kind === "moment-user" || kind === "moment-char") return MOMENT_FONT_SCALE_KEY;
   return kind === "user" ? DIARY_ENTRY_USER_FONT_SCALE_KEY : DIARY_ENTRY_FONT_SCALE_KEY;
 }
 
@@ -165,13 +179,13 @@ function normalizeTrigger(value: unknown): DiaryEntryTrigger {
   return value === "timer" ? "timer" : "manual";
 }
 
-export function loadDiaryEntryFontAssetId(kind: DiaryEntryAuthorType = "character"): string | null {
+export function loadDiaryEntryFontAssetId(kind: DiaryFontKind = "character"): string | null {
   const raw = kvGet(fontAssetKey(kind));
   const id = typeof raw === "string" ? raw.trim() : "";
   return id || null;
 }
 
-export function saveDiaryEntryFontAssetId(assetId: string | null, kind: DiaryEntryAuthorType = "character"): void {
+export function saveDiaryEntryFontAssetId(assetId: string | null, kind: DiaryFontKind = "character"): void {
   const id = typeof assetId === "string" ? assetId.trim() : "";
   const key = fontAssetKey(kind);
   if (id) {
@@ -181,13 +195,13 @@ export function saveDiaryEntryFontAssetId(assetId: string | null, kind: DiaryEnt
   }
 }
 
-export function loadDiaryEntryFontScale(kind: DiaryEntryAuthorType = "character"): number {
+export function loadDiaryEntryFontScale(kind: DiaryFontKind = "character"): number {
   const raw = Number(kvGet(fontScaleKey(kind)));
   if (!Number.isFinite(raw)) return 1;
   return Math.min(1.25, Math.max(0.85, Number(raw.toFixed(2))));
 }
 
-export function saveDiaryEntryFontScale(scale: number, kind: DiaryEntryAuthorType = "character"): void {
+export function saveDiaryEntryFontScale(scale: number, kind: DiaryFontKind = "character"): void {
   const normalized = Math.min(1.25, Math.max(0.85, Number(scale.toFixed(2))));
   const key = fontScaleKey(kind);
   if (Math.abs(normalized - 1) < 0.001) {
