@@ -1246,8 +1246,18 @@
   padding-left: 36px;
   cursor: pointer;
 }
+/* 选中的底色画在伪元素上，上下各多出一点，不贴着气泡；不占位置，列表不会跳 */
 .chat-msg-wrapper[data-multi-select][data-selected] {
+  isolation: isolate;
+}
+.chat-msg-wrapper[data-multi-select][data-selected]::before {
+  content: "";
+  position: absolute;
+  inset: -6px 0;
+  z-index: -1;
+  border-radius: 12px;
   background: color-mix(in srgb, var(--c-icon-active) 10%, transparent);
+  pointer-events: none;
 }
 .chat-multi-select-check {
   position: absolute;

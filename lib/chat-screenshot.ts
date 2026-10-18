@@ -151,10 +151,10 @@ export async function renderChatScreenshot(parts: ChatScreenshotParts): Promise<
     force(probeBody, { position: "absolute", inset: "0", overflow: "hidden" });
     probe.appendChild(probeBody);
 
-    // 截图的台子：标题栏、选中的消息、输入栏从上往下排，不再叠着
+    // 截图的台子：标题栏、选中的消息、输入栏从上往下排，不再叠着；有多少消息就多高
     const stage = shellOf(wrapper);
     stage.classList.add("chat-capture-stage");
-    placeShell(stage, "auto", `${screenHeight}px`);
+    placeShell(stage, "auto", "0");
     force(stage, { display: "flex", "flex-direction": "column", "background-color": baseColor });
     const flow = { position: "relative", inset: "auto", top: "auto", left: "auto", right: "auto", bottom: "auto", width: "100%", flex: "none", transform: "none", margin: "0" };
     for (const part of [header, ...headerExtras]) {
@@ -183,7 +183,7 @@ export async function renderChatScreenshot(parts: ChatScreenshotParts): Promise<
     host.appendChild(holder);
     try {
         await nextFrame();
-        const height = Math.max(screenHeight, Math.ceil(stage.getBoundingClientRect().height));
+        const height = Math.ceil(stage.getBoundingClientRect().height);
         const scale = Math.max(1, Math.min(
             window.devicePixelRatio || 2,
             3,
