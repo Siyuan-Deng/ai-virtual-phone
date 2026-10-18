@@ -5,6 +5,9 @@ import { Bookmark, Bot, ChevronLeft, Layers, Trash2, X } from "lucide-react";
 import { DotsThree } from "@phosphor-icons/react";
 
 import { ReadingShareDialog } from "@/components/reading/reading-share-dialog";
+import { ContentDialog } from "@/components/ui/modal";
+import { downloadFile } from "@/lib/download-utils";
+import type { DiaryFontKind } from "@/lib/diary-entry-types";
 import type { ReadingShareSegment } from "@/lib/reading-share-card";
 import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
@@ -12,6 +15,7 @@ import {
   MOMENTS_UPDATED_EVENT,
   MOMENT_PROFILES_UPDATED_EVENT,
   deleteMoment,
+  loadMomentAsset,
   loadMomentAvatar,
   loadMomentProfiles,
   loadMoments,
@@ -19,12 +23,12 @@ import {
   saveMomentAvatar,
   saveMomentProfiles,
   type Moment,
+  type MomentChatLine,
   type MomentProfileOwner,
   type MomentProfiles,
 } from "@/lib/moment-storage";
 import { READING_AVATAR_MAX_SIZE, compressReadingImage } from "@/lib/reading-image";
 import { resolveUserIdentity } from "@/lib/settings-storage";
-import { DiaryEntryFontPanel } from "./diary-entries-app";
 import { useDiaryFont } from "./use-diary-font";
 import { useDragToTrash } from "./use-drag-to-trash";
 
@@ -90,7 +94,20 @@ function formatCaptionTime(moment: Moment): string {
 
 /** 纸条右上角那枚小标 */
 function sourceLabel(moment: Moment): string {
+  if (moment.source === "chat") return "聊天";
   return moment.source === "extra" ? "番外" : "正篇";
+}
+
+type PaperTone = "yellow" | "green" | "blue";
+
+/** 片刻纪事那三份字体 */
+type MomentFontKind = Extract<DiaryFontKind, "moment" | "moment-user" | "moment-char">;
+
+/** 纸条在列表里排第几就是什么颜色（和 .diary-entry-card:nth-child(2n / 3n) 一致，6n 算蓝） */
+function paperTone(index: number): PaperTone {
+  const n = index + 1;
+  if (n % 3 === 0) return "blue";
+  return n % 2 === 0 ? "green" : "yellow";
 }
 
 function clipText(value: string, maxLength: number): string {
@@ -102,12 +119,17 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
   const [moments, setMoments] = useState<Moment[]>([]);
   const [characters, setCharacters] = useState<Character[]>([]);
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
-  const [activeMoment, setActiveMoment] = useState<Moment | null>(null);
+  const [activeMoment, setActiveMoment] = useState<{ moment: Moment; tone: PaperTone } | null>(null);
   const [sharingMoment, setSharingMoment] = useState<Moment | null>(null);
   // 合并：勾几段拼成一张图分享。picking 时点纸条是勾选，不打开、不能拖去删
   const [picking, setPicking] = useState(false);
   const [pickedIds, setPickedIds] = useState<string[]>([]);
   const [mergeSharing, setMergeSharing] = useState<Moment[] | null>(null);
+  // 聊天那张纸点分享：就是收的时候存下的那张聊天截图
+  const [chatShot, setChatShot] = useState<{ blob: Blob; url: string; name: string } | null>(null);
+  useEffect(() => () => { if (chatShot) URL.revokeObjectURL(chatShot.url); }, [chatShot]);
+  // 聊天那几张纸上的小图（表情、转账、拍一拍……）：Blob → objectURL
+  const [assetUrls, setAssetUrls] = useState<Record<string, string>>({});
   const [deleteCandidate, setDeleteCandidate] = useState<Moment | null>(null);
   const [fontPanelOpen, setFontPanelOpen] = useState(false);
   const [profilePanelOpen, setProfilePanelOpen] = useState(false);
@@ -116,12 +138,18 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
   const [profileAvatars, setProfileAvatars] = useState<Record<MomentProfileOwner, string>>({});
   const mainRef = useRef<HTMLElement | null>(null);
   const fontFileRef = useRef<HTMLInputElement | null>(null);
+  /** 三份字体共用一个文件选择框，点了哪一份就传给哪一份 */
+  const fontTargetRef = useRef<MomentFontKind>("moment");
 
   const notify = useCallback((message: string) => {
     onNotice?.(message);
   }, [onNotice]);
 
+  // 系统字体：片刻纪事里所有的字；聊天里收的「我」/角色说的话另用自己的（没传就跟系统字体走）
   const font = useDiaryFont("moment", notify);
+  const userFont = useDiaryFont("moment-user", notify);
+  const charFont = useDiaryFont("moment-char", notify);
+  const fontsByKind = { moment: font, "moment-user": userFont, "moment-char": charFont } as const;
   const trash = useDragToTrash<Moment>({
     enabled: Boolean(activeCharacterId) && !picking,
     scrollRef: mainRef,
@@ -193,6 +221,47 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
     [activeCharacterId, books],
   );
 
+  useEffect(() => {
+    const keys = (activeBook?.moments ?? []).flatMap(moment => (moment.lines ?? []).flatMap(line => (line.kind === "snap" ? [line.asset] : [])));
+    if (keys.length === 0) return;
+    let cancelled = false;
+    const made: string[] = [];
+    void Promise.all(keys.map(async key => [key, await loadMomentAsset(key)] as const)).then((entries) => {
+      if (cancelled) return;
+      const next: Record<string, string> = {};
+      for (const [key, blob] of entries) {
+        if (!blob) continue;
+        const url = URL.createObjectURL(blob);
+        made.push(url);
+        next[key] = url;
+      }
+      setAssetUrls(next);
+    });
+    return () => {
+      cancelled = true;
+      made.forEach(url => URL.revokeObjectURL(url));
+    };
+  }, [activeBook?.moments]);
+
+  const openChatShot = useCallback(async (moment: Moment) => {
+    const blob = moment.shotAsset ? await loadMomentAsset(moment.shotAsset) : null;
+    if (!blob) {
+      notify("这张没有存下聊天截图。");
+      return;
+    }
+    setChatShot({ blob, url: URL.createObjectURL(blob), name: `片刻纪事-聊天-${moment.characterName || "未命名"}-${momentDate(moment)}.jpg` });
+  }, [notify]);
+
+  const saveChatShot = useCallback(async () => {
+    if (!chatShot) return;
+    try {
+      await downloadFile(chatShot.blob, chatShot.name);
+      setChatShot(null);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "保存失败");
+    }
+  }, [chatShot, notify]);
+
   // 换本子、本子没了都退出勾选
   useEffect(() => {
     setPicking(false);
@@ -218,7 +287,7 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
 
   const removeMoment = useCallback((moment: Moment) => {
     deleteMoment(moment.id);
-    setActiveMoment(current => current?.id === moment.id ? null : current);
+    setActiveMoment(current => current?.moment.id === moment.id ? null : current);
     setDeleteCandidate(null);
     notify("已从片刻纪事里删掉这一段。");
   }, [notify]);
@@ -248,7 +317,7 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
   }, [profileAvatars, profiles, userBase]);
 
   return (
-    <section className={`diary-app diary-entry-app ${trash.drag ? "is-entry-dragging" : ""}`} style={font.style}>
+    <section className={`diary-app diary-entry-app ${trash.drag ? "is-entry-dragging" : ""}`} style={{ ...font.style, ...userFont.style, ...charFont.style }}>
       <header className="diary-app-header diary-entry-header">
         {picking ? (
           <button type="button" className="moment-pick-action" onClick={stopPicking}>取消</button>
@@ -271,7 +340,7 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
           type="file"
           accept=".ttf,.otf,.woff,.woff2,font/*,application/font-woff,application/font-woff2"
           className="hidden"
-          onChange={font.upload}
+          onChange={event => void fontsByKind[fontTargetRef.current].upload(event)}
         />
         {picking ? (
           <button type="button" className="moment-pick-action" disabled={pickedIds.length === 0} onClick={sharePicked}>分享</button>
@@ -307,7 +376,7 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
           </div>
         ) : activeBook ? (
           <div className={`diary-entry-list${picking ? " is-picking" : ""}`}>
-            {activeBook.moments.map(moment => (
+            {activeBook.moments.map((moment, index) => (
               <button
                 key={moment.id}
                 type="button"
@@ -326,11 +395,12 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
                     event.preventDefault();
                     return;
                   }
-                  if (picking) togglePicked(moment.id);
-                  else setActiveMoment(moment);
+                  if (!picking) setActiveMoment({ moment, tone: paperTone(index) });
+                  else if (moment.source === "chat") notify("聊天的纸不能合并，点开它可以直接分享截图。");
+                  else togglePicked(moment.id);
                 }}
               >
-                <MomentCardContent moment={moment} />
+                <MomentCardContent moment={moment} assetUrls={assetUrls} />
               </button>
             ))}
           </div>
@@ -347,7 +417,7 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
         )}
       </main>
 
-      {activeBook && !picking && activeBook.moments.length > 1 ? (
+      {activeBook && !picking && activeBook.moments.filter(moment => moment.source !== "chat").length > 1 ? (
         <button type="button" className="diary-entry-write-btn" onClick={() => setPicking(true)}>
           <Layers size={18} strokeWidth={1.7} />
           <span>合并</span>
@@ -355,23 +425,49 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
       ) : null}
 
       {fontPanelOpen ? (
-        <DiaryEntryFontPanel
-          title={font.label}
-          hasCustomFont={font.hasCustomFont}
+        <MomentFontPanel
+          tiers={[
+            { kind: "moment", title: "系统字体", hint: "片刻纪事里的所有字", custom: font.hasCustomFont },
+            { kind: "moment-user", title: "我的字体", hint: "聊天里收的、我说的话", custom: userFont.hasCustomFont },
+            { kind: "moment-char", title: "角色字体", hint: "聊天里收的、角色说的话", custom: charFont.hasCustomFont },
+          ]}
           scale={font.scale}
-          onUpload={() => fontFileRef.current?.click()}
+          onUpload={(kind) => {
+            fontTargetRef.current = kind;
+            fontFileRef.current?.click();
+          }}
+          onReset={kind => fontsByKind[kind].reset()}
           onScaleChange={font.changeScale}
-          onReset={font.reset}
           onClose={() => setFontPanelOpen(false)}
         />
       ) : null}
 
       {activeMoment ? (
         <MomentDetail
-          moment={activeMoment}
+          moment={activeMoment.moment}
+          tone={activeMoment.tone}
+          assetUrls={assetUrls}
           onClose={() => setActiveMoment(null)}
-          onShare={() => setSharingMoment(activeMoment)}
+          onShare={() => {
+            if (activeMoment.moment.source === "chat") void openChatShot(activeMoment.moment);
+            else setSharingMoment(activeMoment.moment);
+          }}
         />
+      ) : null}
+
+      {chatShot ? (
+        <ContentDialog
+          title="聊天截图"
+          confirmLabel="保存图片"
+          cancelLabel="关闭"
+          onConfirm={() => void saveChatShot()}
+          onCancel={() => setChatShot(null)}
+        >
+          <div className="chat-capture-preview">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={chatShot.url} alt="聊天截图" />
+          </div>
+        </ContentDialog>
       ) : null}
 
       {sharingMoment ? (
@@ -487,7 +583,7 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
             minHeight: trash.drag.height,
           }}
         >
-          <MomentCardContent moment={trash.drag.item} />
+          <MomentCardContent moment={trash.drag.item} assetUrls={assetUrls} />
         </div>
       ) : null}
     </section>
@@ -520,7 +616,38 @@ function MomentBookCover({ book, onOpen }: { book: MomentBook; onOpen: () => voi
   );
 }
 
-function MomentCardContent({ moment }: { moment: Moment }) {
+/** 聊天里非文字的那条：收的时候原样截下来的小图 */
+function MomentChatSnap({ line, url, scale = 1 }: { line: Extract<MomentChatLine, { kind: "snap" }>; url?: string; scale?: number }) {
+  const width = Math.round(line.width * scale);
+  const height = Math.round(line.height * scale);
+  // eslint-disable-next-line @next/next/no-img-element
+  return url
+    ? <img className="moment-chat-snap" data-speaker={line.speaker} src={url} alt="" style={{ width }} />
+    : <span className="moment-chat-snap" data-speaker={line.speaker} style={{ width, height }} />;
+}
+
+function MomentCardContent({ moment, assetUrls }: { moment: Moment; assetUrls: Record<string, string> }) {
+  if (moment.source === "chat") {
+    const lines = moment.lines ?? [];
+    // 纸条外面：他靠左、我靠右，不加框，放前几条，多了渐隐
+    return (
+      <>
+        <span className="diary-entry-card-kicker">CHAT</span>
+        <span className="diary-entry-card-markers">
+          <span className="diary-entry-marker">{sourceLabel(moment)}</span>
+        </span>
+        <span className={`moment-chat-lines${lines.length > 5 || moment.paragraphs.join("").length > 70 ? " is-clipped" : ""}`}>
+          {lines.slice(0, 6).map((line, index) => line.kind === "text"
+            ? <span key={index} className="moment-chat-line" data-speaker={line.speaker}>{line.text}</span>
+            : <MomentChatSnap key={index} line={line} url={assetUrls[line.asset]} scale={0.6} />)}
+        </span>
+        <span className="diary-entry-card-meta">
+          <span>{lines.length} 条</span>
+          <time>{momentDate(moment)}</time>
+        </span>
+      </>
+    );
+  }
   return (
     <>
       <span className="diary-entry-card-kicker">{moment.source === "extra" ? "EXTRA" : "STORY"}</span>
@@ -536,7 +663,14 @@ function MomentCardContent({ moment }: { moment: Moment }) {
   );
 }
 
-function MomentDetail({ moment, onClose, onShare }: { moment: Moment; onClose: () => void; onShare: () => void }) {
+function MomentDetail({ moment, tone, assetUrls, onClose, onShare }: {
+  moment: Moment;
+  /** 外面那张纸条的颜色：聊天气泡跟着它配色 */
+  tone: PaperTone;
+  assetUrls: Record<string, string>;
+  onClose: () => void;
+  onShare: () => void;
+}) {
   return (
     <div className="nw-modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
       <article className="diary-entry-detail-paper" onClick={(event) => event.stopPropagation()}>
@@ -546,24 +680,87 @@ function MomentDetail({ moment, onClose, onShare }: { moment: Moment; onClose: (
         <div className="diary-entry-detail-scroll">
           <header>
             <div className="diary-entry-detail-topline">
-              <span>{moment.source === "extra" ? "番外摘录" : "正篇摘录"}</span>
+              <span>{`${sourceLabel(moment)}摘录`}</span>
               <div className="diary-entry-detail-actions">
                 <button type="button" onClick={onShare}>分享</button>
                 <button type="button" onClick={onClose}>关闭</button>
               </div>
             </div>
           </header>
-          <div className="diary-entry-blocks">
-            {moment.paragraphs.map((paragraph, index) => (
-              <p key={index} className="diary-entry-paragraph">{paragraph}</p>
-            ))}
-          </div>
+          {moment.source === "chat" ? (
+            // 点开以后：小气泡，颜色跟外面那张纸条；非文字的照聊天里原样
+            <div className="moment-chat-bubbles" data-tone={tone}>
+              {(moment.lines ?? []).map((line, index) => line.kind === "text"
+                ? <p key={index} className="moment-chat-bubble" data-speaker={line.speaker}>{line.text}</p>
+                : <MomentChatSnap key={index} line={line} url={assetUrls[line.asset]} />)}
+            </div>
+          ) : (
+            <div className="diary-entry-blocks">
+              {moment.paragraphs.map((paragraph, index) => (
+                <p key={index} className="diary-entry-paragraph">{paragraph}</p>
+              ))}
+            </div>
+          )}
           <footer className="diary-entry-detail-signature">
             <span>{moment.speakerName}</span>
             <time>{momentDate(moment)}</time>
           </footer>
         </div>
       </article>
+    </div>
+  );
+}
+
+/** 片刻纪事的字体：系统 / 我 / 角色三份各自上传，字号共用一个 */
+function MomentFontPanel({ tiers, scale, onUpload, onReset, onScaleChange, onClose }: {
+  tiers: Array<{ kind: MomentFontKind; title: string; hint: string; custom: boolean }>;
+  scale: number;
+  onUpload: (kind: MomentFontKind) => void;
+  onReset: (kind: MomentFontKind) => void;
+  onScaleChange: (scale: number) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="nw-modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <section className="diary-font-panel" onClick={event => event.stopPropagation()}>
+        <header>
+          <div>
+            <h2>片刻纪事字体</h2>
+            <p>我的、角色的没上传就和系统字体一样</p>
+          </div>
+          <button type="button" className="diary-icon-btn" onClick={onClose} aria-label="关闭">
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="moment-font-tiers">
+          {tiers.map(tier => (
+            <div key={tier.kind} className="moment-font-tier">
+              <span>
+                <strong>{tier.title}</strong>
+                <em>{tier.custom ? "已上传" : tier.kind === "moment" ? "默认手写体" : "跟系统字体"} · {tier.hint}</em>
+              </span>
+              <button type="button" onClick={() => onUpload(tier.kind)}>上传</button>
+              {tier.custom ? <button type="button" onClick={() => onReset(tier.kind)}>恢复</button> : null}
+            </div>
+          ))}
+        </div>
+
+        <label className="diary-font-size-control">
+          <span>
+            <strong>字号</strong>
+            <em>{Math.round(scale * 100)}%</em>
+          </span>
+          <input
+            type="range"
+            min="0.85"
+            max="1.25"
+            step="any"
+            value={scale}
+            onChange={event => onScaleChange(Number(event.target.value))}
+          />
+        </label>
+      </section>
     </div>
   );
 }

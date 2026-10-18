@@ -43,6 +43,7 @@ import { TransferTargetModal } from "./transfer-target-modal";
 import { GiftPickerModal } from "./gift-picker-modal";
 import { ConfirmDialog, ContentDialog } from "@/components/ui/modal";
 import { downloadFile } from "@/lib/download-utils";
+import { addChatMoment, type MomentChatLineDraft } from "@/lib/moment-storage";
 import { deleteWeixinCloudMessagesFromCloud, emitWeixinSyncToast, syncAllWeixinBotRuntimesToCloud } from "@/lib/weixin-cloud-sync";
 import { loadBindingConfig, loadPresets, loadRegexes, resolveBinding, resolveUserIdentity } from "@/lib/settings-storage";
 import { generateGroupChatCompletion, generateGroupOfflineChatCompletion, parseGroupChatResponse, buildEditableGroupRoundText } from "@/lib/group-chat-engine";
@@ -53,7 +54,7 @@ import { useKeyboardDismissAutoSend } from "@/components/chat/use-keyboard-dismi
 import { cancelBailoutKey } from "@/lib/push-bailout-client";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import type { UserIdentity } from "@/components/settings/user-identity";
-import { AlertCircle, Blocks, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, ImageDown, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
+import { AlertCircle, Blocks, Bookmark, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, ImageDown, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
 import { setDebugChatState } from "@/lib/debug-store";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { setChatActive } from "@/lib/music-action-queue";
@@ -290,6 +291,7 @@ function isHiddenChatFlowMessage(msg: ChatMessage, displayContent?: string): boo
 const GENERATING_PREFIX = "chat-generating:";
 const CHAT_BG_COMPLETE = "chat-bg-complete";
 const CHAT_CAPTURE_TOAST = "正在生成图片...";
+const CHAT_COLLECT_TOAST = "正在收进片刻纪事...";
 const CHAT_OFFLINE_MODE_PREFIX = "chat-offline-mode:";
 const CHAT_THEATER_MODE_PREFIX = "chat-theater-mode:";
 const GENERATING_LOCK_TTL_MS = 5 * 60 * 1000;
@@ -5331,48 +5333,116 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         setShowConfirmMultiDelete(false);
     }, []);
 
-    const saveSelectedAsImage = async () => {
+    /** 多选 → 存图 / 收藏共用：记下选中的气泡（按列表顺序），退出多选（勾没了、输入栏回来了）后再从列表里取回来 */
+    const takeSelectedForCapture = async (toast: string) => {
         const wrapper = wrapperRef.current;
         const body = scrollRef.current;
-        if (!wrapper || !body || isCapturingChat) return;
-        // 记下选中的气泡在列表里的顺序；退出多选（勾没了、输入栏回来了）以后再照这个顺序从列表里取
+        if (!wrapper || !body || isCapturingChat) return null;
         const bubbleIds = Array.from(body.querySelectorAll<HTMLElement>(".chat-msg-wrapper[data-selected]"))
             .map(el => el.id)
             .filter(Boolean);
         if (bubbleIds.length === 0) {
-            showChatToast("请选择要保存的消息");
-            return;
+            showChatToast("请先选消息");
+            return null;
         }
         cancelMultiSelect();
         setIsCapturingChat(true);
-        showPersistentChatToast(CHAT_CAPTURE_TOAST);
-        try {
-            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-            const rows: HTMLElement[] = [];
-            for (const id of bubbleIds) {
-                const bubble = body.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
-                if (!bubble) continue;
-                // 一整组带上（时间条、思考条 + 气泡）
-                const row = bubble.parentElement && bubble.parentElement !== body ? bubble.parentElement : bubble;
-                if (!rows.includes(row)) rows.push(row);
-            }
-            const ownChildren = (selector: string) => Array.from(wrapper.children)
-                .filter((el): el is HTMLElement => el instanceof HTMLElement && el.matches(selector));
-            const { renderChatScreenshot, chatScreenshotToBlob } = await import("@/lib/chat-screenshot");
-            const canvas = await renderChatScreenshot({
+        showPersistentChatToast(toast);
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const bubbles: HTMLElement[] = [];
+        const rows: HTMLElement[] = [];
+        for (const id of bubbleIds) {
+            const bubble = body.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
+            if (!bubble) continue;
+            bubbles.push(bubble);
+            // 一整组带上（时间条、思考条、展开的状态栏 + 气泡）
+            const row = bubble.parentElement && bubble.parentElement !== body ? bubble.parentElement : bubble;
+            if (!rows.includes(row)) rows.push(row);
+        }
+        const ownChildren = (selector: string) => Array.from(wrapper.children)
+            .filter((el): el is HTMLElement => el instanceof HTMLElement && el.matches(selector));
+        return {
+            bubbleIds,
+            bubbles,
+            parts: {
                 wrapper,
                 body,
                 rows,
                 header: ownChildren('[data-ui="header"]')[0] ?? null,
                 headerExtras: ownChildren(".chat-plugin-header").filter(el => el.offsetHeight > 0),
                 inputBar: ownChildren('[data-ui="input"]')[0] ?? null,
-            });
+            },
+        };
+    };
+
+    const saveSelectedAsImage = async () => {
+        const taken = await takeSelectedForCapture(CHAT_CAPTURE_TOAST);
+        if (!taken) return;
+        try {
+            const { renderChatScreenshot, chatScreenshotToBlob } = await import("@/lib/chat-screenshot");
+            const { canvas } = await renderChatScreenshot(taken.parts);
             const blob = await chatScreenshotToBlob(canvas);
             clearTimeout(chatToastTimer.current);
             setChatToast(null);
             setChatCapture({ blob, url: URL.createObjectURL(blob) });
         } catch (error) {
             showChatToast(`生成图片失败：${error instanceof Error ? error.message : String(error)}`, 3000);
+        } finally {
+            setIsCapturingChat(false);
+        }
+    };
+
+    /** 多选 → 收藏：几条放进片刻纪事同一张纸。文字照字收，别的（表情、转账、拍一拍……）截聊天里原样的小图；
+     *  再存一张整段截图，片刻纪事里点分享就是它 */
+    const collectSelectedToMoments = async () => {
+        if (session.isGroup) return;
+        const taken = await takeSelectedForCapture(CHAT_COLLECT_TOAST);
+        if (!taken) return;
+        try {
+            type Pending =
+                | { kind: "text"; speaker: "user" | "char"; text: string; at: string }
+                | { kind: "snap"; speaker: "user" | "char" | "system"; index: number; at: string };
+            const pending: Pending[] = [];
+            const snapTargets: HTMLElement[] = [];
+            for (const wrap of taken.bubbles) {
+                const stored = messages.find(m => `message-${m.id}` === wrap.id);
+                const at = stored?.createdAt || new Date().toISOString();
+                const role = wrap.dataset.role;
+                const speaker = role === "user" ? "user" : role === "assistant" ? "char" : "system";
+                const bubble = wrap.querySelector<HTMLElement>(".chat-bubble-role-user, .chat-bubble-role-assistant");
+                const text = speaker !== "system" && bubble && !stored?.mediaType && !bubble.matches(".chat-bubble-media, .chat-bubble-html-preview")
+                    ? bubble.innerText.trim()
+                    : "";
+                if (text && speaker !== "system") {
+                    pending.push({ kind: "text", speaker, text, at });
+                    continue;
+                }
+                const target = wrap.querySelector<HTMLElement>(".chat-msg-content-wrap") ?? (wrap.firstElementChild as HTMLElement | null);
+                if (!target) continue;
+                pending.push({ kind: "snap", speaker, index: snapTargets.length, at });
+                snapTargets.push(target);
+            }
+            const { renderChatScreenshot, chatScreenshotToBlob } = await import("@/lib/chat-screenshot");
+            const { canvas, snaps } = await renderChatScreenshot({ ...taken.parts, snapTargets });
+            const shot = await chatScreenshotToBlob(canvas);
+            const drafts: MomentChatLineDraft[] = pending.flatMap((line): MomentChatLineDraft[] => {
+                if (line.kind === "text") return [line];
+                const snap = snaps[line.index];
+                return snap ? [{ kind: "snap", speaker: line.speaker, blob: snap.blob, width: snap.width, height: snap.height, at: line.at }] : [];
+            });
+            const characterName = character?.name || "";
+            const moment = await addChatMoment({
+                characterId: character?.id || session.contactId,
+                characterName,
+                speaker: "char",
+                speakerName: characterName,
+                sessionId: session.id,
+                messageId: taken.bubbleIds.join(","),
+                messageAt: pending[0]?.at || new Date().toISOString(),
+            }, drafts, shot);
+            showChatToast(moment ? "已收进片刻纪事" : "这几条已经收过了");
+        } catch (error) {
+            showChatToast(`收藏失败：${error instanceof Error ? error.message : String(error)}`, 3000);
         } finally {
             setIsCapturingChat(false);
         }
@@ -6328,14 +6398,25 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                 : `实际删除 ${multiDeleteTargetIds.length} 条`}
                         </span>
                     </div>
+                    {!session.isGroup && (
+                        <button
+                            type="button"
+                            className="chat-multi-select-save-btn"
+                            disabled={selectedMessageIds.size === 0 || isCapturingChat}
+                            onClick={() => void collectSelectedToMoments()}
+                        >
+                            <Bookmark size={17} strokeWidth={1.8} />
+                            收藏
+                        </button>
+                    )}
                     <button
                         type="button"
                         className="chat-multi-select-save-btn"
                         disabled={selectedMessageIds.size === 0 || isCapturingChat}
                         onClick={() => void saveSelectedAsImage()}
                     >
-                        <ImageDown size={18} strokeWidth={1.8} />
-                        保存图片
+                        <ImageDown size={17} strokeWidth={1.8} />
+                        存图
                     </button>
                     <button
                         type="button"
@@ -6872,7 +6953,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             {chatToast && (
                 <div className="chat-toast-overlay">
                     <div className="wp-toast chat-toast-floating">
-                        {chatToast === "加载音乐中..." || chatToast === CHAT_CAPTURE_TOAST ? (
+                        {chatToast === "加载音乐中..." || chatToast === CHAT_CAPTURE_TOAST || chatToast === CHAT_COLLECT_TOAST ? (
                             <span className="ui-loading-toast-content">
                                 <span className="ui-loading-spinner" />
                                 <span>{chatToast}</span>

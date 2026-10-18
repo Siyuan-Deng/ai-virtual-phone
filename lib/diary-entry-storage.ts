@@ -26,6 +26,8 @@ export const DIARY_ENTRY_USER_FONT_ASSET_KEY = "ai_phone_diary_entry_user_font_a
 export const DIARY_ENTRY_USER_FONT_SCALE_KEY = "ai_phone_diary_entry_user_font_scale_v1";
 export const MOMENT_FONT_ASSET_KEY = "ai_phone_moment_font_asset_v1";
 export const MOMENT_FONT_SCALE_KEY = "ai_phone_moment_font_scale_v1";
+export const MOMENT_USER_FONT_ASSET_KEY = "ai_phone_moment_user_font_asset_v1";
+export const MOMENT_CHAR_FONT_ASSET_KEY = "ai_phone_moment_char_font_asset_v1";
 
 registerKvMigration(ENTRIES_KEY);
 registerKvMigration(TIMER_KEY);
@@ -36,14 +38,19 @@ registerKvMigration(DIARY_ENTRY_USER_FONT_ASSET_KEY);
 registerKvMigration(DIARY_ENTRY_USER_FONT_SCALE_KEY);
 registerKvMigration(MOMENT_FONT_ASSET_KEY);
 registerKvMigration(MOMENT_FONT_SCALE_KEY);
+registerKvMigration(MOMENT_USER_FONT_ASSET_KEY);
+registerKvMigration(MOMENT_CHAR_FONT_ASSET_KEY);
 
 function fontAssetKey(kind: DiaryFontKind): string {
   if (kind === "moment") return MOMENT_FONT_ASSET_KEY;
+  if (kind === "moment-user") return MOMENT_USER_FONT_ASSET_KEY;
+  if (kind === "moment-char") return MOMENT_CHAR_FONT_ASSET_KEY;
   return kind === "user" ? DIARY_ENTRY_USER_FONT_ASSET_KEY : DIARY_ENTRY_FONT_ASSET_KEY;
 }
 
+/** 片刻纪事的三份字体共用一个字号 */
 function fontScaleKey(kind: DiaryFontKind): string {
-  if (kind === "moment") return MOMENT_FONT_SCALE_KEY;
+  if (kind === "moment" || kind === "moment-user" || kind === "moment-char") return MOMENT_FONT_SCALE_KEY;
   return kind === "user" ? DIARY_ENTRY_USER_FONT_SCALE_KEY : DIARY_ENTRY_FONT_SCALE_KEY;
 }
 

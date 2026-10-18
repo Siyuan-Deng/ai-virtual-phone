@@ -1289,8 +1289,8 @@
   z-index: 35;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+  gap: 6px;
+  padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px));
   background: color-mix(in srgb, var(--c-card-bg) 92%, transparent);
   border-top: 0.5px solid var(--c-card-border);
   box-shadow: 0 -8px 28px rgba(0,0,0,0.08);
@@ -1317,7 +1317,8 @@
   color: var(--c-text);
 }
 .chat-multi-select-delete-btn {
-  padding: 0 16px;
+  padding: 0 10px;
+  gap: 4px;
   background: color-mix(in srgb, var(--c-danger) 14%, transparent);
   color: var(--c-danger);
   font-size: calc(14px*var(--app-text-scale,1));
@@ -1328,7 +1329,8 @@
   cursor: not-allowed;
 }
 .chat-multi-select-save-btn {
-  padding: 0 14px;
+  padding: 0 10px;
+  gap: 4px;
   background: var(--c-input);
   color: var(--c-text);
   font-size: calc(14px*var(--app-text-scale,1));
@@ -1373,6 +1375,7 @@
   gap: 2px;
 }
 .chat-multi-select-summary strong {
+  white-space: nowrap;
   font-size: calc(14px*var(--app-text-scale,1));
   color: var(--c-text-title);
   line-height: 1.2;

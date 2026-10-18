@@ -16,16 +16,38 @@ const FONT_FAMILY: Record<DiaryFontKind, string> = {
   character: "AIPhoneDiaryEntryCharacterFont",
   user: "AIPhoneDiaryEntryUserWriterFont",
   moment: "AIPhoneMomentFont",
+  "moment-user": "AIPhoneMomentUserFont",
+  "moment-char": "AIPhoneMomentCharFont",
 };
 const FONT_STYLE_ID: Record<DiaryFontKind, string> = {
   character: "ai-phone-diary-entry-character-font-face",
   user: "ai-phone-diary-entry-user-writer-font-face",
   moment: "ai-phone-moment-font-face",
+  "moment-user": "ai-phone-moment-user-font-face",
+  "moment-char": "ai-phone-moment-char-font-face",
 };
 const FONT_LABEL: Record<DiaryFontKind, string> = {
   character: "日记字体",
   user: "日记字体",
   moment: "片刻纪事字体",
+  "moment-user": "我的字体",
+  "moment-char": "角色字体",
+};
+/** 写到哪个 CSS 变量上。片刻纪事聊天里「我」/角色的两份没传时不写，CSS 里退回片刻纪事那份 */
+const FONT_VAR: Record<DiaryFontKind, string> = {
+  character: "--diary-entry-font-family",
+  user: "--diary-entry-font-family",
+  moment: "--diary-entry-font-family",
+  "moment-user": "--moment-user-font-family",
+  "moment-char": "--moment-char-font-family",
+};
+/** 字号只跟着各本的主字体走（片刻纪事三份共用一个） */
+const OWNS_SCALE: Record<DiaryFontKind, boolean> = {
+  character: true,
+  user: true,
+  moment: true,
+  "moment-user": false,
+  "moment-char": false,
 };
 /** 没上传时手记默认的手写体 */
 const DEFAULT_FAMILY = `"NoteWall Ximai"`;
@@ -101,10 +123,12 @@ export function useDiaryFont(kind: DiaryFontKind, notify: (message: string) => v
 
   const reset = useCallback(() => {
     saveDiaryEntryFontAssetId(null, kind);
-    saveDiaryEntryFontScale(1, kind);
     setAssetId(null);
     setDataUrl(null);
-    setScale(1);
+    if (OWNS_SCALE[kind]) {
+      saveDiaryEntryFontScale(1, kind);
+      setScale(1);
+    }
     notify(`已恢复默认${label}`);
   }, [kind, label, notify]);
 
@@ -114,9 +138,9 @@ export function useDiaryFont(kind: DiaryFontKind, notify: (message: string) => v
   const style = useMemo(() => {
     return {
       ...(dataUrl
-        ? { "--diary-entry-font-family": `"${FONT_FAMILY[kind]}", ${DEFAULT_FAMILY}, var(--app-font-family)` }
+        ? { [FONT_VAR[kind]]: `"${FONT_FAMILY[kind]}", ${DEFAULT_FAMILY}, var(--app-font-family)` }
         : {}),
-      "--diary-entry-font-scale": String(scale),
+      ...(OWNS_SCALE[kind] ? { "--diary-entry-font-scale": String(scale) } : {}),
     } as CSSProperties;
   }, [dataUrl, kind, scale]);
 

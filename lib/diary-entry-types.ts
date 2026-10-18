@@ -2,8 +2,9 @@ export type DiaryEntryTrigger = "manual" | "timer";
 
 export type DiaryEntryAuthorType = "character" | "user";
 
-/** 手记里各自一套字体的几本：TA的日记、我的日记、片刻纪事 */
-export type DiaryFontKind = DiaryEntryAuthorType | "moment";
+/** 手记里各自一套字体的几本：TA的日记、我的日记、片刻纪事。
+ *  片刻纪事另有两份：聊天里收的「我」说的话、角色说的话各用各的（没传就跟片刻纪事那份走） */
+export type DiaryFontKind = DiaryEntryAuthorType | "moment" | "moment-user" | "moment-char";
 
 export type DiaryEntryTodoItem = {
   text: string;

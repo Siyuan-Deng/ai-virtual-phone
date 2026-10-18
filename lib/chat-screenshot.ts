@@ -2,6 +2,8 @@
 // 用的是聊天页当下真实的 DOM：在屏幕外照原样搭一个台子（同样的 session 类名，美化 CSS 照样生效），
 // 再交给 modern-screenshot 画成图。背景按一屏的大小截一块，消息多了往下一块块接上，不会被拉大。
 
+import { scopeSessionCSS } from "./css-scoper";
+
 /** iOS Safari 画布面积上限是 16,777,216 像素，留一点余量；单边也别超过 32k */
 const MAX_CANVAS_AREA = 16_000_000;
 const MAX_CANVAS_SIDE = 32_000;
@@ -17,7 +19,62 @@ export type ChatScreenshotParts = {
     /** 选中的消息，按列表里的顺序；每个是一整组（时间条 + 气泡） */
     rows: HTMLElement[];
     inputBar: HTMLElement | null;
+    /** 另外单独截成透明底小图的元素（在 rows 里面）：片刻纪事里非文字消息原样放 */
+    snapTargets?: HTMLElement[];
 };
+
+export type ChatSnap = { blob: Blob; width: number; height: number };
+
+export type ChatScreenshotResult = {
+    canvas: HTMLCanvasElement;
+    /** 跟 snapTargets 一一对应，截不出来的是 null */
+    snaps: Array<ChatSnap | null>;
+};
+
+/** 自定义状态栏等它交 HTML 最多等这么久；别的 iframe 不认这个请求，就按超时算 */
+const FRAME_SNAPSHOT_TIMEOUT = 800;
+
+/** 自定义状态栏在沙盒 iframe 里，外面读不到、也画不进截图：请它把当下画好的 HTML 交出来 */
+function snapshotFrame(frame: HTMLIFrameElement): Promise<string | null> {
+    const target = frame.contentWindow;
+    if (!target) return Promise.resolve(null);
+    return new Promise((resolve) => {
+        const finish = (html: string | null) => {
+            window.clearTimeout(timer);
+            window.removeEventListener("message", onMessage);
+            resolve(html);
+        };
+        const onMessage = (event: MessageEvent) => {
+            if (event.source !== target) return;
+            const data = event.data as { source?: unknown; type?: unknown; html?: unknown } | null;
+            if (data?.source === "chat-status-frame" && data.type === "snapshot" && typeof data.html === "string") finish(data.html);
+        };
+        const timer = window.setTimeout(() => finish(null), FRAME_SNAPSHOT_TIMEOUT);
+        window.addEventListener("message", onMessage);
+        target.postMessage({ source: "chat-status-frame", type: "snapshot" }, "*");
+    });
+}
+
+let frameSeq = 0;
+
+/** 把交出来的 HTML 摆回 iframe 原来的位置：样式关在自己的框里，iframe 里那套默认字体、body 外边距照旧 */
+function frameReplacement(html: string, width: number, height: number): HTMLElement {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    doc.querySelectorAll("script").forEach(node => node.remove());
+    const scope = `chat-capture-frame-${++frameSeq}`;
+    const css = Array.from(doc.querySelectorAll("style")).map(node => node.textContent || "").join("\n");
+    const box = document.createElement("div");
+    box.style.cssText = `all: initial; display: block; width: ${width}px; height: ${height}px; overflow: hidden;`;
+    const style = document.createElement("style");
+    style.textContent = `.${scope}{display:block;margin:8px;}\n${scopeSessionCSS(css, `.${scope}`)}`;
+    const root = document.createElement("div");
+    root.className = [scope, doc.body.className].filter(Boolean).join(" ");
+    const inline = doc.body.getAttribute("style");
+    if (inline) root.setAttribute("style", inline);
+    root.innerHTML = doc.body.innerHTML;
+    box.append(style, root);
+    return box;
+}
 
 /** 行内 !important：美化 CSS 里写了 !important 也压得住 */
 function force(el: HTMLElement, styles: Record<string, string>): void {
@@ -40,7 +97,8 @@ function cleanClone(root: HTMLElement): HTMLElement {
         el.removeAttribute("id");
         el.removeAttribute("data-multi-select");
         el.removeAttribute("data-selected");
-        el.removeAttribute("data-active");
+        // 展开状态栏的那颗心也用 data-active 标红，它要留着
+        if (!el.classList.contains("chat-monologue-heart")) el.removeAttribute("data-active");
         el.removeAttribute("data-highlight");
     }
     // 输入框里打了一半的字不带上，留占位提示
@@ -114,9 +172,9 @@ async function shrinkImages(stage: HTMLElement, scale: number): Promise<void> {
 }
 
 /** 画出截图。台子搭在 wrapper 旁边（继承到的字体、变量都一样），用完就拆 */
-export async function renderChatScreenshot(parts: ChatScreenshotParts): Promise<HTMLCanvasElement> {
-    const { domToCanvas } = await import("modern-screenshot");
-    const { wrapper, header, headerExtras, body, rows, inputBar } = parts;
+export async function renderChatScreenshot(parts: ChatScreenshotParts): Promise<ChatScreenshotResult> {
+    const { domToBlob, domToCanvas } = await import("modern-screenshot");
+    const { wrapper, header, headerExtras, body, rows, inputBar, snapTargets = [] } = parts;
     const host = wrapper.parentElement;
     if (!host || rows.length === 0) throw new Error("没有可以截的消息");
 
@@ -171,7 +229,28 @@ export async function renderChatScreenshot(parts: ChatScreenshotParts): Promise<
         // 列表自己的背景已经在砖里了
         "background-color": "transparent", "background-image": "none",
     });
-    for (const row of rows) list.appendChild(cleanClone(row.cloneNode(true) as HTMLElement));
+    // 展开着的自定义状态栏：先把 HTML 要过来，克隆里的 iframe 换成它
+    const frameShots = await Promise.all(rows.map(row => Promise.all(
+        Array.from(row.querySelectorAll("iframe")).map(async (frame) => {
+            const rect = frame.getBoundingClientRect();
+            const html = await snapshotFrame(frame);
+            return html ? { html, width: rect.width, height: rect.height } : null;
+        }),
+    )));
+    // 要单独截的元素先做个记号，克隆里照记号找回来
+    snapTargets.forEach((target, index) => target.setAttribute("data-capture-snap", String(index)));
+    try {
+        rows.forEach((row, rowIndex) => {
+            const clone = cleanClone(row.cloneNode(true) as HTMLElement);
+            Array.from(clone.querySelectorAll("iframe")).forEach((frame, frameIndex) => {
+                const shot = frameShots[rowIndex][frameIndex];
+                if (shot) frame.replaceWith(frameReplacement(shot.html, shot.width, shot.height));
+            });
+            list.appendChild(clone);
+        });
+    } finally {
+        snapTargets.forEach(target => target.removeAttribute("data-capture-snap"));
+    }
     stage.appendChild(list);
     if (inputBar) {
         const clone = cleanClone(inputBar.cloneNode(true) as HTMLElement);
@@ -202,7 +281,7 @@ export async function renderChatScreenshot(parts: ChatScreenshotParts): Promise<
         });
 
         await shrinkImages(stage, scale);
-        return await domToCanvas(stage, {
+        const canvas = await domToCanvas(stage, {
             scale,
             width,
             height,
@@ -210,6 +289,27 @@ export async function renderChatScreenshot(parts: ChatScreenshotParts): Promise<
             timeout: 15000,
             maximumCanvasSize: MAX_CANVAS_AREA,
         });
+
+        const snapScale = Math.max(2, Math.min(window.devicePixelRatio || 2, 3));
+        const snaps: Array<ChatSnap | null> = [];
+        for (let index = 0; index < snapTargets.length; index += 1) {
+            const el = stage.querySelector<HTMLElement>(`[data-capture-snap="${index}"]`);
+            const rect = el?.getBoundingClientRect();
+            const blob = el && rect?.width && rect.height
+                ? await domToBlob(el, {
+                    scale: snapScale,
+                    width: Math.ceil(rect.width),
+                    height: Math.ceil(rect.height),
+                    backgroundColor: null,
+                    type: "image/png",
+                    timeout: 15000,
+                    // 气泡、系统提示的 max-width 是百分比，单独截时会按小图自己的宽去算，字就挤折了
+                    style: { maxWidth: "none", minWidth: "0", margin: "0" },
+                }).catch(() => null)
+                : null;
+            snaps.push(blob && rect ? { blob, width: Math.round(rect.width), height: Math.round(rect.height) } : null);
+        }
+        return { canvas, snaps };
     } finally {
         holder.remove();
     }

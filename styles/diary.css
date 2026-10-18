@@ -809,6 +809,153 @@
   pointer-events: none;
 }
 
+/* 片刻纪事 · 聊天收的纸条（外面）：他靠左、我靠右，不加框，各用各的字体；多了往下渐隐 */
+.moment-chat-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 22px;
+  min-height: 46px;
+  max-height: 10.5em;
+  overflow: hidden;
+  font-size: calc(18px*var(--app-text-scale,1)*var(--diary-entry-font-scale,1));
+  line-height: 1.5;
+  color: rgba(42, 39, 34, 0.78);
+}
+
+.moment-chat-lines.is-clipped {
+  -webkit-mask-image: linear-gradient(180deg, #000 72%, transparent);
+  mask-image: linear-gradient(180deg, #000 72%, transparent);
+}
+
+.moment-chat-line {
+  max-width: 86%;
+  overflow-wrap: anywhere;
+}
+
+.moment-chat-line[data-speaker="char"],
+.moment-chat-bubble[data-speaker="char"] {
+  align-self: flex-start;
+  font-family: var(--moment-char-font-family, var(--diary-entry-font-family));
+}
+
+.moment-chat-line[data-speaker="user"],
+.moment-chat-bubble[data-speaker="user"] {
+  align-self: flex-end;
+  font-family: var(--moment-user-font-family, var(--diary-entry-font-family));
+}
+
+.moment-chat-line[data-speaker="user"] {
+  text-align: right;
+  color: rgba(42, 39, 34, 0.62);
+}
+
+/* 非文字的那条：聊天里原样截下来的小图 */
+.moment-chat-snap {
+  display: block;
+  flex: none;
+  max-width: 80%;
+  height: auto;
+}
+
+.moment-chat-snap[data-speaker="char"] { align-self: flex-start; }
+.moment-chat-snap[data-speaker="user"] { align-self: flex-end; }
+.moment-chat-snap[data-speaker="system"] { align-self: center; }
+
+/* 点开以后：小气泡，颜色跟外面那张纸条（黄 / 绿 / 蓝） */
+.moment-chat-bubbles {
+  --moment-bubble-user: #f8edbf;
+  --moment-bubble-char: #fffef8;
+  --moment-bubble-line: #ece0b4;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: calc(17px*var(--app-text-scale,1)*var(--diary-entry-font-scale,1));
+  line-height: 1.55;
+  color: #2d2b28;
+}
+
+.moment-chat-bubbles[data-tone="green"] {
+  --moment-bubble-user: #e5f5bd;
+  --moment-bubble-char: #fbfff0;
+  --moment-bubble-line: #d9e9b2;
+}
+
+.moment-chat-bubbles[data-tone="blue"] {
+  --moment-bubble-user: #dbe9fb;
+  --moment-bubble-char: #f8fbff;
+  --moment-bubble-line: #d0e0f3;
+}
+
+.moment-chat-bubble {
+  margin: 0;
+  max-width: 82%;
+  padding: 5px 11px;
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+}
+
+.moment-chat-bubble[data-speaker="char"] {
+  background: var(--moment-bubble-char);
+  box-shadow: inset 0 0 0 1px var(--moment-bubble-line);
+  border-top-left-radius: 4px;
+}
+
+.moment-chat-bubble[data-speaker="user"] {
+  background: var(--moment-bubble-user);
+  border-top-right-radius: 4px;
+}
+
+/* 片刻纪事字体：系统 / 我 / 角色 三份 */
+.moment-font-tiers {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.moment-font-tier {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 10px 12px;
+  border-radius: 16px;
+  background: rgba(48, 45, 40, 0.06);
+}
+
+.moment-font-tier > span {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.moment-font-tier strong {
+  font-size: calc(13px*var(--app-text-scale,1));
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.moment-font-tier em {
+  font-style: normal;
+  font-size: calc(10.5px*var(--app-text-scale,1));
+  line-height: 1.35;
+  color: rgba(47, 42, 35, 0.56);
+}
+
+.moment-font-tier button {
+  flex: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: rgba(48, 45, 40, 0.1);
+  color: #302d28;
+  font-family: var(--app-font-family);
+  font-size: calc(12px*var(--app-text-scale,1));
+  font-weight: 550;
+  cursor: pointer;
+}
+
 .diary-entry-card-meta {
   display: flex;
   align-items: center;
