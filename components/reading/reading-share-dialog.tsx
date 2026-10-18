@@ -172,7 +172,21 @@ export function ReadingShareDialog({
         align: ReadingShareAlign;
         avatarShape?: ReadingShareAvatarShape;
         ratio?: ReadingShareRatio;
+        // 片刻纪事才有的几项：存档时这一页有才存，读档时档里有才改（阅读那边和老档都没有，照旧）
+        signer?: "char" | "user" | "both";
+        signerOrder?: "user" | "char";
+        userAlign?: ReadingShareAlign;
+        tintUser?: boolean;
+        segmentJoin?: ReadingShareJoin;
+        charFont?: "system" | "char";
     };
+    const currentStyle = (): ShareStyle => ({
+        template, palette, align, avatarShape, ratio,
+        ...(signatureChoices ? { signer, signerOrder } : {}),
+        ...(mixed ? { userAlign, tintUser } : {}),
+        ...(merged ? { segmentJoin } : {}),
+        ...(canPickCharFont ? { charFont } : {}),
+    });
     const applyStyle = (style: ShareStyle) => {
         if (!style?.template || !READING_SHARE_TEMPLATE_PRESETS[style.template]) return;
         setTemplate(style.template);
@@ -181,6 +195,12 @@ export function ReadingShareDialog({
         setAvatarShape(style.avatarShape === "square" ? "square" : "circle");
         // 老档里没有比例这项，当成自适应
         setRatio(READING_SHARE_RATIOS.some(item => item.id === style.ratio) ? style.ratio as ReadingShareRatio : "auto");
+        if (style.signer === "char" || style.signer === "user" || style.signer === "both") setSigner(style.signer);
+        if (style.signerOrder === "user" || style.signerOrder === "char") setSignerOrder(style.signerOrder);
+        if (ALIGNS.some(([, value]) => value === style.userAlign)) setUserAlign(style.userAlign as ReadingShareAlign);
+        if (typeof style.tintUser === "boolean") setTintUser(style.tintUser);
+        if (SEGMENT_JOINS.some(([, value]) => value === style.segmentJoin)) setSegmentJoin(style.segmentJoin as ReadingShareJoin);
+        if (style.charFont === "system" || style.charFont === "char") setCharFont(style.charFont);
     };
     const hasMine = annotations.some((annotation) => annotation.authorType === "user");
     const hasTheirs = annotations.some((annotation) => annotation.authorType === "character");
@@ -461,7 +481,7 @@ export function ReadingShareDialog({
                     )}
                     <ReadingPresetBar<ShareStyle>
                         kind="share"
-                        current={() => ({ template, palette, align, avatarShape, ratio })}
+                        current={currentStyle}
                         onLoad={applyStyle}
                         defaultName={READING_SHARE_TEMPLATES.find(t => t.id === template)?.label || "我的样式"}
                     />
