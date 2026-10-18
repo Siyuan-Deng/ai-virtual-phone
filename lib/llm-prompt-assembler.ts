@@ -1,7 +1,7 @@
 // lib/llm-prompt-assembler.ts
 
 import { Character } from "./character-types";
-import { ChatMessage, isSystemInstructionMessage } from "./chat-storage";
+import { ChatMessage, isCalendarChangeNotice, isSystemInstructionMessage } from "./chat-storage";
 import type { StateValue } from "./chat-storage";
 import { PresetConfig, Prompt, PromptOrderEntry, WorldBookConfig, RegexConfig, WorldBookEntry } from "./settings-types";
 import type { UserIdentity } from "@/components/settings/user-identity";
@@ -590,6 +590,7 @@ function pushChronologicalShortTermBlocks(params: {
         }
         if (msg.mediaType === "music_notify"
             || msg.mediaType === "tool_notice"
+            || isCalendarChangeNotice(msg)
             || isNativeToolResultMessage(msg)
             || msg.mediaType === "memory_write_request") return;
 
@@ -1053,6 +1054,7 @@ export function assemblePromptPayload(input: AssemblerInput): LLMMessage[] {
             // UI-only notification — skip from prompt
             if (msg.mediaType === "music_notify"
                 || msg.mediaType === "tool_notice"
+                || isCalendarChangeNotice(msg)
                 || isNativeToolResultMessage(msg)
                 || msg.mediaType === "memory_write_request") return;
 
@@ -1780,6 +1782,7 @@ function pushGroupChronologicalShortTermBlocks(params: {
             return;
         }
         if (msg.mediaType === "tool_notice"
+            || isCalendarChangeNotice(msg)
             || isNativeToolResultMessage(msg)) return;
 
         const promptRole = resolveHistoryPromptRole(msg);
@@ -2264,6 +2267,7 @@ export function assembleGroupPromptPayload(input: GroupAssemblerInput): LLMMessa
                 return;
             }
             if (msg.mediaType === "tool_notice"
+                || isCalendarChangeNotice(msg)
                 || isNativeToolResultMessage(msg)) return;
             const promptRole = resolveHistoryPromptRole(msg);
             const ts = (timeAware && msg.createdAt) ? formatChatTimestamp(msg.createdAt, groupPromptTimestampOptions) : "";

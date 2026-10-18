@@ -5992,7 +5992,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     const hiddenEmpty = isHiddenChatFlowMessage(renderMsg, bubbleDisplayContent);
                     const hasFoldedPanel = !!(renderMsg.statusPanel || renderMsg.innerMonologue);
                     // 内心卡片只展示本轮实际输出的状态值；旧数据没有 freshStateValues 时回退到合并快照
-                    const cardStateValues = msg.freshStateValues ?? msg.stateValues;
+                    // 原生状态栏没在用（自定义生效 / 关闭）时，提示词里根本不要状态值；模型照习惯写出来的
+                    // [好感度:X][焦虑值:X] 已经从正文里摘掉了，这里也不再显示。
+                    // 自定义没配完整会退回原生，那时照常显示
+                    const cardStateValues = statusRegionCfg.mode !== "off" && !customStatusActive
+                        ? (msg.freshStateValues ?? msg.stateValues)
+                        : undefined;
                     const isSilentThought = !visibleContent && !renderMsg.mediaType && hasFoldedPanel && msg.role !== "user";
                     const isStandaloneHtmlPreview = !renderMsg.mediaType && isStandaloneHtmlPreviewContent(bubbleDisplayContent);
                     const isMediaBubble = (renderMsg.mediaType && CHAT_MEDIA_BUBBLE_TYPES.has(renderMsg.mediaType)) || isStandaloneHtmlPreview;

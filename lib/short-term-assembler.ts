@@ -3,7 +3,7 @@
 // a unified timeline. Replaces the old ShortTermEvent IndexedDB approach.
 // Used by: memory-bank-page (UI display), memory-summarizer (summarization input).
 
-import { isReadingDiscussMessage, isSystemInstructionMessage, loadChatSessions, loadChatMessages, type ChatMessage } from "./chat-storage";
+import { isCalendarChangeNotice, isReadingDiscussMessage, isSystemInstructionMessage, loadChatSessions, loadChatMessages, type ChatMessage } from "./chat-storage";
 import { buildGroupAdminBracketText } from "./group-admin";
 import { loadMomentPosts, loadMomentComments } from "./moments-storage";
 import { loadCharacters } from "./character-storage";
@@ -115,6 +115,7 @@ function isPromptHiddenChatMessage(
     return (msg.nativeToolCalls?.length && !options?.includeNativeToolHistory)
         || (msg.mediaType === "tool_result" && !!msg.nativeToolResult && !options?.includeNativeToolHistory)
         || msg.mediaType === "tool_notice"
+        || isCalendarChangeNotice(msg)
         || msg.mediaType === "memory_write_request";
 }
 
@@ -287,6 +288,8 @@ export function loadNativeTimeline(
 
             const msgLabel = formatPromptEventLabel("私聊", msg.createdAt, timeAware, timestampOptions);
 
+            // 日历修改通知：灰色提示，不是谁说的话
+            if (isCalendarChangeNotice(msg)) continue;
             if (msg.role === "system") {
                 // UI-only notification — skip from prompt
                 if (msg.mediaType === "music_notify") continue;
@@ -956,6 +959,7 @@ function loadDirectChatHistoryForPrompt(characterId: string): ChatMessage[] {
     return loadChatMessages(session.id).filter(msg => {
         if (msg.isRetracted) return false;
         if (isPromptHiddenChatMessage(msg)) return false;
+        if (isCalendarChangeNotice(msg)) return false;
         if (msg.role === "system") {
             if (msg.mediaType === "music_notify") return false;
             if (msg.mediaType === "tool_notice") return false;
@@ -1286,7 +1290,7 @@ export function prepareGroupShortTermContext(
     const timeline = [...timelineByKey.values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
     const activationPool = [
         ...timeline.map(entry => ({ timestamp: entry.timestamp, content: entry.content })),
-        ...history.filter(msg => msg.mediaType !== "tool_notice").map(msg => ({ timestamp: msg.createdAt, content: msg.content })),
+        ...history.filter(msg => msg.mediaType !== "tool_notice" && !isCalendarChangeNotice(msg)).map(msg => ({ timestamp: msg.createdAt, content: msg.content })),
     ].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
     const wbActivationContext = activationPool.slice(-10).map(item => item.content).join("\n");
 

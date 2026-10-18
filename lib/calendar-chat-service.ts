@@ -1111,14 +1111,38 @@ function nudgeCalendarChangeNotice(message: ChatMessage | undefined): void {
     else pending.arm(1100);
 }
 
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** 模型照着以前的通知自己写的「X修改了你的日历：…（未执行：…）」：真通知只由执行过的动作块产生，
+ *  这种一律摘掉，不然改没改成都会冒一条像通知的普通气泡。只认这个角色名打头的整行，别的话不碰 */
+function stripImitatedCalendarNotices(text: string, payload: LlmResponsePayload): string {
+    if (!text || !text.includes("修改了你的日历") || payload?.purpose !== "chat" || !payload.sessionId) return text;
+    const session = loadChatSessions().find((item) => item.id === payload.sessionId);
+    const name = session && !session.isGroup
+        ? loadCharacters().find((item) => String(item.id) === String(session.contactId))?.name?.trim()
+        : "";
+    if (!name) return text;
+    const notice = `${escapeRegExp(name)}修改了你的日历[：:]`;
+    const stripped = text
+        .replace(new RegExp(`<message(?:\\s[^>]*)?>\\s*${notice}[\\s\\S]*?<\\/message>`, "gi"), "")
+        .replace(new RegExp(`^[^\\S\\n]*${notice}[^\\n]*(?:\\n[^\\S\\n]*未执行[：:][^\\n]*)?\\n?`, "gm"), "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    // 整条回复只有这一句的话留着原样，免得变成一条空回复
+    return stripped || text;
+}
+
 function applyCharacterCalendarActions(payload: LlmResponsePayload): LlmResponsePayload {
     const parsed = extractCalendarActionBlocks(payload?.text);
+    const cleaned = stripImitatedCalendarNotices(parsed.cleaned, payload);
     if (parsed.actions.length === 0) {
         takeCalendarWriteRequest(payload);
-        return parsed.cleaned !== String(payload?.text || "").trim() ? { ...payload, text: parsed.cleaned } : payload;
+        return cleaned !== String(payload?.text || "").trim() ? { ...payload, text: cleaned } : payload;
     }
     const request = takeCalendarWriteRequest(payload);
-    const next = { ...payload, text: parsed.cleaned || "已经帮你处理好了。" };
+    const next = { ...payload, text: cleaned || "已经帮你处理好了。" };
     if (!request || !canCharacterModifyCalendar(request.characterId)) {
         console.info("[Calendar] 忽略了没有角色修改权限的日历动作");
         return next;

@@ -1154,6 +1154,13 @@ export function createToolExecutionId(): string {
     return `toolrun_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/** 角色改了用户日历后插的那条灰色通知。它和回复同一批、多半存成 assistant，但不是角色说的话：
+ *  原样进提示词，模型就会把「X修改了你的日历：…」学成自己的台词，写成普通气泡（有时还不带动作块，改不成） */
+export function isCalendarChangeNotice(msg: object): boolean {
+    const value = msg as { calendarChangeNotice?: unknown; origin?: unknown };
+    return value.calendarChangeNotice === true || value.origin === "calendar_character_action";
+}
+
 export function pushChatMessage(msg: Omit<ChatMessage, "id" | "createdAt" | "status"> & {
     status?: ChatMessageStatus;
     createdAt?: string;
