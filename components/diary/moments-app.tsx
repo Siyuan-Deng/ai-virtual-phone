@@ -71,6 +71,11 @@ function momentDate(moment: Moment): string {
   return formatDate(moment.messageAt) || formatDate(moment.createdAt);
 }
 
+/** 剧情里那个「我」：和剧情 App 一样先找剧情身份，再找这个角色的、全局的 */
+function storyIdentity(characterId: string) {
+  return resolveUserIdentity(characterId, "story") ?? resolveUserIdentity(characterId) ?? resolveUserIdentity();
+}
+
 function momentTime(moment: Moment): number {
   const time = new Date(moment.messageAt || moment.createdAt).getTime();
   return Number.isNaN(time) ? 0 : time;
@@ -307,12 +312,17 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
   }, [characters, profileAvatars, profiles]);
   /** 外面设的「我」，没设就用聊天身份；本子里没单独设时用它 */
   const userBase = useCallback((characterId: string) => {
-    const identity = resolveUserIdentity(characterId, "story");
+    const identity = storyIdentity(characterId);
     return {
       name: profiles.user.name || identity?.name || "我",
       avatar: profileAvatars.user || identity?.avatarUrl || undefined,
     };
   }, [profileAvatars, profiles]);
+  /** 分享图出处那行「《正篇》· 我 · 角色」：写两人本来的名字（身份里的名字、角色名），不用署名 ID */
+  const realNames = useCallback((characterId: string, fallbackName: string) => {
+    const character = characters.find(item => item.id === characterId);
+    return `${storyIdentity(characterId)?.name?.trim() || "我"} · ${character?.name || fallbackName}`;
+  }, [characters]);
   const userSignature = useCallback((characterId: string) => {
     const base = userBase(characterId);
     return {
@@ -481,9 +491,9 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
           filePrefix="片刻纪事"
           quoteParagraphs={sharingMoment.paragraphs}
           quoteSegments={[{ paragraphs: sharingMoment.paragraphs, speaker: sharingMoment.speaker }]}
-          // 出处一行写成「《正篇》· 我 · 角色」，名字都用署名
+          // 出处一行写成「《正篇》· 我 · 角色」，用两人本来的名字
           bookTitle={sourceLabel(sharingMoment)}
-          bookAuthor={`${userSignature(sharingMoment.characterId).name} · ${charSignature(sharingMoment.characterId, sharingMoment.characterName).name}`}
+          bookAuthor={realNames(sharingMoment.characterId, sharingMoment.characterName)}
           chapterTitle=""
           progressPercent={0}
           progressLabel={momentDate(sharingMoment)}
@@ -517,7 +527,7 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
             quoteParagraphs={mergeSharing.flatMap(moment => moment.paragraphs)}
             quoteSegments={segments}
             bookTitle={sources.join("·")}
-            bookAuthor={`${user.name} · ${char.name}`}
+            bookAuthor={realNames(first.characterId, first.characterName)}
             chapterTitle=""
             progressPercent={0}
             progressLabel={momentDateRange(mergeSharing)}
