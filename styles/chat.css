@@ -1288,6 +1288,7 @@
   backdrop-filter: blur(18px);
 }
 .chat-multi-select-icon-btn,
+.chat-multi-select-save-btn,
 .chat-multi-select-delete-btn {
   border: 0;
   min-width: 44px;
@@ -1315,6 +1316,44 @@
 .chat-multi-select-delete-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+.chat-multi-select-save-btn {
+  padding: 0 14px;
+  background: var(--c-input);
+  color: var(--c-text);
+  font-size: calc(14px*var(--app-text-scale,1));
+  font-weight: 600;
+}
+.chat-multi-select-save-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* 聊天截图的台子（屏幕外搭的，截完就拆）：背景已经截成一块块接上，
+   外层和列表原来的伪元素背景不再画一遍；动画一律停在最后的样子 */
+.chat-capture-stage::before,
+.chat-capture-stage::after,
+.chat-capture-stage > .page-body::before,
+.chat-capture-stage > .page-body::after {
+  content: none !important;
+}
+.chat-capture-stage *,
+.chat-capture-stage *::before,
+.chat-capture-stage *::after,
+.chat-capture-probe * {
+  animation: none !important;
+  transition: none !important;
+}
+/* 截好的长图先在弹窗里看一眼，再点保存（iPhone 上系统分享要一次新的点按才能打开） */
+.chat-capture-preview {
+  max-height: 58vh;
+  overflow-y: auto;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.05);
+}
+.chat-capture-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 .chat-multi-select-summary {
   min-width: 0;

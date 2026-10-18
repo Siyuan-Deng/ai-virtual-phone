@@ -41,7 +41,8 @@ import { VideoCallScreen } from "./video-call-screen";
 import { GroupCallScreen } from "./group-call-screen";
 import { TransferTargetModal } from "./transfer-target-modal";
 import { GiftPickerModal } from "./gift-picker-modal";
-import { ConfirmDialog } from "@/components/ui/modal";
+import { ConfirmDialog, ContentDialog } from "@/components/ui/modal";
+import { downloadFile } from "@/lib/download-utils";
 import { deleteWeixinCloudMessagesFromCloud, emitWeixinSyncToast, syncAllWeixinBotRuntimesToCloud } from "@/lib/weixin-cloud-sync";
 import { loadBindingConfig, loadPresets, loadRegexes, resolveBinding, resolveUserIdentity } from "@/lib/settings-storage";
 import { generateGroupChatCompletion, generateGroupOfflineChatCompletion, parseGroupChatResponse, buildEditableGroupRoundText } from "@/lib/group-chat-engine";
@@ -52,7 +53,7 @@ import { useKeyboardDismissAutoSend } from "@/components/chat/use-keyboard-dismi
 import { cancelBailoutKey } from "@/lib/push-bailout-client";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import type { UserIdentity } from "@/components/settings/user-identity";
-import { AlertCircle, Blocks, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
+import { AlertCircle, Blocks, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, ImageDown, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
 import { setDebugChatState } from "@/lib/debug-store";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { setChatActive } from "@/lib/music-action-queue";
@@ -288,6 +289,7 @@ function isHiddenChatFlowMessage(msg: ChatMessage, displayContent?: string): boo
 // ── Background generation tracking ──────────────────────────
 const GENERATING_PREFIX = "chat-generating:";
 const CHAT_BG_COMPLETE = "chat-bg-complete";
+const CHAT_CAPTURE_TOAST = "正在生成图片...";
 const CHAT_OFFLINE_MODE_PREFIX = "chat-offline-mode:";
 const CHAT_THEATER_MODE_PREFIX = "chat-theater-mode:";
 const GENERATING_LOCK_TTL_MS = 5 * 60 * 1000;
@@ -1117,6 +1119,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [pendingGenerate, setPendingGenerate] = useState(false);
     const [chatToast, setChatToast] = useState<string | null>(null);
     const chatToastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+    // 多选 → 保存图片：先截好放进弹窗看一眼，点「保存图片」才存（iPhone 的系统分享要一次新的点按才打得开）
+    const [chatCapture, setChatCapture] = useState<{ blob: Blob; url: string } | null>(null);
+    const [isCapturingChat, setIsCapturingChat] = useState(false);
+    useEffect(() => () => { if (chatCapture) URL.revokeObjectURL(chatCapture.url); }, [chatCapture]);
     // 自动生图失败：弹一次弹窗提示，关掉即消失（同一轮里多张失败只提示第一条）
     const [imageGenerationFailure, setImageGenerationFailure] = useState<string | null>(null);
     const [cloudDeletePending, setCloudDeletePending] = useState<{ count: number } | null>(null);
@@ -5325,6 +5331,65 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         setShowConfirmMultiDelete(false);
     }, []);
 
+    const saveSelectedAsImage = async () => {
+        const wrapper = wrapperRef.current;
+        const body = scrollRef.current;
+        if (!wrapper || !body || isCapturingChat) return;
+        // 记下选中的气泡在列表里的顺序；退出多选（勾没了、输入栏回来了）以后再照这个顺序从列表里取
+        const bubbleIds = Array.from(body.querySelectorAll<HTMLElement>(".chat-msg-wrapper[data-selected]"))
+            .map(el => el.id)
+            .filter(Boolean);
+        if (bubbleIds.length === 0) {
+            showChatToast("请选择要保存的消息");
+            return;
+        }
+        cancelMultiSelect();
+        setIsCapturingChat(true);
+        showPersistentChatToast(CHAT_CAPTURE_TOAST);
+        try {
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            const rows: HTMLElement[] = [];
+            for (const id of bubbleIds) {
+                const bubble = body.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
+                if (!bubble) continue;
+                // 一整组带上（时间条、思考条 + 气泡）
+                const row = bubble.parentElement && bubble.parentElement !== body ? bubble.parentElement : bubble;
+                if (!rows.includes(row)) rows.push(row);
+            }
+            const ownChildren = (selector: string) => Array.from(wrapper.children)
+                .filter((el): el is HTMLElement => el instanceof HTMLElement && el.matches(selector));
+            const { renderChatScreenshot, chatScreenshotToBlob } = await import("@/lib/chat-screenshot");
+            const canvas = await renderChatScreenshot({
+                wrapper,
+                body,
+                rows,
+                header: ownChildren('[data-ui="header"]')[0] ?? null,
+                headerExtras: ownChildren(".chat-plugin-header").filter(el => el.offsetHeight > 0),
+                inputBar: ownChildren('[data-ui="input"]')[0] ?? null,
+            });
+            const blob = await chatScreenshotToBlob(canvas);
+            clearTimeout(chatToastTimer.current);
+            setChatToast(null);
+            setChatCapture({ blob, url: URL.createObjectURL(blob) });
+        } catch (error) {
+            showChatToast(`生成图片失败：${error instanceof Error ? error.message : String(error)}`, 3000);
+        } finally {
+            setIsCapturingChat(false);
+        }
+    };
+
+    const saveChatCapture = async () => {
+        if (!chatCapture) return;
+        const name = session.isGroup ? (session.groupName || "群聊") : (session.alias || character?.name || "聊天");
+        const stamp = new Date().toISOString().slice(0, 10);
+        try {
+            await downloadFile(chatCapture.blob, `聊天截图-${name}-${stamp}.jpg`);
+            setChatCapture(null);
+        } catch (error) {
+            showChatToast(error instanceof Error ? error.message : "保存失败", 3000);
+        }
+    };
+
     const toggleMultiSelectedMessage = useCallback((messageId: string) => {
         setSelectedMessageIds(prev => {
             const next = new Set(prev);
@@ -6265,6 +6330,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     </div>
                     <button
                         type="button"
+                        className="chat-multi-select-save-btn"
+                        disabled={selectedMessageIds.size === 0 || isCapturingChat}
+                        onClick={() => void saveSelectedAsImage()}
+                    >
+                        <ImageDown size={18} strokeWidth={1.8} />
+                        保存图片
+                    </button>
+                    <button
+                        type="button"
                         className="chat-multi-select-delete-btn"
                         disabled={selectedMessageIds.size === 0 || multiDeleteTargetIds.length === 0}
                         onClick={confirmMultiDelete}
@@ -6339,6 +6413,21 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     onConfirm={handleMultiDeleteConfirmed}
                     onCancel={() => setShowConfirmMultiDelete(false)}
                 />
+            )}
+
+            {chatCapture && (
+                <ContentDialog
+                    title="聊天截图"
+                    confirmLabel="保存图片"
+                    cancelLabel="关闭"
+                    onConfirm={() => void saveChatCapture()}
+                    onCancel={() => setChatCapture(null)}
+                >
+                    <div className="chat-capture-preview">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={chatCapture.url} alt="聊天截图" />
+                    </div>
+                </ContentDialog>
             )}
 
             {/* Settings Panel — portaled outside session-scoped CSS, preserves chat room mount */}
@@ -6783,7 +6872,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             {chatToast && (
                 <div className="chat-toast-overlay">
                     <div className="wp-toast chat-toast-floating">
-                        {chatToast === "加载音乐中..." ? (
+                        {chatToast === "加载音乐中..." || chatToast === CHAT_CAPTURE_TOAST ? (
                             <span className="ui-loading-toast-content">
                                 <span className="ui-loading-spinner" />
                                 <span>{chatToast}</span>
