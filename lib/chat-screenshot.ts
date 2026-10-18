@@ -125,34 +125,71 @@ function nextFrame(): Promise<void> {
 function loadImage(src: string): Promise<HTMLImageElement | null> {
     return new Promise((resolve) => {
         const image = new Image();
-        if (/^https?:/i.test(src) && !src.startsWith(location.origin)) image.crossOrigin = "anonymous";
         image.onload = () => resolve(image);
         image.onerror = () => resolve(null);
         image.src = src;
     });
 }
 
-/** 头像、图片先缩到显示尺寸再嵌进去：同一张头像每条消息都会嵌一份，原图大的话整张图会大到手机画不出来 */
-async function shrinkImages(stage: HTMLElement, scale: number): Promise<void> {
-    const cache = new Map<string, Promise<string | null>>();
-    const shrink = async (src: string, width: number, height: number): Promise<string | null> => {
-        const image = await loadImage(src);
-        if (!image || !image.naturalWidth || !image.naturalHeight) return null;
+function blobToDataUrl(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+    });
+}
+
+/** 别的网站上的图（表情包图床、外链头像）：页面上看得见，可截图要读出图片数据，对方不让跨站读就是一片空白。
+ *  先直接读，读不到让自家服务器代取一次；本地的（data / blob / 同源）原样返回 */
+async function readableImageUrl(src: string): Promise<string | null> {
+    if (!/^https?:/i.test(src) || src.startsWith(location.origin)) return src;
+    try {
+        const res = await fetch(src, { mode: "cors", cache: "force-cache" });
+        if (res.ok) return await blobToDataUrl(await res.blob());
+    } catch {
+        // 不让跨站读，走代理
+    }
+    try {
+        const res = await fetch("/api/tool-proxy", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: src, method: "GET", timeoutMs: 15000 }),
+        });
+        const payload = res.ok ? await res.json() as { _binary?: boolean; contentType?: string; data?: string } : null;
+        if (payload?._binary && payload.data) return `data:${payload.contentType || "image/png"};base64,${payload.data}`;
+    } catch {
+        // 代理也拿不到，只好空着
+    }
+    return null;
+}
+
+/** 截之前把图都换成读得出数据的本地版本，顺便缩到显示尺寸：
+ *  同一张头像每条消息都会嵌一份，原图大的话整张图会大到手机画不出来 */
+async function prepareImages(stage: HTMLElement, scale: number): Promise<void> {
+    const readable = new Map<string, Promise<string | null>>();
+    const sized = new Map<string, Promise<string | null>>();
+    const prepare = async (src: string, width: number, height: number): Promise<string | null> => {
+        if (!readable.has(src)) readable.set(src, readableImageUrl(src));
+        const local = await readable.get(src);
+        if (!local) return null;
+        const image = await loadImage(local);
+        if (!image || !image.naturalWidth || !image.naturalHeight) return local;
         // 等比缩到刚好盖住显示框（裁切交给原来的 object-fit）
         const ratio = Math.min(1, Math.max(width / image.naturalWidth, height / image.naturalHeight));
-        if (ratio > 0.8 && src.length < 300_000) return null;
+        if (ratio > 0.8 && local.length < 300_000) return local;
         const canvas = document.createElement("canvas");
         canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio));
         canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio));
         const ctx = canvas.getContext("2d");
-        if (!ctx) return null;
+        if (!ctx) return local;
         ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
         try {
-            return /^data:image\/jpe?g|\.jpe?g(\?|$)/i.test(src)
+            return /^data:image\/jpe?g|\.jpe?g(\?|$)/i.test(local) || /\.jpe?g(\?|$)/i.test(src)
                 ? canvas.toDataURL("image/jpeg", 0.9)
                 : canvas.toDataURL("image/png");
         } catch {
-            return null; // 跨域图画不出来，原样留着
+            return local;
         }
     };
     await Promise.all(Array.from(stage.querySelectorAll("img")).map(async (img) => {
@@ -162,11 +199,14 @@ async function shrinkImages(stage: HTMLElement, scale: number): Promise<void> {
         const width = Math.ceil(rect.width * scale);
         const height = Math.ceil(rect.height * scale);
         const key = `${src}|${width}x${height}`;
-        if (!cache.has(key)) cache.set(key, shrink(src, width, height));
-        const smaller = await cache.get(key);
-        if (smaller) {
+        if (!sized.has(key)) sized.set(key, prepare(src, width, height));
+        const next = await sized.get(key);
+        if (next && next !== src) {
+            // 钉住原来的显示尺寸：换成缩过的图以后，w-auto 的图不会跟着新尺寸变大变小
+            img.style.setProperty("width", `${rect.width}px`);
+            img.style.setProperty("height", `${rect.height}px`);
             img.removeAttribute("srcset");
-            img.src = smaller;
+            img.src = next;
         }
     }));
 }
@@ -270,7 +310,12 @@ export async function renderChatScreenshot(parts: ChatScreenshotParts): Promise<
             MAX_CANVAS_SIDE / height,
         ));
 
-        const tile = await domToCanvas(probe, { scale, backgroundColor: baseColor, timeout: 15000 });
+        // 截图库自己去取的图（背景图这类 CSS 里的）也走同一条路：读不到就代取
+        const fetchFn = async (url: string) => {
+            const local = await readableImageUrl(url);
+            return local && local !== url ? local : false;
+        };
+        const tile = await domToCanvas(probe, { scale, backgroundColor: baseColor, timeout: 15000, fetchFn });
         probe.remove();
         force(stage, {
             "background-image": `url(${tile.toDataURL("image/jpeg", 0.92)})`,
@@ -280,7 +325,7 @@ export async function renderChatScreenshot(parts: ChatScreenshotParts): Promise<
             "background-attachment": "scroll",
         });
 
-        await shrinkImages(stage, scale);
+        await prepareImages(stage, scale);
         const canvas = await domToCanvas(stage, {
             scale,
             width,
@@ -288,6 +333,7 @@ export async function renderChatScreenshot(parts: ChatScreenshotParts): Promise<
             backgroundColor: baseColor,
             timeout: 15000,
             maximumCanvasSize: MAX_CANVAS_AREA,
+            fetchFn,
         });
 
         const snapScale = Math.max(2, Math.min(window.devicePixelRatio || 2, 3));
@@ -303,6 +349,7 @@ export async function renderChatScreenshot(parts: ChatScreenshotParts): Promise<
                     backgroundColor: null,
                     type: "image/png",
                     timeout: 15000,
+                    fetchFn,
                     // 气泡、系统提示的 max-width 是百分比，单独截时会按小图自己的宽去算，字就挤折了
                     style: { maxWidth: "none", minWidth: "0", margin: "0" },
                 }).catch(() => null)

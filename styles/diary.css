@@ -850,6 +850,12 @@
   color: rgba(42, 39, 34, 0.62);
 }
 
+/* 剧情里收的、我说的话：也用「我的字体」（角色的话在剧情里照旧是系统字体） */
+.moment-card .diary-entry-card-text[data-speaker="user"],
+.diary-entry-blocks[data-speaker="user"] .diary-entry-paragraph {
+  font-family: var(--moment-user-font-family, var(--diary-entry-font-family));
+}
+
 /* 非文字的那条：聊天里原样截下来的小图 */
 .moment-chat-snap {
   display: block;

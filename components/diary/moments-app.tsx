@@ -150,6 +150,11 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
   const userFont = useDiaryFont("moment-user", notify);
   const charFont = useDiaryFont("moment-char", notify);
   const fontsByKind = { moment: font, "moment-user": userFont, "moment-char": charFont } as const;
+  /** 画分享图用的真实字体名：我 / 角色那份没传就是系统字体 */
+  const speakerFonts = {
+    user: userFont.hasCustomFont ? userFont.family : font.family,
+    char: charFont.hasCustomFont ? charFont.family : font.family,
+  };
   const trash = useDragToTrash<Moment>({
     enabled: Boolean(activeCharacterId) && !picking,
     scrollRef: mainRef,
@@ -427,9 +432,9 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
       {fontPanelOpen ? (
         <MomentFontPanel
           tiers={[
-            { kind: "moment", title: "系统字体", hint: "片刻纪事里的所有字", custom: font.hasCustomFont },
-            { kind: "moment-user", title: "我的字体", hint: "聊天里收的、我说的话", custom: userFont.hasCustomFont },
-            { kind: "moment-char", title: "角色字体", hint: "聊天里收的、角色说的话", custom: charFont.hasCustomFont },
+            { kind: "moment", title: "系统字体", hint: "其它所有的字", custom: font.hasCustomFont },
+            { kind: "moment-user", title: "我的字体", hint: "剧情、聊天里我说的话", custom: userFont.hasCustomFont },
+            { kind: "moment-char", title: "角色字体", hint: "聊天里角色说的话；分享图里可选", custom: charFont.hasCustomFont },
           ]}
           scale={font.scale}
           onUpload={(kind) => {
@@ -475,6 +480,7 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
           title="分享片段"
           filePrefix="片刻纪事"
           quoteParagraphs={sharingMoment.paragraphs}
+          quoteSegments={[{ paragraphs: sharingMoment.paragraphs, speaker: sharingMoment.speaker }]}
           // 出处一行写成「《正篇》· 我 · 角色」，名字都用署名
           bookTitle={sourceLabel(sharingMoment)}
           bookAuthor={`${userSignature(sharingMoment.characterId).name} · ${charSignature(sharingMoment.characterId, sharingMoment.characterName).name}`}
@@ -488,6 +494,7 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
             initial: sharingMoment.speaker === "user" ? "user" : "char",
           }}
           fonts={{ body: font.family, userAnnotation: font.family, charAnnotation: font.family }}
+          speakerFonts={speakerFonts}
           onClose={() => setSharingMoment(null)}
         />
       ) : null}
@@ -522,6 +529,7 @@ export function MomentsApp({ onBack, onNotice }: MomentsAppProps) {
               initial: speakers.size > 1 ? "both" : first.speaker === "user" ? "user" : "char",
             }}
             fonts={{ body: font.family, userAnnotation: font.family, charAnnotation: font.family }}
+            speakerFonts={speakerFonts}
             onClose={() => setMergeSharing(null)}
           />
         );
@@ -654,7 +662,7 @@ function MomentCardContent({ moment, assetUrls }: { moment: Moment; assetUrls: R
       <span className="diary-entry-card-markers">
         <span className="diary-entry-marker">{sourceLabel(moment)}</span>
       </span>
-      <span className="diary-entry-card-text">{clipText(moment.paragraphs.join(" "), 130)}</span>
+      <span className="diary-entry-card-text" data-speaker={moment.speaker}>{clipText(moment.paragraphs.join(" "), 130)}</span>
       <span className="diary-entry-card-meta">
         <span>{moment.speakerName}</span>
         <time>{momentDate(moment)}</time>
@@ -695,7 +703,7 @@ function MomentDetail({ moment, tone, assetUrls, onClose, onShare }: {
                 : <MomentChatSnap key={index} line={line} url={assetUrls[line.asset]} />)}
             </div>
           ) : (
-            <div className="diary-entry-blocks">
+            <div className="diary-entry-blocks" data-speaker={moment.speaker}>
               {moment.paragraphs.map((paragraph, index) => (
                 <p key={index} className="diary-entry-paragraph">{paragraph}</p>
               ))}

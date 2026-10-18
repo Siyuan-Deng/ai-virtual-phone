@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ContentDialog } from "@/components/ui/modal";
 import { Toggle } from "@/components/ui/form";
 import { downloadFile } from "@/lib/download-utils";
@@ -52,6 +52,8 @@ type Props = {
     };
     /** 字体直接给；不给就去阅读界面里量 */
     fonts?: ReadingShareFonts;
+    /** 片刻纪事：自己的话用 user 字体；他的话可以选系统字体（fonts.body）还是 char 字体 */
+    speakerFonts?: { user: string; char: string };
     title?: string;
     /** 存图的文件名开头 */
     filePrefix?: string;
@@ -113,10 +115,28 @@ function resolveRenderedFonts(): ReadingShareFonts {
 
 const SEGMENT_JOINS: Array<[string, ReadingShareJoin]> = [["「……」", "ellipsis"], ["出处", "caption"], ["直接接上", "none"]];
 const ALIGNS: Array<[string, ReadingShareAlign]> = [["左对齐", "left"], ["居中", "center"], ["右对齐", "right"]];
+const TINTS: Array<[string, boolean]> = [["原色", false], ["淡化", true]];
+const CHAR_FONTS: Array<[string, "system" | "char"]> = [["系统字体", "system"], ["角色字体", "char"]];
+
+/** 一排单选的小胶囊 */
+function ChipRow<T>({ options, value, onChange }: { options: Array<[string, T]>; value: T; onChange: (value: T) => void }) {
+    return (
+        <div className="reading-share-aligns">
+            {options.map(([label, option]) => (
+                <button
+                    key={label}
+                    type="button"
+                    className={`reading-share-template${value === option ? " is-active" : ""}`}
+                    onClick={() => onChange(option)}
+                >{label}</button>
+            ))}
+        </div>
+    );
+}
 
 export function ReadingShareDialog({
     quoteParagraphs, quoteSegments, bookTitle, bookAuthor, chapterTitle, progressPercent, annotations, onClose,
-    progressLabel, signature, signatureChoices, fonts, title = "分享摘抄", filePrefix = "摘抄",
+    progressLabel, signature, signatureChoices, fonts, speakerFonts, title = "分享摘抄", filePrefix = "摘抄",
 }: Props) {
     const [signer, setSigner] = useState<"char" | "user" | "both">(signatureChoices?.initial ?? "char");
     const [signerOrder, setSignerOrder] = useState<"user" | "char">("user");
@@ -133,6 +153,9 @@ export function ReadingShareDialog({
     const mixed = merged
         && quoteSegments!.some(segment => segment.speaker === "user")
         && quoteSegments!.some(segment => segment.speaker !== "user");
+    /** 他的话用系统字体还是角色字体（只在片刻纪事、而且有他的话时可选） */
+    const [charFont, setCharFont] = useState<"system" | "char">("system");
+    const canPickCharFont = Boolean(speakerFonts && signatureChoices && quoteSegments?.some(segment => segment.speaker !== "user"));
 
     /** 换模板时配色和对齐回到那个模板的出厂值——深色版面套上浅色底会直接糊掉 */
     const pickTemplate = (next: ReadingShareTemplate) => {
@@ -171,7 +194,7 @@ export function ReadingShareDialog({
     /** 片刻纪事两个人的头像，按地址缓存，切署名时不用重新解码 */
     const choiceAvatarsRef = useRef(new Map<string, CanvasImageSource | null>());
     /** 摘抄内容在弹窗打开期间不会变；钉住，免得父组件重渲染就重画一遍 */
-    const contentRef = useRef({ quoteParagraphs, quoteSegments, annotations, bookTitle, bookAuthor, chapterTitle, progressPercent, progressLabel, signature, signatureChoices, fonts });
+    const contentRef = useRef({ quoteParagraphs, quoteSegments, speakerFonts, annotations, bookTitle, bookAuthor, chapterTitle, progressPercent, progressLabel, signature, signatureChoices, fonts });
 
     useEffect(() => {
         let cancelled = false;
@@ -205,6 +228,9 @@ export function ReadingShareDialog({
                 // 等字体真正可用，否则画出来的是系统字体
                 if (typeof document !== "undefined" && document.fonts?.ready) {
                     if (given.fonts) await document.fonts.load(`40px ${given.fonts.body}`).catch(() => {});
+                    for (const family of [given.speakerFonts?.user, given.speakerFonts?.char]) {
+                        if (family) await document.fonts.load(`40px ${family}`).catch(() => {});
+                    }
                     await document.fonts.ready.catch(() => {});
                 }
                 if (cancelled) return;
@@ -214,7 +240,14 @@ export function ReadingShareDialog({
                 const canvas = renderReadingShareCard({
                     template,
                     quoteParagraphs: content.quoteParagraphs,
-                    ...(merged ? { quoteSegments: content.quoteSegments, segmentJoin } : {}),
+                    ...(content.quoteSegments?.length ? { quoteSegments: content.quoteSegments } : {}),
+                    ...(merged ? { segmentJoin } : {}),
+                    ...(content.speakerFonts ? {
+                        speakerFonts: {
+                            user: content.speakerFonts.user,
+                            ...(charFont === "char" ? { char: content.speakerFonts.char } : {}),
+                        },
+                    } : {}),
                     ...(mixed ? { userAlign, tintUserSegments: tintUser } : {}),
                     bookTitle: content.bookTitle,
                     bookAuthor: content.bookAuthor,
@@ -249,7 +282,7 @@ export function ReadingShareDialog({
         };
         void draw();
         return () => { cancelled = true; };
-    }, [align, avatarShape, palette, ratio, template, withMine, withTheirs, signer, signerOrder, merged, mixed, segmentJoin, userAlign, tintUser]);
+    }, [align, avatarShape, palette, ratio, template, withMine, withTheirs, signer, signerOrder, merged, mixed, segmentJoin, userAlign, tintUser, charFont]);
 
     const handleDownload = async () => {
         const canvas = canvasRef.current;
@@ -331,49 +364,31 @@ export function ReadingShareDialog({
                         ))}
                     </div>
                     {mixed && signatureChoices ? (
-                        // 你我都有：名字一列，右边各一排对齐；自己那排底下再一排原色/淡化
+                        // 你我都有：名字一列，右边各一排对齐；他那排底下可选字体，自己那排底下是原色/淡化
                         <div className="reading-share-who-grid">
-                            {([
-                                [signatureChoices.char.name, align, setAlign],
-                                [signatureChoices.user.name, userAlign, setUserAlign],
-                            ] as Array<[string, ReadingShareAlign, (value: ReadingShareAlign) => void]>).map(([who, current, set], row) => (
-                                <Fragment key={row}>
-                                    <span className="reading-share-who">{who}</span>
-                                    <div className="reading-share-aligns">
-                                        {ALIGNS.map(([label, value]) => (
-                                            <button
-                                                key={value}
-                                                type="button"
-                                                className={`reading-share-template${current === value ? " is-active" : ""}`}
-                                                onClick={() => set(value)}
-                                            >{label}</button>
-                                        ))}
-                                    </div>
-                                </Fragment>
-                            ))}
+                            <span className="reading-share-who">{signatureChoices.char.name}</span>
+                            <ChipRow options={ALIGNS} value={align} onChange={setAlign} />
+                            {canPickCharFont && (
+                                <>
+                                    <span aria-hidden="true" />
+                                    <ChipRow options={CHAR_FONTS} value={charFont} onChange={setCharFont} />
+                                </>
+                            )}
+                            <span className="reading-share-who">{signatureChoices.user.name}</span>
+                            <ChipRow options={ALIGNS} value={userAlign} onChange={setUserAlign} />
                             <span aria-hidden="true" />
-                            <div className="reading-share-aligns">
-                                {([["原色", false], ["淡化", true]] as Array<[string, boolean]>).map(([label, value]) => (
-                                    <button
-                                        key={label}
-                                        type="button"
-                                        className={`reading-share-template${tintUser === value ? " is-active" : ""}`}
-                                        onClick={() => setTintUser(value)}
-                                    >{label}</button>
-                                ))}
-                            </div>
+                            <ChipRow options={TINTS} value={tintUser} onChange={setTintUser} />
                         </div>
                     ) : (
-                        <div className="reading-share-aligns">
-                            {ALIGNS.map(([label, value]) => (
-                                <button
-                                    key={value}
-                                    type="button"
-                                    className={`reading-share-template${align === value ? " is-active" : ""}`}
-                                    onClick={() => setAlign(value)}
-                                >{label}</button>
-                            ))}
-                        </div>
+                        <>
+                            <ChipRow options={ALIGNS} value={align} onChange={setAlign} />
+                            {canPickCharFont && signatureChoices && (
+                                <div className="reading-share-who-grid">
+                                    <span className="reading-share-who">{signatureChoices.char.name}</span>
+                                    <ChipRow options={CHAR_FONTS} value={charFont} onChange={setCharFont} />
+                                </div>
+                            )}
+                        </>
                     )}
                     {merged && (
                         <>
