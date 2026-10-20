@@ -8,7 +8,12 @@ import { Check, ChevronLeft, ChevronRight, Eraser, Folder, Plus, Save, Trash2, X
 import { Avatar } from "@/components/ui/primitives";
 import type { Character } from "@/lib/character-types";
 import { loadApiConfigs, loadPresets, loadRegexes, loadWorldBooks } from "@/lib/settings-storage";
-import { inheritedCharacterAppApiLabel, loadCharacterAppApiId, saveCharacterAppApiId } from "@/lib/app-api-binding";
+import {
+  inheritedCharacterAppSlot,
+  loadCharacterAppSlot,
+  saveCharacterAppSlotField,
+  type CharacterAppSlotField,
+} from "@/lib/app-api-binding";
 import { loadWorldBookFolders, loadWorldBookRootOrder } from "@/lib/worldbook-folders";
 import { loadApiConfigFolders, loadApiConfigRootOrder } from "@/lib/api-config-folders";
 import { buildPickerEntries } from "@/lib/item-folders";
@@ -490,6 +495,7 @@ export function StoryBindingPicker({
   onClose,
   title,
   followLabel = "跟随剧情",
+  emptyFollows = false,
 }: {
   kind: StoryBindingKind;
   bindings: StoryExtraBindings;
@@ -499,6 +505,8 @@ export function StoryBindingPicker({
   title?: string;
   /** 不单独绑、跟着上一级走的那一行 */
   followLabel?: string;
+  /** 剧情正篇（设置里那一格）：多选一个都不勾就是继承上一级，不是「不用」 */
+  emptyFollows?: boolean;
 }) {
   const options = useMemo(() => bindingOptions(kind), [kind]);
   const multi = kind === "worldBooks" || kind === "regexes";
@@ -530,7 +538,8 @@ export function StoryBindingPicker({
             return;
           }
           const current = selected ?? [];
-          setIds(on ? current.filter((id) => id !== option.id) : [...current, option.id]);
+          const next = on ? current.filter((id) => id !== option.id) : [...current, option.id];
+          setIds(emptyFollows && next.length === 0 ? undefined : next);
         }}
       >
         <span>{option.name}</span>
@@ -582,7 +591,9 @@ export function StoryBindingPicker({
           {options.length === 0 ? <div className="story-sheet-empty">还没有可选的{label}</div> : null}
           {openFolder ? inFolder(openFolder.id).map(optionRow) : rootEntries ? null : options.map(optionRow)}
           {multi ? (
-            <div className="story-drawer-note">勾了几个就只用这几个；一个都不勾就是不用{label}。</div>
+            <div className="story-drawer-note">
+              {emptyFollows ? "勾了几个就只用这几个；一个都不勾就继承上一级。" : `勾了几个就只用这几个；一个都不勾就是不用${label}。`}
+            </div>
           ) : null}
         </div>
       </div>
@@ -590,20 +601,52 @@ export function StoryBindingPicker({
   );
 }
 
-// ── 剧情正篇自己的 API：就是设置 → 绑定 → 这个角色 → 剧情 里的那一项，两边改的是同一份 ──
+// ── 剧情正篇的绑定：就是设置 → 绑定 → 这个角色 → 剧情 那一格（API、预设、世界书、正则），两边改的是同一份 ──
 
-/** 这个角色剧情单独绑的 API（没单独绑就是 undefined） */
-export function loadStoryApiOverride(characterId: string): string | undefined {
-  return loadCharacterAppApiId(characterId, "story");
+const MAIN_SLOT_FIELD: Record<StoryBindingKind, CharacterAppSlotField> = {
+  api: "apiConfigId",
+  preset: "presetId",
+  worldBooks: "worldBookIds",
+  regexes: "regexIds",
+};
+
+function slotIds(kind: StoryBindingKind, slot: { apiConfigId?: string; presetId?: string; worldBookIds?: string[]; regexIds?: string[] }): string[] {
+  const value = slot[MAIN_SLOT_FIELD[kind]];
+  return Array.isArray(value) ? value : value ? [value] : [];
 }
 
-export function saveStoryApiOverride(characterId: string, apiConfigId: string | undefined): void {
-  saveCharacterAppApiId(characterId, "story", apiConfigId);
+function optionNames(kind: StoryBindingKind, ids: string[]): string[] {
+  const options = bindingOptions(kind);
+  return ids.map((id) => options.find((option) => option.id === id)?.name).filter((name): name is string => Boolean(name));
 }
 
-/** 不单独绑时实际用的那个（全局 → 角色默认 → 剧情应用默认），显示成「继承：xx」 */
-export function storyApiFollowLabel(characterId: string): string {
-  return inheritedCharacterAppApiLabel(characterId, "story");
+/** 这个角色剧情单独绑的几项；没单独绑的（或绑的已经删了）是 undefined */
+export function loadStoryMainBindings(characterId: string): StoryExtraBindings {
+  const slot = loadCharacterAppSlot(characterId, "story");
+  const alive = (kind: StoryBindingKind) => {
+    const ids = slotIds(kind, slot);
+    const options = bindingOptions(kind);
+    const kept = ids.filter((id) => options.some((option) => option.id === id));
+    return kept.length > 0 ? kept : undefined;
+  };
+  return {
+    apiConfigId: alive("api")?.[0],
+    presetId: alive("preset")?.[0],
+    worldBookIds: alive("worldBooks"),
+    regexIds: alive("regexes"),
+  };
+}
+
+export function saveStoryMainBinding(characterId: string, kind: StoryBindingKind, bindings: StoryExtraBindings): void {
+  const ids = selectedBindingIds(kind, bindings);
+  saveCharacterAppSlotField(characterId, "story", MAIN_SLOT_FIELD[kind], kind === "api" || kind === "preset" ? ids?.[0] : ids);
+}
+
+/** 不单独绑时实际用的（全局 → 角色默认 → 剧情应用默认），显示成「继承：xx」 */
+export function storyMainFollowLabel(characterId: string, kind: StoryBindingKind): string {
+  const names = optionNames(kind, slotIds(kind, inheritedCharacterAppSlot(characterId, "story")));
+  if (names.length > 0) return `继承：${names.join("、")}`;
+  return kind === "api" || kind === "preset" ? "继承默认" : "继承：无";
 }
 
 export function StoryMainBindingsSection({
@@ -614,24 +657,35 @@ export function StoryMainBindingsSection({
   characterId: string;
   /** 绑定改过就变，让这里重新读 */
   revision: number;
-  onOpen: () => void;
+  onOpen: (kind: StoryBindingKind) => void;
 }) {
-  const value = useMemo(() => {
-    const own = loadStoryApiOverride(characterId);
-    const name = own ? bindingOptions("api").find((option) => option.id === own)?.name : undefined;
-    return name ? { text: name, follow: false } : { text: storyApiFollowLabel(characterId), follow: true };
+  const values = useMemo(() => {
+    const own = loadStoryMainBindings(characterId);
+    return BINDING_KINDS.map((kind) => {
+      const names = optionNames(kind, selectedBindingIds(kind, own) ?? []);
+      return names.length > 0
+        ? { kind, text: names.join("、"), follow: false }
+        : { kind, text: storyMainFollowLabel(characterId, kind), follow: true };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [characterId, revision]);
   return (
     <div className="story-drawer-section">
       <div className="story-drawer-eyebrow">剧情绑定</div>
-      <button type="button" className="story-bind-row" onClick={onOpen}>
-        <span>{BINDING_LABELS.api}</span>
-        <span data-follow={value.follow ? "true" : undefined}>{value.text}</span>
-        <span aria-hidden="true">›</span>
-      </button>
+      {values.map((value) => (
+        <button key={value.kind} type="button" className="story-bind-row" onClick={() => onOpen(value.kind)}>
+          <span>{BINDING_LABELS[value.kind]}</span>
+          <span data-follow={value.follow ? "true" : undefined}>{value.text}</span>
+          <span aria-hidden="true">›</span>
+        </button>
+      ))}
     </div>
   );
+}
+
+/** 「剧情API」「剧情预设」…… 侧栏选项面板的标题 */
+export function storyMainBindingTitle(kind: StoryBindingKind): string {
+  return `剧情${BINDING_LABELS[kind]}`;
 }
 
 // ── 番外方案：模板（含梗概和开关）+ 绑定成套保存、切换 ──

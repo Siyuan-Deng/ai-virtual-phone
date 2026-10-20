@@ -86,10 +86,11 @@ import {
   StoryNowCard,
   StoryRecentSection,
   StoryRecoverSheet,
-  loadStoryApiOverride,
+  loadStoryMainBindings,
   orderStoryCharacters,
-  saveStoryApiOverride,
-  storyApiFollowLabel,
+  saveStoryMainBinding,
+  storyMainBindingTitle,
+  storyMainFollowLabel,
   type StoryBindingKind,
 } from "@/components/story/story-extra-ui";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
@@ -256,7 +257,7 @@ function storyMemoryMarkers(): Map<string, string> {
   return markers;
 }
 
-type StoryDrawerSheet = { type: "characters" } | { type: "binding"; kind: StoryBindingKind } | { type: "mainApi" } | { type: "recover" };
+type StoryDrawerSheet = { type: "characters" } | { type: "binding"; kind: StoryBindingKind } | { type: "mainBinding"; kind: StoryBindingKind } | { type: "recover" };
 
 function resizeStoryComposerTextarea(el: HTMLTextAreaElement) {
   el.style.height = "auto";
@@ -925,9 +926,10 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
       }
     };
     // 依赖用 id/foldTags 原始值而不是 session 对象：会话缓存归一化会更换对象
-    // 引用，按对象依赖会让本 effect 在无关渲染中反复重跑
+    // 引用，按对象依赖会让本 effect 在无关渲染中反复重跑。
+    // bindingRevision：正篇的正则在侧栏 / 设置里改了，已经显示的剧情马上按新的重排
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, activeCharacterId, currentSession?.id, display?.foldTags, extraBindingsKey, messages, isGenerating]);
+  }, [ready, activeCharacterId, currentSession?.id, display?.foldTags, extraBindingsKey, messages, isGenerating, bindingRevision]);
 
   function applySessionUpdates(updates: Partial<StorySession>) {
     if (!currentSession) return;
@@ -1490,7 +1492,7 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
           <StoryMainBindingsSection
             characterId={activeCharacterId}
             revision={bindingRevision}
-            onOpen={() => setDrawerSheet({ type: "mainApi" })}
+            onOpen={(kind) => setDrawerSheet({ type: "mainBinding", kind })}
           />
         )}
 
@@ -1756,14 +1758,16 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
           onClose={() => setDrawerSheet(null)}
         />
       ) : null}
-      {drawerOpen && drawerSheet?.type === "mainApi" ? (
+      {drawerOpen && drawerSheet?.type === "mainBinding" ? (
         <StoryBindingPicker
-          kind="api"
-          title="剧情API"
-          followLabel={storyApiFollowLabel(activeCharacterId)}
-          bindings={{ apiConfigId: loadStoryApiOverride(activeCharacterId) }}
-          onChange={(bindings) => saveStoryApiOverride(activeCharacterId, bindings.apiConfigId)}
+          // 每次渲染都重读设置里那一格：这里改完会发事件、bindingRevision 一变这里就跟着刷新
+          kind={drawerSheet.kind}
+          title={storyMainBindingTitle(drawerSheet.kind)}
+          followLabel={storyMainFollowLabel(activeCharacterId, drawerSheet.kind)}
+          bindings={loadStoryMainBindings(activeCharacterId)}
+          onChange={(bindings) => saveStoryMainBinding(activeCharacterId, drawerSheet.kind, bindings)}
           onClose={() => setDrawerSheet(null)}
+          emptyFollows
         />
       ) : null}
 
