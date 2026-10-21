@@ -47,6 +47,7 @@ import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "@/lib/chat-
 import { getThemeAssetDataUrl, saveThemeAssetFromBlob } from "@/lib/theme-storage";
 import {
   generateStoryCompletion,
+  generateStoryContinuation,
   getStoryRenderSignature,
   rebuildStorySessionRenderCache,
 } from "@/lib/story-engine";
@@ -70,6 +71,7 @@ import {
   type StoryMessage,
   type StoryOrphanGroup,
   type StorySession,
+  updateStoryMessageContent,
   updateStorySession,
 } from "@/lib/story-storage";
 import { buildStoryExtraInstruction, normalizeStoryExtraConfig, storyExtraHistory } from "@/lib/story-extra";
@@ -95,8 +97,10 @@ import {
 } from "@/components/story/story-extra-ui";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import {
+  DEFAULT_STORY_CONTINUE_PROMPT,
   appendStoryCommand,
   loadStoryCommandButtonVisible,
+  loadStoryContinuePrompt,
   loadStoryQuickCommands,
   saveStoryCommandButtonVisible,
   saveStoryQuickCommands,
@@ -584,6 +588,14 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
     return () => { cancelled = true; };
   }, [backgroundImageId]);
   const isGenerating = Boolean(activeSessionId) && generatingSessionIds.has(activeSessionId);
+  // 「续写」只给最后一条回复（后面还没有用户说的话）
+  const continuableMessageId = (() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === "user") return null;
+      if (messages[i].role === "assistant") return messages[i].id;
+    }
+    return null;
+  })();
   // 番外：单独的绑定，历史只取当前这一篇，不写记忆区
   const isExtra = currentSession?.kind === "extra";
   const extraConfig = isExtra ? normalizeStoryExtraConfig(currentSession?.extraConfig) : null;
@@ -1373,6 +1385,57 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
     }
   }
 
+  // 续写：最后那条回复写到一半断了，照普通剧情把上下文（含写了一半的这条）发过去，
+  // 最后加上侧栏里的续写提示词；接好的整条写回同一条消息
+  async function handleStoryContinue(msgId: string) {
+    const msgIndex = messages.findIndex(m => m.id === msgId);
+    if (msgIndex === -1 || isGenerating) return;
+    const partial = messages[msgIndex];
+    if (partial.role !== "assistant") return;
+    const sessionId = activeSessionId;
+    const characterId = activeCharacterId;
+    const contextMessages = messages.slice(0, msgIndex + 1);
+    setActiveMessageId(null);
+    autoBottomLockRef.current = true;
+    requestAnimationFrame(() => scrollStoryToBottom());
+    markGenerating(sessionId, true);
+    const generationRun = createStoryGenerationRun(sessionId);
+    const generationRunId = generationRun.runId;
+    const isCurrentGeneration = () => mountedRef.current && isStoryGenerationRunActive(sessionId, generationRunId);
+    try {
+      const result = await generateStoryContinuation(
+        characterId,
+        isExtra ? storyExtraHistory(contextMessages) : contextMessages,
+        partial,
+        loadStoryContinuePrompt().trim() || DEFAULT_STORY_CONTINUE_PROMPT,
+        {
+          sessionFoldTags: display?.foldTags,
+          sessionContextExcludedTags: display?.contextExcludedTags,
+          signal: generationRun.controller.signal,
+          bindings: extraBindings,
+          extra: isExtra,
+        },
+      );
+      if (!isCurrentGeneration()) return;
+      updateStoryMessageContent(partial.id, {
+        rawContent: result.rawText, renderedContent: result.renderedText,
+        storySummary: result.storySummary, regexSignature: result.regexSignature, parserVersion: result.parserVersion,
+      });
+      if (activeSessionIdRef.current === sessionId) setMessages(loadStoryMessages(sessionId));
+      setStorageVersion(v => v + 1);
+    } catch (error) {
+      if (!isCurrentGeneration() || isAbortLikeError(error)) return;
+      const errText = error instanceof Error ? error.message : "续写失败，请稍后再试。";
+      pushStoryMessage({ sessionId, role: "system", rawContent: errText, renderedContent: errText });
+      if (activeSessionIdRef.current === sessionId) setMessages(loadStoryMessages(sessionId));
+      setStorageVersion(v => v + 1);
+    } finally {
+      if (finishStoryGenerationRun(sessionId, generationRunId)) {
+        markGenerating(sessionId, false);
+      }
+    }
+  }
+
   if (!ready) return null;
 
   if (loadFailed || characters.length === 0) {
@@ -2002,6 +2065,9 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
                                     <button onClick={() => handleStoryEditStart(message)} className="story-ctx-btn">编辑</button>
                                     {(message.role === "assistant" || message.role === "user") && !message.instruction && (
                                       <button onClick={() => setCollectChoiceId(message.id)} className="story-ctx-btn">收藏</button>
+                                    )}
+                                    {message.id === continuableMessageId && !isGenerating && (
+                                      <button onClick={() => { void handleStoryContinue(message.id); }} className="story-ctx-btn">续写</button>
                                     )}
                                   </div>
                                   <div style={{ display: "flex" }}>

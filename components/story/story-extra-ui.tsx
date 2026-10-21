@@ -2,7 +2,7 @@
 
 // 剧情侧栏（选角色）和番外用到的几块界面，版式照用户选定的方案 C。
 
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronLeft, ChevronRight, Eraser, Folder, Plus, Save, Trash2, X } from "lucide-react";
 import { Avatar } from "@/components/ui/primitives";
@@ -17,7 +17,16 @@ import {
 import { loadWorldBookFolders, loadWorldBookRootOrder } from "@/lib/worldbook-folders";
 import { loadApiConfigFolders, loadApiConfigRootOrder } from "@/lib/api-config-folders";
 import { buildPickerEntries } from "@/lib/item-folders";
-import { appendStoryCommand } from "@/lib/story-commands";
+import {
+  DEFAULT_STORY_CONTINUE_PROMPT,
+  appendStoryCommand,
+  deleteStoryContinuePromptPreset,
+  loadStoryContinuePrompt,
+  loadStoryContinuePromptPresets,
+  saveStoryContinuePrompt,
+  saveStoryContinuePromptPreset,
+  type StoryContinuePromptPreset,
+} from "@/lib/story-commands";
 import type {
   StoryExtraBindings,
   StoryExtraConfig,
@@ -921,11 +930,135 @@ export function StoryInstructionCard({ content }: { content: string }) {
   );
 }
 
-/** 侧栏里管系统指令：输入栏显不显示「指令」按钮，快捷指令的增删 */
-function fitCommandDraftHeight(el: HTMLTextAreaElement) {
+function fitDraftHeight(el: HTMLTextAreaElement, maxHeight: number) {
   el.style.height = "auto";
-  el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
 }
+
+/** 一开始一行高，写长了自己换行、框跟着长高；侧栏宽度变了（转屏等）也重算 */
+function useAutoGrowTextarea(ref: RefObject<HTMLTextAreaElement | null>, value: string, maxHeight: number) {
+  useLayoutEffect(() => {
+    if (ref.current) fitDraftHeight(ref.current, maxHeight);
+  }, [ref, value, maxHeight]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fitDraftHeight(el, maxHeight);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref, maxHeight]);
+}
+
+/** 续写提示词：写了自动存，可以存几档切换；按钮在框下面 */
+function StoryContinuePromptEditor() {
+  const [text, setText] = useState(() => loadStoryContinuePrompt());
+  const [presets, setPresets] = useState<StoryContinuePromptPreset[]>(() => loadStoryContinuePromptPresets());
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useAutoGrowTextarea(inputRef, text, 240);
+  // 下拉框只在现在这段和某一档一字不差时显示它；改过就回到占位
+  const selectedId = presets.find((preset) => preset.text === text)?.id ?? "";
+  const change = (next: string) => {
+    setText(next);
+    saveStoryContinuePrompt(next);
+    setConfirmingDelete(false);
+  };
+  return (
+    <div className="story-command-manage">
+      <div className="story-continue-head">
+        <span className="story-command-manage-label">续写提示词</span>
+        {text !== DEFAULT_STORY_CONTINUE_PROMPT ? (
+          <button type="button" onClick={() => change(DEFAULT_STORY_CONTINUE_PROMPT)}>恢复默认</button>
+        ) : null}
+      </div>
+      <textarea
+        ref={inputRef}
+        className="story-continue-input"
+        rows={1}
+        value={text}
+        placeholder="长按回复点「续写」时，接在最后发给模型"
+        onChange={(event) => change(event.target.value)}
+      />
+      <div className="story-preset-row">
+        <select
+          className="story-preset-select"
+          value={selectedId}
+          onChange={(event) => {
+            const preset = presets.find((item) => item.id === event.target.value);
+            if (preset) change(preset.text);
+          }}
+        >
+          <option value="">{presets.length > 0 ? "选一档保存过的提示词" : "还没有保存过提示词"}</option>
+          {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+        </select>
+        {selectedId ? (
+          <button
+            type="button"
+            className={`story-preset-btn${confirmingDelete ? " is-danger" : ""}`}
+            aria-label={confirmingDelete ? "确认删除这档提示词" : "删除这档提示词"}
+            onClick={() => {
+              if (!confirmingDelete) { setConfirmingDelete(true); return; }
+              deleteStoryContinuePromptPreset(selectedId);
+              setConfirmingDelete(false);
+              setPresets(loadStoryContinuePromptPresets());
+            }}
+          >
+            <Trash2 size={15} />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="story-preset-btn"
+          aria-label="把现在这段存成一档"
+          disabled={!text.trim()}
+          onClick={() => {
+            setName(presets.find((item) => item.id === selectedId)?.name ?? "");
+            setNaming(true);
+            setConfirmingDelete(false);
+          }}
+        >
+          <Save size={15} />
+        </button>
+      </div>
+      {naming ? (
+        <div className="story-preset-row">
+          <input
+            className="story-preset-input"
+            value={name}
+            maxLength={30}
+            placeholder="给这段提示词起个名字"
+            autoFocus
+            onChange={(event) => setName(event.target.value)}
+          />
+          <button
+            type="button"
+            className="story-preset-btn"
+            aria-label="确认保存"
+            onClick={() => {
+              saveStoryContinuePromptPreset(name || "未命名", text);
+              setPresets(loadStoryContinuePromptPresets());
+              setNaming(false);
+            }}
+          >
+            <Check size={15} />
+          </button>
+          <button type="button" className="story-preset-btn" aria-label="取消" onClick={() => setNaming(false)}>
+            <X size={15} />
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** 侧栏里管系统指令：输入栏显不显示「指令」按钮，快捷指令的增删，续写提示词 */
 
 export function StoryCommandSettingsSection({
   buttonVisible,
@@ -946,22 +1079,8 @@ export function StoryCommandSettingsSection({
 }) {
   const [draft, setDraft] = useState("");
   const draftRef = useRef<HTMLTextAreaElement>(null);
-  // 写长了自己换行、框跟着长高（保存 / 发送贴着框底）；侧栏宽度变了（转屏等）也重算
-  useLayoutEffect(() => {
-    if (draftRef.current) fitCommandDraftHeight(draftRef.current);
-  }, [draft]);
-  useEffect(() => {
-    const el = draftRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    let width = el.clientWidth;
-    const observer = new ResizeObserver(() => {
-      if (el.clientWidth === width) return;
-      width = el.clientWidth;
-      fitCommandDraftHeight(el);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+  // 保存 / 发送贴着框底
+  useAutoGrowTextarea(draftRef, draft, 160);
   const add = () => {
     const text = draft.trim();
     if (!text) return;
@@ -1032,6 +1151,7 @@ export function StoryCommandSettingsSection({
           <button type="button" className="story-command-send" disabled={!draft.trim() || sending} onClick={send}>发送</button>
         </div>
       </div>
+      <StoryContinuePromptEditor />
     </div>
   );
 }

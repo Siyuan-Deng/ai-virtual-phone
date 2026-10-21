@@ -218,6 +218,70 @@ export async function generateStoryCompletion(
   };
 }
 
+/** 新写的这段接到写了一半的那条后面：
+ *  - 思维链（<think> 块）只留在整条最前面那一份，新写的这段前面的去掉，不然会插在正文中间
+ *  - 写了一半的那段里 <content> 还没闭合、模型又从 <content> 开头写，就去掉重复的开头标签
+ *  - 不另加空白：断在句子中间就直接接上；新写的自己带了换行的照留 */
+function joinStoryContinuation(partial: string, addition: string): string {
+  let next = addition.replace(/^\s*<(think|thinking)>[\s\S]*?<\/\1>\s*/i, "");
+  if (/<content>/i.test(partial) && !/<\/content>/i.test(partial)) next = next.replace(/^\s*<content>\s*/i, "");
+  return partial + next;
+}
+
+/** 续写：最后那条回复写到一半断了。提示词照普通剧情拼（上下文里带着写了一半的这条），
+ *  最后再加一条续写提示词（当系统指令发）；返回的是接好之后的整条，重新解析过 */
+export async function generateStoryContinuation(
+  characterId: string,
+  history: StoryMessage[],
+  partial: StoryMessage,
+  continuePrompt: string,
+  options?: { sessionFoldTags?: string; sessionContextExcludedTags?: string; signal?: AbortSignal; bindings?: StoryExtraBindings; extra?: boolean },
+): Promise<StoryGenerationResult> {
+  const character = loadCharacters().find((item) => item.id === characterId);
+  if (!character) {
+    throw new ChatEngineError(`Character not found: ${characterId}`);
+  }
+
+  const { apiConfig, preset, regexes, worldBooks, regexSignature, summaryTag } = resolveStoryConfigs(characterId, options?.bindings);
+  const effectiveFoldTags = options?.sessionFoldTags?.trim() || DEFAULT_STORY_FOLD_TAGS;
+  const effectiveContextExcludedTags = options?.sessionContextExcludedTags?.trim() || DEFAULT_STORY_CONTEXT_EXCLUDED_TAGS;
+  // 续写提示词排在写了一半的那条后面：历史以 assistant 收尾，不会被挪到输入前面
+  const instruction: StoryMessage = {
+    id: `continue_${Date.now().toString(36)}`,
+    sessionId: partial.sessionId,
+    role: "system",
+    instruction: true,
+    rawContent: continuePrompt,
+    renderedContent: continuePrompt,
+    createdAt: new Date().toISOString(),
+  };
+  const llmMessages = await buildStoryPromptMessages(characterId, [...history, instruction], preset, regexes, worldBooks, effectiveContextExcludedTags);
+
+  const userIdentity = resolveUserIdentity(characterId, "story");
+  const macroEngine = new MacroEngine(character.name, userIdentity?.name ?? "用户");
+
+  const rawOutput = await sendLLMRequestPreferStream(apiConfig, preset, llmMessages, regexes, {
+    characterName: character.name,
+  }, { skipOutputRegex: true, includeReasoning: true, appId: "story", appTags: storyAppTags(options?.extra), characterId, signal: options?.signal });
+
+  const parsed = parseStoryResponse(joinStoryContinuation(partial.rawContent, rawOutput), regexes, {
+    summaryTag,
+    foldTags: effectiveFoldTags,
+    macroEngine,
+    activeTags: ["story"],
+  });
+  return {
+    rawText: parsed.rawText,
+    renderedText: parsed.renderedText,
+    storySummary: parsed.summaryText,
+    regexSignature,
+    parserVersion: STORY_PARSER_VERSION,
+    promptMessages: llmMessages,
+    model: apiConfig.defaultModel,
+    presetName: preset?.name || "默认预设",
+  };
+}
+
 async function buildStoryPromptMessages(
   characterId: string,
   history: StoryMessage[],
