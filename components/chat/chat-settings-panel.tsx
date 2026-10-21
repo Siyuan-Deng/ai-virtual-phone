@@ -44,7 +44,7 @@ import { downloadFile } from "@/lib/download-utils";
 import { getSchemes, saveScheme, deleteScheme, type CSSScheme } from "@/lib/css-scheme-storage";
 import { CustomStatusFrame } from "@/components/chat/custom-status-frame";
 import { KeyboardAutoSendDebounceItem } from "@/components/chat/keyboard-auto-send-debounce-item";
-import { ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, MessageSquare, Search, AlertCircle, Code, Laptop, Trash2, Smile, Sparkles, X, Play, Upload, Download, Save, FolderOpen, type LucideIcon } from "lucide-react";
+import { BookOpen, ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, MessageSquare, Search, AlertCircle, Code, Laptop, Trash2, Smile, Sparkles, X, Play, Upload, Download, Save, FolderOpen, type LucideIcon } from "lucide-react";
 import { BINDING_ACCENTS, CONTENT_APP_ACCENTS } from "@/lib/ui-accent-colors";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { ConfirmDialog } from "@/components/ui/modal";
@@ -52,7 +52,8 @@ import { CHAT_SESSION_CSS_EXAMPLE } from "@/lib/css-examples";
 import { Toggle, Input } from "@/components/ui/form";
 import { PageShell } from "@/components/ui/page-shell";
 import { AppApiPickerDialog } from "@/components/settings/app-api-picker-dialog";
-import { inheritedCharacterAppApiLabel, loadCharacterAppApiId } from "@/lib/app-api-binding";
+import { AppWorldBookPickerDialog } from "@/components/settings/app-worldbook-picker-dialog";
+import { characterAppWorldBookLabel, inheritedCharacterAppApiLabel, loadCharacterAppApiId } from "@/lib/app-api-binding";
 
 // 自定义状态栏预填模板：微博主页（契约=「状态栏」章节整段正文，含【逻辑】【格式】与包裹要求）
 // 预览用的默认示例数据：契约没有自带示例时兜底，字段与下面的微博模板对应
@@ -310,6 +311,14 @@ export function ChatSettingsPanel({
         return api ? (api.name || api.provider) : inheritedCharacterAppApiLabel(session.contactId, "chat");
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [session.isGroup, session.contactId, chatApiRevision]);
+    // 这个角色聊天单独勾的世界书：也是设置 → 绑定 → 角色 → 聊天里的那一项
+    const [showChatWorldBookPicker, setShowChatWorldBookPicker] = useState(false);
+    const [chatWorldBookRevision, setChatWorldBookRevision] = useState(0);
+    const chatWorldBookLabel = useMemo(() => {
+        if (session.isGroup) return "";
+        return characterAppWorldBookLabel(session.contactId, "chat");
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [session.isGroup, session.contactId, chatWorldBookRevision]);
     // 自定义状态栏（状态区）
     const [statusRegion, setStatusRegion] = useState<StatusRegionConfig>(() => getStatusRegionConfig(session.id));
     const [showStatusRegionDialog, setShowStatusRegionDialog] = useState(false);
@@ -1016,6 +1025,16 @@ export function ChatSettingsPanel({
                             </div>
                         </button>
                     )}
+                    {!session.isGroup && (
+                        <button className="menu-item" onClick={() => setShowChatWorldBookPicker(true)}>
+                            <ChatInfoIcon icon={BookOpen} color={BINDING_ACCENTS.worldBook} />
+                            <div className="menu-label-group"><span className="menu-label">聊天世界书</span></div>
+                            <div className="menu-right">
+                                <span className="menu-desc mr-1">{chatWorldBookLabel}</span>
+                                <ChevronRight size={16} />
+                            </div>
+                        </button>
+                    )}
                     <div className="menu-item">
                         <ChatInfoIcon icon={ImageIcon} color={BINDING_ACCENTS.api} />
                         <div className="menu-label-group">
@@ -1611,6 +1630,17 @@ export function ChatSettingsPanel({
                     onClose={() => {
                         setShowChatApiPicker(false);
                         setChatApiRevision(value => value + 1);
+                    }}
+                />
+            )}
+            {showChatWorldBookPicker && (
+                <AppWorldBookPickerDialog
+                    characterId={session.contactId}
+                    appId="chat"
+                    title="选择聊天世界书"
+                    onClose={() => {
+                        setShowChatWorldBookPicker(false);
+                        setChatWorldBookRevision(value => value + 1);
                     }}
                 />
             )}

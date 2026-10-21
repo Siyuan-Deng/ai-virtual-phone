@@ -8,6 +8,7 @@ import {
     getCharacterBinding,
     loadApiConfigs,
     loadBindingConfig,
+    loadWorldBooks,
     resolveBinding,
     saveBindingConfig,
     setCharacterBinding,
@@ -77,4 +78,36 @@ export function inheritedCharacterAppSlot(characterId: string, appId: string): B
     const overrides = { ...binding.appOverrides };
     delete overrides[appId];
     return resolveBinding(setCharacterBinding(config, { ...binding, appOverrides: overrides }), characterId, appId);
+}
+
+// ── 世界书：聊天侧边栏里直接改「这个角色在这个应用里勾哪几本」，和设置 → 绑定 → 角色 → 应用 → 世界书是同一项 ──
+
+function worldBookNames(ids: string[] | undefined): string[] {
+    if (!ids?.length) return [];
+    const books = loadWorldBooks();
+    return ids.map(id => books.find(book => book.id === id)?.name).filter((name): name is string => Boolean(name));
+}
+
+/** 一本写名字，多本写「N 项已选」：和设置页的写法一样 */
+function worldBookSummary(names: string[]): string {
+    return names.length === 1 ? names[0] : `${names.length} 项已选`;
+}
+
+/** 这个角色在这个应用里单独勾的世界书（删掉的不算）；没单独勾是空的 */
+export function loadCharacterAppWorldBookIds(characterId: string, appId: string): string[] {
+    const ids = loadCharacterAppSlot(characterId, appId).worldBookIds || [];
+    const books = loadWorldBooks();
+    return ids.filter(id => books.some(book => book.id === id));
+}
+
+/** 「继承：xx」；上一级也没有就是「继承上级绑定」 */
+export function inheritedCharacterAppWorldBookLabel(characterId: string, appId: string): string {
+    const names = worldBookNames(inheritedCharacterAppSlot(characterId, appId).worldBookIds);
+    return names.length > 0 ? `继承：${worldBookSummary(names)}` : "继承上级绑定";
+}
+
+/** 侧边栏那一行右边写的：自己勾了就是那几本，没勾就是继承那句 */
+export function characterAppWorldBookLabel(characterId: string, appId: string): string {
+    const names = worldBookNames(loadCharacterAppWorldBookIds(characterId, appId));
+    return names.length > 0 ? worldBookSummary(names) : inheritedCharacterAppWorldBookLabel(characterId, appId);
 }
