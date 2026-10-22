@@ -12,6 +12,7 @@ import { ChatSession, loadChatSessions, pushChatMessage, hydrateChatStorage } fr
 import { notifyMascotPageContext } from "@/lib/mascot-events";
 import { loadCharacters } from "@/lib/character-storage";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
+import { nightSlotKeys } from "@/lib/night-mode";
 import { kvGet } from "@/lib/kv-db";
 import { formatXiaohongshuShareForPrompt, type ChatSharePayload } from "@/lib/chat-share";
 import { CHAT_OPEN_SESSION_EVENT, CHAT_OPEN_ADD_CONTACT_EVENT } from "@/lib/chat-notification-events";
@@ -240,7 +241,7 @@ export const PhoneChatApp = memo(function PhoneChatApp({ onClose, initialSession
             {...(hideTabBar ? { "data-tabbar-hidden": "" } : {})}
         >
             {/* Chat app-level custom CSS (lower priority than per-session CSS) */}
-            {chatAppCSS && <SessionCustomCSS css={chatAppCSS} scope=".chat-app" />}
+            <SessionCustomCSS css={chatAppCSS || ""} scope=".chat-app" nightKey={nightSlotKeys.chatApp} />
             {/* The Main Content Area */}
             <div className="chat-main-content relative flex-1 flex flex-col overflow-hidden" {...(activeSession || activeMascot ? { "data-covered-by-room": "" } : {})}>
                 {activeTab === "messages" && <ChatMessageList onCloseApp={onClose} activeSession={activeSession} onSelectSession={(session) => { setActiveMascot(false); setActiveSession(session); }} onSelectMascot={handleSelectMascot} />}

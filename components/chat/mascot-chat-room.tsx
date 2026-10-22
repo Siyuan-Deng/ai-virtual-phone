@@ -10,6 +10,8 @@ import { MediaPreviewOverlay } from "@/components/chat/media-preview-overlay";
 import { Input } from "@/components/ui/form";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
+import { NightSideTabs, useNightDraft } from "@/components/ui/night-side-tabs";
+import { nightSlotKeys } from "@/lib/night-mode";
 import { CHAT_SESSION_CSS_EXAMPLE } from "@/lib/css-examples";
 import {
     clearMascotToolHistoryMessages,
@@ -143,6 +145,10 @@ function MascotInfoPanel({
     const [personaDraft, setPersonaDraft] = useState(settings.personaPrompt);
     const [editingCSS, setEditingCSS] = useState(false);
     const [cssDraft, setCssDraft] = useState(settings.chatCustomCSS || "");
+    // 「白天 | 夜间」：编辑的是哪一份
+    const nightCss = useNightDraft(nightSlotKeys.mascot);
+    const cssEditing = nightCss.side === "night" ? nightCss.draft : cssDraft;
+    const setCssEditing = nightCss.side === "night" ? nightCss.setDraft : setCssDraft;
     const [showConfirmClearTools, setShowConfirmClearTools] = useState(false);
     const [showConfirmDelete, setShowConfirmDelete] = useState(false);
     const chat = useSyncExternalStore(subscribeMascotChat, getMascotChatSnapshot, getMascotChatSnapshot);
@@ -401,19 +407,20 @@ function MascotInfoPanel({
                             <p className="ts-13 text-[var(--c-text)] mb-3 leading-relaxed">
                                 支持 :root 变量和选择器，仅作用于 AI助手聊天室。CSS 方案与普通聊天室共用。
                             </p>
+                            <NightSideTabs state={nightCss} dayValue={cssDraft} />
                             <textarea
                                 className="ui-textarea font-mono ts-13 leading-relaxed flex-1"
                                 style={{ minHeight: 280, resize: "none", scrollbarWidth: "none" }}
                                 placeholder={`:root {\n  --c-bubble-self: #95ec69;\n}\n\n.chat-bubble-role-user {\n  border-radius: 6px;\n}\n\n.chat-html-inline-frame {\n  max-height: min(36vh, 340px);\n}`}
-                                value={cssDraft}
-                                onChange={(event) => setCssDraft(event.target.value)}
+                                value={cssEditing}
+                                onChange={(event) => setCssEditing(event.target.value)}
                                 spellCheck={false}
                             />
                             <div className="flex gap-2 mt-3 items-center">
-                                <CSSSchemeBar target="chat_session" currentCSS={cssDraft} onLoad={setCssDraft} />
-                                <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => setCssDraft(CHAT_SESSION_CSS_EXAMPLE)}>示例</button>
-                                <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => setCssDraft("")}>清除</button>
-                                <button type="button" className="ui-btn ui-btn-soft-action flex-1" onClick={() => { updateMascotSettings({ chatCustomCSS: cssDraft }); setEditingCSS(false); }}>应用</button>
+                                <CSSSchemeBar target="chat_session" currentCSS={cssEditing} onLoad={setCssEditing} />
+                                <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => setCssEditing(CHAT_SESSION_CSS_EXAMPLE)}>示例</button>
+                                <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => setCssEditing("")}>清除</button>
+                                <button type="button" className="ui-btn ui-btn-soft-action flex-1" onClick={() => { updateMascotSettings({ chatCustomCSS: cssDraft }); nightCss.commit(); setEditingCSS(false); }}>应用</button>
                             </div>
                         </div>
                     </PageShell>
@@ -893,9 +900,7 @@ export function MascotChatRoom({ onBack, onDeleted }: MascotChatRoomProps) {
             {...(showInfo ? { "data-settings-open": "" } : {})}
             {...(!initialScrollReady ? { "data-initial-scroll-pending": "" } : {})}
         >
-            {settings.chatCustomCSS && (
-                <SessionCustomCSS css={settings.chatCustomCSS} scope=".mascot-chat-session" />
-            )}
+            <SessionCustomCSS css={settings.chatCustomCSS || ""} scope=".mascot-chat-session" nightKey={nightSlotKeys.mascot} />
             <style>{`
                 .mascot-chat-session > .page-body {
                     overflow-y: scroll;

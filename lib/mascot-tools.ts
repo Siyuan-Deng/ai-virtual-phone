@@ -10,6 +10,7 @@
 //   - 图像处理套件 (image_pack)       — 10 个子工具
 //   - 导航工具 (navigate)             — 1 个独立工具（直接暴露）
 
+import { isNightActive, nightSlotKeys, nightTextFor, setNightBinding } from "./night-mode";
 import type { LlmToolDefinition } from "./llm-provider-adapter";
 import type { ToolCall, ToolResult } from "./tool-executor";
 import type { MascotPageContext } from "./mascot-context";
@@ -1628,7 +1629,25 @@ async function resolveStorySession(sessionName: string | undefined, ctx: MascotT
     return { error: "请用 sessionName 指定要操作哪个剧情会话", choices };
 }
 
+/** 夜间模式开着时，CSS 工具读写的是这一格的夜间那份（lib/night-mode） */
+function nightCssKey(location: string, sessionId?: string): string | null {
+    if (location === "chat_app") return nightSlotKeys.chatApp;
+    if (location === "mascot_chat") return nightSlotKeys.mascot;
+    if (location === "music") return nightSlotKeys.music;
+    if (location === "calendar") return nightSlotKeys.calendar;
+    if (location === "chat_session" && sessionId) return nightSlotKeys.chatSession(sessionId);
+    if (location === "story" && sessionId) return nightSlotKeys.story(sessionId);
+    return null;
+}
+
 async function readCssAt(location: string, ctx: MascotToolContext, sessionName?: string): Promise<{ css: string; sessionId?: string; displayName?: string; note?: string; choices?: string[] }> {
+    const result = await readDayCssAt(location, ctx, sessionName);
+    const key = isNightActive() && !result.choices ? nightCssKey(location, result.sessionId) : null;
+    if (!key) return result;
+    return { ...result, css: nightTextFor(key, result.css), note: [result.note, "现在是夜间模式，读到的是夜间那份（没单独配过就和白天一样）"].filter(Boolean).join("；") };
+}
+
+async function readDayCssAt(location: string, ctx: MascotToolContext, sessionName?: string): Promise<{ css: string; sessionId?: string; displayName?: string; note?: string; choices?: string[] }> {
     const { kvGet } = await import("./kv-db");
     if (location === "chat_app") return { css: kvGet("chat-app-custom-css") || "" };
     if (location === "mascot_chat") {
@@ -1719,9 +1738,23 @@ async function handleReadCss(args: Record<string, unknown>, ctx: MascotToolConte
     return { name: "读取CSS", success: true, data: parts.join("\n") };
 }
 
-async function writeCssAt(location: string, css: string, ctx: MascotToolContext, sessionName?: string): Promise<{ displayName?: string }> {
+async function writeCssAt(location: string, css: string, ctx: MascotToolContext, sessionName?: string): Promise<{ displayName?: string; night?: boolean }> {
     const { kvSet, kvRemove } = await import("./kv-db");
     const trimmed = css.trim();
+    // 夜间模式开着：写进这一格的夜间那份，白天的不动
+    if (isNightActive()) {
+        const target = location === "chat_session" || location === "story"
+            ? await (location === "chat_session" ? resolveChatSession(sessionName, ctx) : resolveStorySession(sessionName, ctx))
+            : null;
+        if (target && "error" in target) {
+            throw new Error(`${target.error}${target.choices ? `。可选会话：${target.choices.map((c) => `「${c}」`).join("、")}` : ""}`);
+        }
+        const key = nightCssKey(location, target?.sessionId);
+        if (key) {
+            setNightBinding(key, trimmed ? { kind: "own", value: trimmed } : null);
+            return { displayName: target?.displayName, night: true };
+        }
+    }
     if (location === "chat_app") {
         if (trimmed) kvSet("chat-app-custom-css", trimmed); else kvRemove("chat-app-custom-css");
         if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("chat-app-css-updated"));
@@ -1867,7 +1900,7 @@ async function handleOverwriteCss(args: Record<string, unknown>, ctx: MascotTool
     const sessionName = args.sessionName as string | undefined;
     if (!location || !CSS_LOCATION_LABELS[location]) return { name: "覆写CSS", success: false, error: `未知位置：${location}` };
     const result = await writeCssAt(location, css, ctx, sessionName);
-    return { name: "覆写CSS", success: true, data: `已覆写 ${location}${result.displayName ? `（${result.displayName}）` : ""} 的 CSS，共 ${css.length} 字符` };
+    return { name: "覆写CSS", success: true, data: `已覆写 ${location}${result.displayName ? `（${result.displayName}）` : ""} 的${result.night ? "夜间" : ""} CSS，共 ${css.length} 字符` };
 }
 
 async function handleClearCss(args: Record<string, unknown>, ctx: MascotToolContext): Promise<ToolResult> {
@@ -1875,7 +1908,7 @@ async function handleClearCss(args: Record<string, unknown>, ctx: MascotToolCont
     const sessionName = args.sessionName as string | undefined;
     if (!location || !CSS_LOCATION_LABELS[location]) return { name: "清除CSS", success: false, error: `未知位置：${location}` };
     const result = await writeCssAt(location, "", ctx, sessionName);
-    return { name: "清除CSS", success: true, data: `已清除 ${location}${result.displayName ? `（${result.displayName}）` : ""} 的 CSS` };
+    return { name: "清除CSS", success: true, data: `已清除 ${location}${result.displayName ? `（${result.displayName}）` : ""} 的${result.night ? "夜间" : ""} CSS${result.night ? "（夜里回到和白天一样）" : ""}` };
 }
 
 // ── Character Handlers ──────────────────────────

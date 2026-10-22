@@ -23,6 +23,7 @@ import {
 import { applyGroupOrder } from "@/lib/list-order";
 import { buildPinnedEntries, commitRootGroupOrder } from "@/lib/item-folders";
 import { Toggle } from "@/components/ui/form";
+import { getNightBinding, nightSlotKeys, setNightBinding, useNightRevision } from "@/lib/night-mode";
 import { useLongPressReorder } from "./use-long-press-reorder";
 import { testRegexRule } from "@/lib/llm-prompt-assembler";
 import { MacroEngine } from "@/lib/macro-engine";
@@ -214,6 +215,8 @@ function getRuleRawTagsLabel(rule: Pick<RegexRule, "tags" | "tagSets">): string 
 }
 
 export function RegexManager({ isActive = true }: { isActive?: boolean } = {}) {
+    // 夜间套装里「这个正则夜里换成谁」改了，这里跟着刷新
+    useNightRevision();
     const [groups, setGroups] = useState<RegexConfig[]>([]);
     const [activeGroupId, setActiveGroupId] = useState<string>("");
     const [viewMode, setViewMode] = useState<"list" | "detail">("list");
@@ -886,6 +889,27 @@ export function RegexManager({ isActive = true }: { isActive?: boolean } = {}) {
                                         onChange={(value) => updateGroup(activeGroup.id, { pinned: value || undefined })}
                                     />
                                 </div>
+
+                                {(() => {
+                                    const nightKey = nightSlotKeys.regex(activeGroup.id);
+                                    const binding = getNightBinding(nightKey);
+                                    return (
+                                        <div className="flex flex-col gap-2">
+                                            <label className="menu-label ts-13 font-semibold ml-1">夜间换成</label>
+                                            <select
+                                                className="ui-input ts-13"
+                                                value={binding?.kind === "swap" ? binding.targetId : ""}
+                                                onChange={(e) => setNightBinding(nightKey, e.target.value ? { kind: "swap", targetId: e.target.value } : null)}
+                                            >
+                                                <option value="">不换（夜里跟白天一样）</option>
+                                                {groups.filter(g => g.id !== activeGroup.id).map(g => (
+                                                    <option key={g.id} value={g.id}>{g.name || "未命名正则"}</option>
+                                                ))}
+                                            </select>
+                                            <p className="menu-desc ml-1">夜间模式开着时，显示用的这个正则换成选的那个。只换显示，不改发给 AI 的提示词；两个正则要的状态栏写法不一样的话，夜里可能显示不对。</p>
+                                        </div>
+                                    );
+                                })()}
                             </div>
 
                             <div className="flex flex-col gap-4 mt-2">

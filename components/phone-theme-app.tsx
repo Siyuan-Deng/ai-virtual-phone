@@ -7,6 +7,7 @@ import {
   Code2,
   Download,
   LayoutGrid,
+  Moon,
   PaintBucket,
   Plus,
   RotateCcw,
@@ -16,6 +17,9 @@ import {
   Wallpaper,
 } from "lucide-react";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
+import { NightAutoPage, NightModeCard } from "@/components/night/night-mode-card";
+import { isNightActive, useNightActive } from "@/lib/night-mode";
+import { NightSetPage } from "@/components/night/night-set-page";
 import { GlassIcon } from "@/components/ui/glass-icon";
 import { normalizeThemeProfile, resolveActiveIconSkins, DEFAULT_THEME_PROFILE, type ThemeProfile } from "@/lib/theme-types";
 import type { DesktopIconId, IconId } from "@/lib/desktop-config";
@@ -67,9 +71,11 @@ type ThemeSection =
   | "widgets"
   | "case"
   | "text"
-  | "css";
+  | "css"
+  | "nightAuto"
+  | "nightSet";
 
-type ThemeMenuItemSection = Exclude<ThemeSection, "menu"> | "transfer" | "reset";
+type ThemeMenuItemSection = Exclude<ThemeSection, "menu" | "nightAuto" | "nightSet"> | "transfer" | "reset";
 type WallpaperSliderField = "wallpaperOpacity" | "wallpaperBlur" | "wallpaperScale" | "wallpaperX" | "wallpaperY";
 
 type PhoneThemeAppProps = {
@@ -168,9 +174,11 @@ const SECTION_TITLES: Record<Exclude<ThemeSection, "menu">, string> = {
   case: "\u624B\u673A\u58F3",
   text: "\u6587\u5B57",
   css: "CSS \u53D8\u91CF",
+  nightAuto: "自动切换",
+  nightSet: "夜间套装",
 };
 
-const THEME_SECTIONS = new Set<string>(["menu", "palette", "wallpaper", "icons", "widgets", "case", "text", "css"]);
+const THEME_SECTIONS = new Set<string>(["menu", "palette", "wallpaper", "icons", "widgets", "case", "text", "css", "nightAuto", "nightSet"]);
 
 function isThemeSection(value: string): value is ThemeSection {
   return THEME_SECTIONS.has(value);
@@ -278,11 +286,26 @@ export function PhoneThemeApp({
   }
 
   const title = section === "menu" ? "\u5916\u89C2" : SECTION_TITLES[section];
+  const nightActive = useNightActive();
 
   return (
     <PageShell title={title} onBack={handleBack}>
+        {nightActive && ["palette", "wallpaper", "icons", "css"].includes(section) ? (
+          <div className="night-theme-banner">
+            <Moon size={14} aria-hidden="true" />
+            <span>夜间模式开着：这里改的只改夜间那份，白天的不动。</span>
+          </div>
+        ) : null}
         {section === "menu" ? (
           <div className="page-menu appearance-main-menu">
+            {/* 白天 / 夜间 */}
+            <div>
+              <h3 className="appearance-menu-section-title">Display</h3>
+              <div className="mt-2.5">
+                <NightModeCard onOpenAuto={() => setSection("nightAuto")} onOpenSet={() => setSection("nightSet")} />
+              </div>
+            </div>
+
             {/* Section 1: 外观定制 — 2x2 card grid */}
             <div>
               <h3 className="appearance-menu-section-title">Appearance</h3>
@@ -419,6 +442,10 @@ export function PhoneThemeApp({
               </div>
             </div>
           </div>
+        ) : section === "nightAuto" ? (
+          <NightAutoPage />
+        ) : section === "nightSet" ? (
+          <NightSetPage />
         ) : section === "wallpaper" ? (
           <WallpaperPage
             draft={draft}
@@ -939,6 +966,8 @@ function GlobalCSSPage({
   onNotice: (text: string) => void;
 }) {
   const [localCSS, setLocalCSS] = useState(() => {
+    // 夜间模式里编辑的是夜间那份，就是现在显示的这份
+    if (isNightActive()) return draft.globalCustomCSS;
     // Read latest from storage in case 小卷 updated it
     try {
       const { readThemeProfile } = require("@/lib/theme-storage");

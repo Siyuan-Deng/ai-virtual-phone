@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Check, ChevronLeft, ChevronRight, Plus, Trash2, Wand2, X } from "lucide-react";
 import { Avatar } from "./ui/primitives";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
+import { NightSideTabs, useNightDraft } from "@/components/ui/night-side-tabs";
+import { isNightActive, nightSlotKeys, setNightBinding, useNightText } from "@/lib/night-mode";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { CALENDAR_CSS_EXAMPLE } from "@/lib/css-examples";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
@@ -156,10 +158,16 @@ export function PhoneCalendarApp({
   const [appliedCalendarCss, setAppliedCalendarCss] = useState(() =>
     typeof window !== "undefined" ? kvGet("calendar-custom-css") || "" : ""
   );
+  // 「白天 | 夜间」：编辑的是哪一份；主题夜里也能单独选
+  const nightCss = useNightDraft(nightSlotKeys.calendar);
+  const calendarTheme = useNightText(nightSlotKeys.calendarTheme, config.theme);
+  const editingCss = nightCss.side === "night" ? nightCss.draft : calendarCustomCss;
+  const setEditingCss = nightCss.side === "night" ? nightCss.setDraft : setCalendarCustomCss;
   const handleApplyCalendarCss = () => {
     const trimmed = calendarCustomCss.trim();
     if (trimmed) kvSet("calendar-custom-css", trimmed);
     else kvRemove("calendar-custom-css");
+    nightCss.commit();
     setAppliedCalendarCss(trimmed);
     window.dispatchEvent(new CustomEvent("calendar-css-updated", { detail: trimmed }));
   };
@@ -670,8 +678,8 @@ export function PhoneCalendarApp({
   };
 
   return (
-    <div className="calendar-app-shell" data-calendar-theme={config.theme}>
-      {appliedCalendarCss && <SessionCustomCSS css={appliedCalendarCss} scope=".calendar-app-shell" />}
+    <div className="calendar-app-shell" data-calendar-theme={calendarTheme}>
+      <SessionCustomCSS css={appliedCalendarCss || ""} scope=".calendar-app-shell" nightKey={nightSlotKeys.calendar} />
       <div className="calendar-app">
         {view === "month" ? (
           <CalendarMonthPage
@@ -809,7 +817,7 @@ export function PhoneCalendarApp({
         <div className="modal-overlay calendar-edit-modal-overlay" onClick={() => setShowThemePanel(false)}>
           <div className="calendar-edit-modal calendar-theme-modal" onClick={e => e.stopPropagation()}>
             <div className="calendar-theme-modal-head">
-              <strong>主题</strong>
+              <strong>主题{nightCss.side === "night" && isNightActive() ? <small className="calendar-theme-night-note"> · 夜间</small> : null}</strong>
               <button type="button" onClick={() => setShowThemePanel(false)} className="calendar-icon-btn" aria-label="关闭">
                 <X size={16} />
               </button>
@@ -820,8 +828,13 @@ export function PhoneCalendarApp({
                   key={theme.id}
                   type="button"
                   className="calendar-theme-option"
-                  data-active={config.theme === theme.id ? "true" : undefined}
+                  data-active={calendarTheme === theme.id ? "true" : undefined}
                   onClick={() => {
+                    // 夜间模式开着：选的是夜间用的主题
+                    if (isNightActive()) {
+                      setNightBinding(nightSlotKeys.calendarTheme, { kind: "own", value: theme.id });
+                      return;
+                    }
                     const nextConfig = { ...config, theme: theme.id };
                     setConfig(nextConfig);
                     saveCalendarConfig(nextConfig);
@@ -834,10 +847,11 @@ export function PhoneCalendarApp({
             </div>
 
             <div className="calendar-theme-css-label">自定义 CSS</div>
+            <NightSideTabs state={nightCss} dayValue={calendarCustomCss} />
             <textarea
               className="calendar-css-textarea"
-              value={calendarCustomCss}
-              onChange={e => setCalendarCustomCss(e.target.value)}
+              value={editingCss}
+              onChange={e => setEditingCss(e.target.value)}
               placeholder="/* 输入 CSS 覆盖日历样式... */"
               spellCheck={false}
               autoCapitalize="off"
@@ -846,8 +860,8 @@ export function PhoneCalendarApp({
             <div className="calendar-theme-css-actions">
               <CSSSchemeBar
                 target="calendar"
-                currentCSS={calendarCustomCss}
-                onLoad={setCalendarCustomCss}
+                currentCSS={editingCss}
+                onLoad={setEditingCss}
                 btnStyle={{
                   width: 30,
                   height: 30,
@@ -865,8 +879,8 @@ export function PhoneCalendarApp({
                   accent: "var(--c-calendar-today)",
                 }}
               />
-              <button type="button" className="calendar-block-btn" data-variant="ghost" onClick={() => setCalendarCustomCss(CALENDAR_CSS_EXAMPLE)}>示例</button>
-              <button type="button" className="calendar-block-btn" data-variant="ghost" onClick={() => setCalendarCustomCss("")}>清空</button>
+              <button type="button" className="calendar-block-btn" data-variant="ghost" onClick={() => setEditingCss(CALENDAR_CSS_EXAMPLE)}>示例</button>
+              <button type="button" className="calendar-block-btn" data-variant="ghost" onClick={() => setEditingCss("")}>清空</button>
               <button type="button" className="calendar-block-btn" data-variant="primary" onClick={handleApplyCalendarCss}>应用</button>
             </div>
           </div>

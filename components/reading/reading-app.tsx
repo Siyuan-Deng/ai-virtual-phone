@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { hydrateKvDb } from "@/lib/kv-db";
 import { loadReadingCustomCss, saveReadingCustomCss } from "@/lib/reading-custom-css";
+import { nightSlotKeys, useNightText } from "@/lib/night-mode";
 import { hydrateReadingStorage } from "@/lib/reading-storage";
 import { ReadingShelf } from "./reading-shelf";
 import { ReadingViewer } from "./reading-viewer";
@@ -80,6 +81,7 @@ export default function ReadingApp({ onClose }: Props) {
     const [activeBook, setActiveBook] = useState<Book | null>(null);
     const [appearance, setAppearance] = useState<ReadingAppearance>(DEFAULT_READING_APPEARANCE);
     const [customCss, setCustomCss] = useState("");
+    const resolvedCustomCss = useNightText(nightSlotKeys.reading, customCss);
     const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
     const [customFontFamily, setCustomFontFamily] = useState<string | undefined>(undefined);
     const [annotationFontFamily, setAnnotationFontFamily] = useState<string | undefined>(undefined);
@@ -345,7 +347,7 @@ export default function ReadingApp({ onClose }: Props) {
         <div className="absolute inset-0" style={appearanceStyle}>
             <style>{readingFontCss}</style>
             {/* 用户自己写的阅读 CSS 放在最后，才盖得过上面那几条 */}
-            {customCss && <style>{customCss}</style>}
+            {resolvedCustomCss && <style>{resolvedCustomCss}</style>}
             {!activeBook && (
                 <ReadingShelf
                     onOpenBook={setActiveBook}

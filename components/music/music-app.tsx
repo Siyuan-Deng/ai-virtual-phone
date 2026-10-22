@@ -9,6 +9,8 @@ import {
 } from "@/lib/music-storage";
 import { useMusicControls, type MusicControlsValue } from "@/lib/music-context";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
+import { NightSideTabs, useNightDraft } from "@/components/ui/night-side-tabs";
+import { nightSlotKeys } from "@/lib/night-mode";
 import {
     isNeteaseConfigured, loadMusicApiConfig, saveMusicApiConfig,
     searchNetease, getNeteasePlayInfo, getNeteaseLyrics, getNeteaseSongDetail,
@@ -279,7 +281,7 @@ export default function MusicApp({ onClose }: Props) {
 
     return (
         <div className="music-app" style={appBgStyle(bgCfg)} {...(player.currentTrack ? { "data-nowbar": "" } : {})}>
-            {customCss && <SessionCustomCSS css={customCss} scope=".music-app" />}
+            <SessionCustomCSS css={customCss || ""} scope=".music-app" nightKey={nightSlotKeys.music} />
             {musicToast && (
                 <div className="music-toast-overlay">
                     <div className="music-toast-chip">
@@ -1879,11 +1881,16 @@ import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
 
 function MusicCssEditor({ onClose, onSave }: { onClose: () => void; onSave: (css: string) => void }) {
     const [css, setCss] = useState(() => kvGet("music-custom-css") || "");
+    // 「白天 | 夜间」：编辑的是哪一份
+    const night = useNightDraft(nightSlotKeys.music);
+    const editing = night.side === "night" ? night.draft : css;
+    const setEditing = night.side === "night" ? night.setDraft : setCss;
 
     const handleSave = () => {
         const trimmed = css.trim();
         if (trimmed) kvSet("music-custom-css", trimmed);
         else kvRemove("music-custom-css");
+        night.commit();
         onSave(trimmed);
         window.dispatchEvent(new CustomEvent("music-css-change", { detail: trimmed }));
         onClose();
@@ -1899,18 +1906,19 @@ function MusicCssEditor({ onClose, onSave }: { onClose: () => void; onSave: (css
             </div>
             <div className="music-settings-body">
                 <div className="music-settings-hint">输入 CSS 代码，覆盖音乐页面任意样式</div>
+                <NightSideTabs state={night} dayValue={css} />
                 <textarea
                     className="music-settings-input"
                     style={{ height: 280, resize: "none", fontFamily: "'SF Mono', 'Menlo', 'Monaco', monospace", fontSize: "calc(13px*var(--app-text-scale,1))", lineHeight: 1.6, padding: "12px 14px", whiteSpace: "pre-wrap", wordBreak: "break-all" }}
-                    value={css}
-                    onChange={e => setCss(e.target.value)}
+                    value={editing}
+                    onChange={e => setEditing(e.target.value)}
                     placeholder="/* 在此输入自定义 CSS... */"
                     spellCheck={false}
                     autoCapitalize="off"
                     autoCorrect="off"
                 />
                 <div className="music-settings-actions">
-                    <CSSSchemeBar target="music" currentCSS={css} onLoad={setCss} btnStyle={{
+                    <CSSSchemeBar target="music" currentCSS={editing} onLoad={setEditing} btnStyle={{
                       border: "1px solid var(--c-music-surface-solid, rgba(255,255,255,0.12))",
                       background: "var(--c-music-surface, rgba(255,255,255,0.06))",
                       color: "var(--c-music-text, #e0d8f0)",
@@ -1923,8 +1931,8 @@ function MusicCssEditor({ onClose, onSave }: { onClose: () => void; onSave: (css
                       inputBorder: "var(--c-music-surface-solid, rgba(255,255,255,0.12))",
                       accent: "var(--c-music-accent, #b49de8)",
                     }} />
-                    <button className="music-settings-btn" onClick={() => setCss(MUSIC_CSS_EXAMPLE)}>示例</button>
-                    <button className="music-settings-btn" onClick={() => setCss("")}>清空</button>
+                    <button className="music-settings-btn" onClick={() => setEditing(MUSIC_CSS_EXAMPLE)}>示例</button>
+                    <button className="music-settings-btn" onClick={() => setEditing("")}>清空</button>
                     <button className="music-settings-btn music-settings-btn-primary" onClick={handleSave}>保存</button>
                 </div>
             </div>

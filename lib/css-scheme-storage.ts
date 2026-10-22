@@ -57,3 +57,8 @@ export function renameScheme(id: string, name: string) {
   if (s) s.name = name;
   saveAll(all);
 }
+
+/** 按 id 找一个方案（夜间套装里记的是方案 id） */
+export function findScheme(id: string): CSSScheme | undefined {
+  return loadAll().find(s => s.id === id);
+}

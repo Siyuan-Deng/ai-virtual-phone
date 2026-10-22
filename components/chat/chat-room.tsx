@@ -57,6 +57,7 @@ import type { UserIdentity } from "@/components/settings/user-identity";
 import { AlertCircle, Blocks, Bookmark, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, ImageDown, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
 import { setDebugChatState } from "@/lib/debug-store";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
+import { nightSlotKeys, resolveNightStatusRender, swapNightRegexes, useNightRevision, useNightText } from "@/lib/night-mode";
 import { setChatActive } from "@/lib/music-action-queue";
 import { getMusicControlBridge } from "@/lib/music-control-bridge";
 import { findPlayableMatch, getNeteaseLyrics, getNeteaseSongDetail } from "@/lib/music-service";
@@ -1283,28 +1284,33 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [messages]);
 
+    // 夜间模式里这个聊天单独配了一张背景，就换成它
+    const backgroundImage = useNightText(nightSlotKeys.chatBg(session.id), session.backgroundImage || "");
     useEffect(() => {
-        if (!session.backgroundImage) {
+        if (!backgroundImage) {
             setBgImageResolved(null);
             setBgLoading(false);
             return;
         }
-        if (session.backgroundImage.startsWith("data:") || session.backgroundImage.startsWith("http")) {
-            setBgImageResolved(session.backgroundImage);
+        if (backgroundImage.startsWith("data:") || backgroundImage.startsWith("http")) {
+            setBgImageResolved(backgroundImage);
             setBgLoading(false);
             return;
         }
         // It's an ID — load from IndexedDB
         setBgLoading(true);
+        let cancelled = false;
         import("@/lib/chat-asset-storage").then(({ getChatImageFromIndexedDB }) => {
-            getChatImageFromIndexedDB(session.backgroundImage!).then(dataUrl => {
+            getChatImageFromIndexedDB(backgroundImage).then(dataUrl => {
+                if (cancelled) return;
                 if (dataUrl) {
                     setBgImageResolved(dataUrl);
                 }
                 setBgLoading(false);
             });
         });
-    }, [session.backgroundImage]);
+        return () => { cancelled = true; };
+    }, [backgroundImage]);
 
     // Message Actions state
     const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
@@ -1642,6 +1648,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             .map(id => allRegexes.find(regex => regex.id === id))
             .filter((regex): regex is RegexConfig => Boolean(regex));
     }, [regexRevision, session.contactId, session.isGroup]);
+    // 显示用的正则：夜间模式里配了「换成」的换掉（只换显示，编辑时跑的正则照白天）
+    const nightRevision = useNightRevision();
+    const displayRegexes = useMemo(
+        () => swapNightRegexes(activeRegexes, loadRegexes()),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [activeRegexes, nightRevision],
+    );
 
     // 流式预览的标签净化配置：与引擎同源（当前会话绑定的预设）。预设开启标签式思维链时，
     // 生成过程中的预览也要按同一套标签剥掉思考过程/摘要，否则最终消息里被引擎剥掉的内容
@@ -1684,12 +1697,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         placement: 1 | 2 | 5 | 6,
         isOffline = false,
     ) => {
-        if (!text || activeRegexes.length === 0) return text;
-        return applyDisplayRegex(text, activeRegexes, placement, {
+        if (!text || displayRegexes.length === 0) return text;
+        return applyDisplayRegex(text, displayRegexes, placement, {
             macroEngine: displayRegexMacroEngine,
             activeTags: getRegexActiveTags(isOffline),
         });
-    }, [activeRegexes, displayRegexMacroEngine, getRegexActiveTags]);
+    }, [displayRegexes, displayRegexMacroEngine, getRegexActiveTags]);
 
     const getMessageDisplayContent = useCallback((message: RenderChatMessage): string => (
         message.displayProjected
@@ -5605,9 +5618,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     return (
         <div ref={wrapperRef} className={`session-${session.id} chat-room-wrapper page-shell inset-0 flex flex-col z-20`} style={chatRoomBackgroundStyle} {...(bgLoading ? { "data-loading": "" } : {})} {...(bgImageResolved ? { "data-has-bg-image": "" } : {})} {...(showSettings ? { "data-settings-open": "" } : {})}>
             {/* Custom CSS Injection for this session — scoped to prevent leaking */}
-            {liveCSS && (
-                <SessionCustomCSS css={liveCSS} scope={`.session-${session.id}`} />
-            )}
+            <SessionCustomCSS css={liveCSS || ""} scope={`.session-${session.id}`} nightKey={nightSlotKeys.chatSession(session.id)} />
 
             {/* 全屏特效层（表情雨/礼花），不拦截任何触摸操作 */}
             <ChatScreenEffectOverlay active={activeScreenEffect} onDone={() => setActiveScreenEffect(null)} />
@@ -6296,7 +6307,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                     )}
                                     {renderMsg.statusPanel && (
                                         msg.statusRegionMode === "custom" && statusRegionCfg.renderHtml.trim() ? (
-                                            <CustomStatusFrame html={statusRegionCfg.renderHtml} raw={renderMsg.statusPanel} />
+                                            <CustomStatusFrame html={resolveNightStatusRender(session.id, statusRegionCfg.renderHtml)} raw={renderMsg.statusPanel} />
                                         ) : (
                                             <BilingualTextBlock text={msg.displayProjected ? renderMsg.statusPanel : renderDisplayText(renderMsg.statusPanel, 6, false)} mode="markdown" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} />
                                         )

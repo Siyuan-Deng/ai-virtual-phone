@@ -104,6 +104,9 @@ import {
   readThemeProfile,
   writeThemeProfile
 } from "@/lib/theme-storage";
+import { bgSetInterval } from "@/lib/bg-timer";
+import { NIGHT_MODE_CHANGED_EVENT, nightSlotKeys, tickNightAuto, useNightActive, useNightRevision, useNightText } from "@/lib/night-mode";
+import { overlayNightTheme, saveNightThemeGroups, splitNightThemeChange } from "@/lib/night-theme";
 import { THEME_PACKAGE_INSTALLED_EVENT } from "@/lib/theme-package";
 import {
   DEFAULT_THEME_PROFILE,
@@ -1118,8 +1121,42 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [musicCustomCss, setMusicCustomCss] = useState(() =>
     typeof window !== "undefined" ? kvGet("music-custom-css") || "" : ""
   );
+  const resolvedMusicCss = useNightText(nightSlotKeys.music, musicCustomCss);
   const [savedTheme, setSavedTheme] = useState<ThemeProfile>(() => initialThemeProfile ?? readInitialThemeProfile());
-  const [draftTheme, setDraftTheme] = useState<ThemeProfile>(() => initialThemeProfile ?? readInitialThemeProfile());
+  const [dayDraftTheme, setDraftTheme] = useState<ThemeProfile>(() => initialThemeProfile ?? readInitialThemeProfile());
+  // 夜间模式：外观里配了夜间那份的组叠上去；夜间时在外观 App 里拖着还没保存的那几组先放 nightThemeDraft
+  const nightActive = useNightActive();
+  const nightRevision = useNightRevision();
+  const [nightThemeDraft, setNightThemeDraft] = useState<Partial<ThemeProfile> | null>(null);
+  const draftTheme = useMemo(
+    () => (nightActive ? { ...overlayNightTheme(dayDraftTheme), ...(nightThemeDraft ?? {}) } : dayDraftTheme),
+    // nightRevision：夜间套装改了也要重算
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [nightActive, nightRevision, dayDraftTheme, nightThemeDraft],
+  );
+  useEffect(() => { setNightThemeDraft(null); }, [nightActive]);
+  // 自动切换：每半分钟、回到前台、手机深浅色变了都对一次；切了就提示一句
+  useEffect(() => {
+    const onChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ night: boolean; source: string }>).detail;
+      if (detail?.source === "settings") return;
+      setNotice(detail?.night ? "🌙 夜间模式" : "☀️ 白天模式");
+    };
+    window.addEventListener(NIGHT_MODE_CHANGED_EVENT, onChanged);
+    const tick = () => tickNightAuto();
+    void hydrateKvDb().then(tick);
+    const stop = bgSetInterval(tick, 30_000);
+    const onVisible = () => { if (document.visibilityState === "visible") tick(); };
+    document.addEventListener("visibilitychange", onVisible);
+    const media = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    media?.addEventListener?.("change", tick);
+    return () => {
+      window.removeEventListener(NIGHT_MODE_CHANGED_EVENT, onChanged);
+      stop();
+      document.removeEventListener("visibilitychange", onVisible);
+      media?.removeEventListener?.("change", tick);
+    };
+  }, []);
   useEffect(() => {
     activeAppRef.current = activeApp;
   }, [activeApp]);
@@ -3505,6 +3542,29 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     setDraftTheme(persisted);
   }
 
+  /** 外观 App / 桌面定制里的改动：夜间模式开着时，改到主题色、壁纸这些组的只改夜间那份 */
+  function handleThemeDraftChange(next: ThemeProfile): void {
+    if (!nightActive) {
+      setDraftTheme(next);
+      return;
+    }
+    const { nightPatch, dayPatch } = splitNightThemeChange(draftTheme, next);
+    if (Object.keys(dayPatch).length) setDraftTheme(prev => ({ ...prev, ...dayPatch }));
+    if (Object.keys(nightPatch).length) setNightThemeDraft(prev => ({ ...(prev ?? {}), ...nightPatch }));
+  }
+
+  async function handleThemeApply(next: ThemeProfile): Promise<void> {
+    if (!nightActive) {
+      await applyTheme(next);
+      return;
+    }
+    // 和已经存下的夜间外观比：改了的组存成夜间单独一份，其余（壁纸库、状态栏开关……）照常存白天
+    const { dayPatch, groups } = splitNightThemeChange(overlayNightTheme(dayDraftTheme), next);
+    saveNightThemeGroups(next, groups);
+    setNightThemeDraft(null);
+    if (Object.keys(dayPatch).length) await applyTheme({ ...dayDraftTheme, ...dayPatch });
+  }
+
   /**
    * Suspend real backdrop-filter blur on glass widgets for a short window while
    * the desktop is busy adding/dragging. The live blur is the dominant GPU cost
@@ -4048,8 +4108,8 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
       return (
         <PhoneThemeApp
           draft={draftTheme}
-          onDraftChange={setDraftTheme}
-          onApply={applyTheme}
+          onDraftChange={handleThemeDraftChange}
+          onApply={handleThemeApply}
           onClose={() => setActiveApp(null)}
           onNotice={setNotice}
           widgets={widgets}
@@ -4489,7 +4549,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
               ) : null}
 
               {/* Music custom CSS — injected at shell level so it persists across apps */}
-              {musicCustomCss && <style dangerouslySetInnerHTML={{ __html: musicCustomCss }} />}
+              {resolvedMusicCss && <style dangerouslySetInnerHTML={{ __html: resolvedMusicCss }} />}
 
               {/* Music overlays are isolated so playback progress does not rerender the desktop shell. */}
               <MusicShellOverlays
@@ -4980,8 +5040,8 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
               {showDesktopCustomizer && (
                 <DesktopCustomizer
                   draft={draftTheme}
-                  onDraftChange={setDraftTheme}
-                  onApply={applyTheme}
+                  onDraftChange={handleThemeDraftChange}
+                  onApply={handleThemeApply}
                   onClose={() => setShowDesktopCustomizer(false)}
                 />
               )}

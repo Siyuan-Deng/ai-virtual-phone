@@ -1,0 +1,501 @@
+/* ══════════════════════════════════════════
+   一键夜间：编辑框顶上的「白天 | 夜间」、外观里的夜间卡和夜间套装
+   编辑框散在各个 App 里，颜色尽量跟着当前文字色走
+   ══════════════════════════════════════════ */
+
+.night-side {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.night-side-tabs {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 10px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.night-side-tabs button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  font: inherit;
+  font-size: calc(12.5px * var(--app-text-scale, 1));
+  cursor: pointer;
+}
+
+.night-side-tabs button[data-on="true"] {
+  opacity: 1;
+  font-weight: 600;
+  background: var(--c-panel, #ffffff);
+  color: var(--c-text-title, #1f2229);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.night-side-tabs button[data-night="true"][data-on="true"] {
+  background: #232a3c;
+  color: #e7ebf6;
+}
+
+.night-side-hint {
+  font-size: calc(11.5px * var(--app-text-scale, 1));
+  line-height: 1.5;
+  opacity: 0.65;
+}
+
+.night-side-copy {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-icon-active, #5b8fb9);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* ── 外观 App：白天 / 夜间卡 ── */
+.night-card-modes {
+  display: flex;
+  justify-content: center;
+  gap: 34px;
+  padding: 18px 16px 10px;
+}
+
+.night-card-mode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-text-title);
+  font: inherit;
+  cursor: pointer;
+}
+
+.night-card-thumb {
+  width: 56px;
+  height: 104px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 7px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: linear-gradient(#eef2fb, #d8e3f6);
+}
+
+.night-card-thumb i {
+  display: block;
+  height: 9px;
+  border-radius: 5px;
+  background: #ffffff;
+}
+
+.night-card-thumb i:nth-child(2) {
+  width: 70%;
+  align-self: flex-end;
+  background: #95ec69;
+}
+
+.night-card-thumb.is-night {
+  background: linear-gradient(#1f2536, #0f1320);
+}
+
+.night-card-thumb.is-night i {
+  background: #343c52;
+}
+
+.night-card-thumb.is-night i:nth-child(2) {
+  background: #3d6b4a;
+}
+
+.night-card-mode-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: calc(12.5px * var(--app-text-scale, 1));
+}
+
+/* 圆形单选：选中是实心蓝底加白勾 */
+.night-card-radio {
+  position: relative;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--c-icon) 70%, transparent);
+}
+
+.night-card-radio[data-on="true"] {
+  border: 0;
+  background: var(--c-icon-active);
+}
+
+.night-card-radio[data-on="true"]::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 3.5px;
+  width: 4px;
+  height: 9px;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.night-card-row .menu-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--c-icon);
+}
+
+.night-switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 11px;
+  background: var(--c-page-body-bg);
+  transition: background-color 0.2s;
+  cursor: pointer;
+}
+
+.night-switch[data-on="true"] {
+  background: var(--c-success);
+}
+
+.night-switch i {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  transition: left 0.2s;
+}
+
+.night-switch[data-on="true"] i {
+  left: 20px;
+}
+
+/* 自动切换页 / 夜间套装页 */
+.night-page {
+  flex: 1 1 auto;
+  /* 和外观里其他页一样：嵌套 flex 列里要 min-height:0 才滚得动（iOS） */
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px 24px;
+}
+
+.night-page-note {
+  margin: 0 6px;
+  color: var(--c-icon);
+  font-size: calc(12px * var(--app-text-scale, 1));
+  line-height: 1.55;
+}
+
+.night-time-row {
+  padding-left: 48px;
+  cursor: default;
+}
+
+.night-time-input {
+  margin-left: auto;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--c-input);
+  color: var(--c-text-title);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 外观里各页：夜间模式开着时顶上那句 */
+.night-theme-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 16px 4px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #232a3c;
+  color: #e7ebf6;
+  font-size: calc(12px * var(--app-text-scale, 1));
+  line-height: 1.45;
+}
+
+/* ── 夜间套装总表 ── */
+.night-set-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--ui-radius-panel, 16px);
+  background: #1e2433;
+  color: #e7ebf6;
+  font-size: calc(12.5px * var(--app-text-scale, 1));
+  line-height: 1.45;
+}
+
+.night-set-summary b {
+  display: block;
+  font-size: calc(14px * var(--app-text-scale, 1));
+}
+
+.night-set-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.night-set-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.night-set-group-head .appearance-menu-section-title {
+  flex: 1;
+}
+
+.night-set-group-head button {
+  margin-top: 8px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--c-icon-active);
+  font: inherit;
+  font-size: calc(12px * var(--app-text-scale, 1));
+  cursor: pointer;
+}
+
+.night-set-badge {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--c-input);
+  color: var(--c-text);
+  font-size: calc(12px * var(--app-text-scale, 1));
+}
+
+.night-set-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.night-set-chip {
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--c-input);
+  color: var(--c-icon);
+  font-size: calc(11px * var(--app-text-scale, 1));
+}
+
+.night-set-chip[data-tone="scheme"] {
+  background: color-mix(in srgb, var(--c-icon-active) 14%, transparent);
+  color: var(--c-icon-active);
+}
+
+.night-set-chip[data-tone="own"] {
+  background: #2a3045;
+  color: #dfe4f5;
+}
+
+/* 点一格从底下弹出来 */
+.night-sheet-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.night-sheet {
+  width: 100%;
+  max-height: 86%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 18px calc(18px + env(safe-area-inset-bottom, 0px));
+  border-radius: 18px 18px 0 0;
+  background: var(--c-panel, #ffffff);
+  color: var(--c-text-title);
+}
+
+.night-sheet-grab {
+  width: 36px;
+  height: 4px;
+  margin: 0 auto 10px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--c-icon) 40%, transparent);
+}
+
+.night-sheet h4 {
+  margin: 0;
+  font-size: calc(15px * var(--app-text-scale, 1));
+}
+
+.night-sheet-sub {
+  margin-bottom: 6px;
+  color: var(--c-icon);
+  font-size: calc(12px * var(--app-text-scale, 1));
+}
+
+.night-sheet-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 0;
+  border: 0;
+  border-top: 1px solid var(--c-card-border, rgba(0, 0, 0, 0.06));
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: calc(13.5px * var(--app-text-scale, 1));
+  text-align: left;
+  cursor: pointer;
+}
+
+.night-sheet-choice small {
+  display: block;
+  margin-top: 1px;
+  color: var(--c-icon);
+  font-size: calc(11.5px * var(--app-text-scale, 1));
+  line-height: 1.45;
+}
+
+.night-sheet-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 0 10px 30px;
+}
+
+.night-sheet-chips button {
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--c-input);
+  color: var(--c-text-title);
+  font: inherit;
+  font-size: calc(12px * var(--app-text-scale, 1));
+  cursor: pointer;
+}
+
+.night-sheet-chips button[data-on="true"] {
+  background: var(--c-icon-active);
+  color: #ffffff;
+}
+
+.night-sheet-empty {
+  color: var(--c-icon);
+  font-size: calc(12px * var(--app-text-scale, 1));
+}
+
+.night-sheet-warn {
+  margin: 0 0 8px 30px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: #fff3e8;
+  color: #b4561f;
+  font-size: calc(11.5px * var(--app-text-scale, 1));
+  line-height: 1.5;
+}
+
+.night-sheet-own {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 0 0 10px 30px;
+}
+
+.night-sheet-own textarea {
+  width: 100%;
+  min-height: 150px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: #232733;
+  color: #c9d1e6;
+  font: calc(12px * var(--app-text-scale, 1)) / 1.6 ui-monospace, Menlo, monospace;
+  resize: vertical;
+}
+
+.night-sheet-own .night-side-copy {
+  margin-left: 0;
+  font-size: calc(12px * var(--app-text-scale, 1));
+}
+
+.night-sheet-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.night-sheet-actions button {
+  flex: 1;
+  padding: 11px 0;
+  border: 0;
+  border-radius: 12px;
+  background: var(--c-input);
+  color: var(--c-text-title);
+  font: inherit;
+  font-size: calc(13.5px * var(--app-text-scale, 1));
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.night-sheet-actions button[data-primary="true"] {
+  background: #232a3c;
+  color: #e7ebf6;
+}
+
+.night-sheet-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.calendar-theme-night-note {
+  font-size: 0.8em;
+  font-weight: 500;
+  opacity: 0.6;
+}

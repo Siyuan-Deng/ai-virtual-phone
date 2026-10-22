@@ -55,6 +55,7 @@ import { AppApiPickerDialog } from "@/components/settings/app-api-picker-dialog"
 import { AppWorldBookPickerDialog } from "@/components/settings/app-worldbook-picker-dialog";
 import { characterAppWorldBookLabel, inheritedCharacterAppApiLabel, loadCharacterAppApiId } from "@/lib/app-api-binding";
 
+
 // 自定义状态栏预填模板：微博主页（契约=「状态栏」章节整段正文，含【逻辑】【格式】与包裹要求）
 // 预览用的默认示例数据：契约没有自带示例时兜底，字段与下面的微博模板对应
 const STATUS_REGION_STARTER_PREVIEW = "名字=林晚\n认证=美食探店博主 · 深夜觅食团成员\n简介=白天写方案，晚上寻宵夜｜私信不回工作请走邮箱\n关注=132\n粉丝=8.7万\n帖子=23分钟前|谁懂啊，加班到十点，楼下面馆居然还给我留了最后一碗牛肉面🥹 #深夜食堂# 老板说看我常来……突然就不想跳槽了|🍜🌃✨|56|203|1.2万\n评论=小奶糖|这就是深夜的意义吧|赞 231\n评论=风住了|老板收留我当洗碗工吧，只求管饭|赞 89\n评论=momo不吃香菜|蹲一个面馆定位！|赞 156";
@@ -182,6 +183,8 @@ import {
     DEFAULT_OFFLINE_CHAT_BILINGUAL_PROMPT,
 } from "@/lib/bilingual-prompt-defaults";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
+import { NightSideTabs, useNightDraft } from "@/components/ui/night-side-tabs";
+import { getNightBinding, nightSlotKeys, setNightBinding, useNightActive, useNightRevision } from "@/lib/night-mode";
 import { MessageBubble, isStandaloneHtmlPreviewContent } from "./message-bubble";
 import { ScreenEffectSettingsModal } from "./screen-effect-settings-modal";
 
@@ -199,6 +202,16 @@ type ChatSettingsPanelProps = {
 const chatInfoIconStyle = (color: string): CSSProperties => ({
     "--icon-color": color,
 } as CSSProperties);
+
+/** 状态栏方案存的是「契约 + 渲染 + 示例」一整包，夜间那份只要渲染 */
+function statusSchemeRender(css: string): string {
+    try {
+        const parsed = JSON.parse(css) as { renderHtml?: unknown };
+        return typeof parsed.renderHtml === "string" ? parsed.renderHtml : "";
+    } catch {
+        return "";
+    }
+}
 
 type SearchResultRole = "user" | "assistant" | "system";
 type SearchResultMediaType = NonNullable<ChatMessage["mediaType"]>;
@@ -324,6 +337,10 @@ export function ChatSettingsPanel({
     const [showStatusRegionDialog, setShowStatusRegionDialog] = useState(false);
     const [draftContract, setDraftContract] = useState("");
     const [draftRender, setDraftRender] = useState("");
+    // 状态栏的「白天 | 夜间」：夜里只换渲染，契约照白天
+    const nightRender = useNightDraft(nightSlotKeys.chatStatus(session.id), statusSchemeRender);
+    const renderEditing = nightRender.side === "night" ? nightRender.draft : draftRender;
+    const setRenderEditing = nightRender.side === "night" ? nightRender.setDraft : setDraftRender;
     const [statusPreviewRaw, setStatusPreviewRaw] = useState(STATUS_REGION_STARTER_PREVIEW);
     const [previewHtml, setPreviewHtml] = useState("");
     const statusImportInputRef = useRef<HTMLInputElement | null>(null);
@@ -429,6 +446,13 @@ export function ChatSettingsPanel({
         const latest = sessions.find(s => s.id === session.id);
         return (latest as Record<string, unknown>)?.customCSS as string || session.customCSS || "";
     });
+    // 「白天 | 夜间」：编辑的是哪一份
+    const nightActive = useNightActive();
+    useNightRevision();
+    const nightBgBinding = getNightBinding(nightSlotKeys.chatBg(session.id));
+    const nightCSS = useNightDraft(nightSlotKeys.chatSession(session.id));
+    const cssEditing = nightCSS.side === "night" ? nightCSS.draft : customCSS;
+    const setCssEditing = nightCSS.side === "night" ? nightCSS.setDraft : setCustomCSS;
 
     const [showConfirmClear, setShowConfirmClear] = useState(false);
     const [showConfirmClearOffline, setShowConfirmClearOffline] = useState(false);
@@ -1198,12 +1222,37 @@ export function ChatSettingsPanel({
                 <div className="menu-group">
                     <label className="menu-item">
                         <ChatInfoIcon icon={ImageIcon} color={BINDING_ACCENTS.api} />
-                        <div className="menu-label-group"><span className="menu-label">聊天背景</span></div>
+                        <div className="menu-label-group">
+                            <span className="menu-label">聊天背景</span>
+                            {nightActive ? <span className="menu-desc">夜间模式开着：换的是夜间那张</span> : null}
+                        </div>
                         <div className="menu-right">
-                            {backgroundImage && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setBackgroundImage(""); updateSession({ backgroundImage: "" }); }}>清除</button></>}
+                            {nightActive ? (
+                                nightBgBinding?.kind === "own"
+                                    ? <><span className="menu-desc mr-1">夜间已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setNightBinding(nightSlotKeys.chatBg(session.id), null); }}>清除</button></>
+                                    : <span className="menu-desc mr-1">跟白天</span>
+                            ) : (
+                                backgroundImage && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setBackgroundImage(""); updateSession({ backgroundImage: "" }); }}>清除</button></>
+                            )}
                             <ChevronRight size={16} />
                         </div>
-                        <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setBackgroundImage, "backgroundImage")} className="hidden" />
+                        <input
+                            type="file"
+                            accept="image/*"
+                            onChange={e => {
+                                if (!nightActive) {
+                                    void handleImageUpload(e, setBackgroundImage, "backgroundImage");
+                                    return;
+                                }
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                void import("@/lib/chat-asset-storage")
+                                    .then(({ saveChatImageToIndexedDB }) => saveChatImageToIndexedDB(file))
+                                    .then(id => setNightBinding(nightSlotKeys.chatBg(session.id), { kind: "own", value: id }))
+                                    .catch(() => alert("图片保存失败，请重试"));
+                            }}
+                            className="hidden"
+                        />
                     </label>
                     {session.isGroup ? (
                         <>
@@ -1601,19 +1650,20 @@ export function ChatSettingsPanel({
                             <p className="ts-13 text-[var(--c-text)] mb-3 leading-relaxed">
                                 支持 :root 变量和选择器，仅作用于本会话。
                             </p>
+                            <NightSideTabs state={nightCSS} dayValue={customCSS} />
                             <textarea
                                 className="ui-textarea font-mono ts-13 leading-relaxed flex-1"
                                 style={{ minHeight: 280, resize: "none", scrollbarWidth: "none" }}
                                 placeholder={`:root {\n  --c-bubble-self: #95ec69;\n}\n\n.chat-bubble-role-user {\n  border-radius: 6px;\n}\n\n.chat-html-inline-frame {\n  max-height: min(36vh, 340px);\n}`}
-                                value={customCSS}
-                                onChange={e => setCustomCSS(e.target.value)}
+                                value={cssEditing}
+                                onChange={e => setCssEditing(e.target.value)}
                                 spellCheck={false}
                             />
                             <div className="flex gap-2 mt-3 items-center">
-                                <CSSSchemeBar target="chat_session" currentCSS={customCSS} onLoad={setCustomCSS} />
-                                <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => setCustomCSS(CHAT_SESSION_CSS_EXAMPLE)}>示例</button>
-                                <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => setCustomCSS("")}>清除</button>
-                                <button type="button" className="ui-btn ui-btn-soft-action flex-1" onClick={() => { updateSession({ customCSS }); window.dispatchEvent(new CustomEvent("chat-session-css-updated", { detail: { sessionId: session.id, css: customCSS } })); setEditingCSS(false); }}>应用</button>
+                                <CSSSchemeBar target="chat_session" currentCSS={cssEditing} onLoad={setCssEditing} />
+                                <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => setCssEditing(CHAT_SESSION_CSS_EXAMPLE)}>示例</button>
+                                <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => setCssEditing("")}>清除</button>
+                                <button type="button" className="ui-btn ui-btn-soft-action flex-1" onClick={() => { updateSession({ customCSS }); nightCSS.commit(); window.dispatchEvent(new CustomEvent("chat-session-css-updated", { detail: { sessionId: session.id, css: customCSS } })); setEditingCSS(false); }}>应用</button>
                             </div>
                         </div>
                     </PageShell>
@@ -1780,9 +1830,12 @@ export function ChatSettingsPanel({
                                 <span className="ts-12 font-semibold text-[var(--c-text-title)]">输出渲染</span>
                                 <span className="ts-10 opacity-40">HTML · 沙盒运行</span>
                             </div>
+                            <div className="mt-1">
+                                <NightSideTabs state={nightRender} dayValue={draftRender} nightNote="夜间只换渲染，上面的契约照白天；夜间这份要的字段和契约对不上，夜里可能显示不全。" />
+                            </div>
                             <textarea
-                                value={draftRender}
-                                onChange={e => setDraftRender(e.target.value)}
+                                value={renderEditing}
+                                onChange={e => setRenderEditing(e.target.value)}
                                 className="ui-input mt-1 w-full font-mono"
                                 style={{ minHeight: 180, fontSize: 12, lineHeight: 1.6, border: "none", borderRadius: 12, background: "color-mix(in srgb, var(--c-text) 6%, transparent)" }}
                                 spellCheck={false}
@@ -1792,7 +1845,7 @@ export function ChatSettingsPanel({
                                     <span className="ts-12 font-semibold text-[var(--c-text-title)]">预览</span>
                                     <span className="ts-10 opacity-40">示例数据可改</span>
                                 </div>
-                                <button type="button" className="modal-header-btn modal-header-btn-muted" aria-label="运行预览" onClick={() => setPreviewHtml(draftRender)}><Play size={15} /></button>
+                                <button type="button" className="modal-header-btn modal-header-btn-muted" aria-label="运行预览" onClick={() => setPreviewHtml(renderEditing)}><Play size={15} /></button>
                             </div>
                             <textarea
                                 value={statusPreviewRaw}
@@ -1822,6 +1875,7 @@ export function ChatSettingsPanel({
                                     const contract = draftContract.trim();
                                     const renderHtml = draftRender.trim();
                                     saveStatusRegion({ mode: contract && renderHtml ? "custom" : "off", contract, renderHtml, previewRaw: statusPreviewRaw });
+                                    nightRender.commit();
                                     setShowStatusRegionDialog(false);
                                 }}
                             >
