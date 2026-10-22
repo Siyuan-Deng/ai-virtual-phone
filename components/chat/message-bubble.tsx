@@ -23,7 +23,7 @@ import remarkBreaks from "remark-breaks";
 import { createPortal } from "react-dom";
 import { Blocks, Maximize2, ReceiptText } from "lucide-react";
 import { retryChatGeneratedImage } from "@/lib/generated-image-retry";
-import { hasCharacterReferenceImage } from "@/lib/image-generation-service";
+import { hasCharacterReferenceImage, isImageGenerationConfigured } from "@/lib/image-generation-service";
 import { GeneratedImageErrorDialog } from "./generated-image-error-dialog";
 import { ScanPayCard } from "@/components/chat/scan-pay-card";
 import { payWithWalletBalance } from "@/lib/wallet-storage";
@@ -1307,6 +1307,11 @@ function ImageBubble({
             setRetryError("提示词不能为空");
             return;
         }
+        // 生图没配置：就在这个框里说一声，不关框、不弹失败
+        if (!isImageGenerationConfigured()) {
+            setRetryError("还没配置生图：先去 设置 → 图像生成 里打开并填好");
+            return;
+        }
         const latestHasRef = hasCharacterReferenceImage(characterId);
         setShowPromptEditor(false);
         setRegenerating(true);
@@ -1975,6 +1980,10 @@ function MediaFileBubble({
         const nextDescription = imagePromptDraft.trim();
         if (!nextDescription) {
             setImageRetryError("提示词不能为空");
+            return;
+        }
+        if (!isImageGenerationConfigured()) {
+            setImageRetryError("还没配置生图：先去 设置 → 图像生成 里打开并填好");
             return;
         }
         const latestHasRef = hasCharacterReferenceImage(characterId);

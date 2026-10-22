@@ -19,7 +19,7 @@ import { buildTwoLevelMomentThreads } from "@/lib/moments-comment-threading";
 import { getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
 import { splitBilingualText } from "@/lib/bilingual-text";
 import { retryMomentGeneratedPhoto } from "@/lib/generated-image-retry";
-import { hasCharacterReferenceImage } from "@/lib/image-generation-service";
+import { hasCharacterReferenceImage, isImageGenerationConfigured } from "@/lib/image-generation-service";
 import { GeneratedImageErrorDialog } from "./generated-image-error-dialog";
 import { Trash2, MoreHorizontal, MapPin, Heart, MessageCircle, Pencil } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui";
@@ -271,6 +271,11 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
         const nextDescription = photoPromptDraft.trim();
         if (!nextDescription) {
             setPhotoRetryError("提示词不能为空");
+            return;
+        }
+        // 生图没配置：就在这个框里说一声，不关框、不弹失败
+        if (!isImageGenerationConfigured()) {
+            setPhotoRetryError("还没配置生图：先去 设置 → 图像生成 里打开并填好");
             return;
         }
         const latestHasRef = hasCharacterReferenceImage(characterId);

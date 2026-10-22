@@ -724,6 +724,27 @@ export async function fetchNovelAiModels(apiKey: string): Promise<string[]> {
   }
 }
 
+/** 生图没打开或没填全。这不算「生成失败」：各处自动生图碰到它不弹窗 */
+export class ImageGenerationNotConfiguredError extends Error {
+  constructor() {
+    super("生图未配置或已关闭");
+    this.name = "ImageGenerationNotConfiguredError";
+  }
+}
+
+export function isImageGenerationNotConfiguredError(error: unknown): boolean {
+  return error instanceof ImageGenerationNotConfiguredError;
+}
+
+/** 生图打开了、当前用的那套必填项也都填了（和 generateImageFromConfiguredApi 返回 null 的条件一致） */
+export function isImageGenerationConfigured(settings: ImageGenerationSettings = loadImageGenerationSettings()): boolean {
+  if (!settings.enabled) return false;
+  if (settings.provider === "novelai") return Boolean(settings.novelai?.apiKey?.trim());
+  const preset = settings.openaiPresets?.find(item => item.id === settings.activeOpenAiPresetId) || settings.openaiPresets?.[0];
+  const active = preset ? { ...settings, ...preset } : settings;
+  return Boolean(active.apiKey.trim() && active.baseUrl.trim() && active.model.trim());
+}
+
 export async function generateImageFromConfiguredApi(params: {
   description: string;
   characterId?: string;

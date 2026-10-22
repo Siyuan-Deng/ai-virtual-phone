@@ -75,6 +75,7 @@ import {
     generateAndApplyChatGeneratedImage,
     isPendingChatGeneratedImageMessage,
 } from "@/lib/generated-image-retry";
+import { isImageGenerationNotConfiguredError } from "@/lib/image-generation-service";
 import { scrollElementWithinContainer } from "@/lib/dom-scroll";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
 import { ChatScreenEffectOverlay, type ActiveScreenEffect } from "./chat-screen-effect";
@@ -2809,7 +2810,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         if (!isPendingChatGeneratedImageMessage(message)) return Promise.resolve(null);
         return generateAndApplyChatGeneratedImage(message, characterId || session.contactId, { signal: guard?.signal })
             .catch(error => {
-                if (!isAbortLikeError(error)) {
+                // 生图没配置：气泡照样标成没生成，但不弹窗
+                if (!isAbortLikeError(error) && !isImageGenerationNotConfiguredError(error)) {
                     console.warn("[ImageGeneration] Failed to generate chat image:", error);
                     const reason = error instanceof Error ? error.message : String(error);
                     setImageGenerationFailure(prev => prev ?? reason);

@@ -1,6 +1,6 @@
 import { saveChatImageToIndexedDB } from "./chat-asset-storage";
 import { syncChatGeneratedImagePromptText, updateChatMessage, type ChatMessage } from "./chat-storage";
-import { generatedImageFilename, generateImageFromConfiguredApi } from "./image-generation-service";
+import { generatedImageFilename, generateImageFromConfiguredApi, ImageGenerationNotConfiguredError } from "./image-generation-service";
 import { updateMomentPost } from "./moments-storage";
 import type { MomentPost } from "./moments-types";
 
@@ -79,7 +79,7 @@ export async function generateAndApplyChatGeneratedImage(
             useReferenceImage: effectiveUseReference,
             signal: options?.signal,
         });
-        if (!generated) throw new Error("生图配置未启用或不完整");
+        if (!generated) throw new ImageGenerationNotConfiguredError();
 
         const fileName = generatedImageFilename(description, generated.mimeType);
         const previousData = message.mediaData ?? {};
@@ -158,7 +158,7 @@ export async function retryMomentGeneratedPhoto(
             characterId: post.authorType === "character" ? post.authorId : undefined,
             useReferenceImage: effectiveUseReference,
         });
-        if (!generated) throw new Error("生图配置未启用或不完整");
+        if (!generated) throw new ImageGenerationNotConfiguredError();
 
         const assetId = await saveChatImageToIndexedDB(generated.blob);
         const updated = updateMomentPost(post.id, {
