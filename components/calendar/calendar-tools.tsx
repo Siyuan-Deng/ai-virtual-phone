@@ -145,7 +145,8 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     );
 }
 
-/** 待办清单编辑器：插件的 renderTodoEditor（allowDeadline 时每行多一排「截止」） */
+/** 待办清单编辑器：插件的 renderTodoEditor（allowDeadline 时每行多一排「截止」）。
+ *  除了能勾的待办，还能加要点（•）：只是一条列表项，没有勾也没有截止 */
 export function TodoListEditor({
     todos,
     onChange,
@@ -173,27 +174,31 @@ export function TodoListEditor({
             <div className="caltool-checklist" ref={listRef}>
                 {todos.map((todo, index) => (
                     <div key={todo.id} className="caltool-check-row">
-                        <input
-                            type="checkbox"
-                            checked={todo.done}
-                            onChange={(event) => patch(index, { done: event.target.checked })}
-                        />
+                        {todo.bullet ? (
+                            <span className="caltool-bullet-mark" aria-hidden="true">•</span>
+                        ) : (
+                            <input
+                                type="checkbox"
+                                checked={todo.done}
+                                onChange={(event) => patch(index, { done: event.target.checked })}
+                            />
+                        )}
                         <input
                             type="text"
                             className="ui-input"
                             value={todo.text}
-                            placeholder="待办事项"
+                            placeholder={todo.bullet ? "要点" : "待办事项"}
                             onChange={(event) => patch(index, { text: event.target.value })}
                         />
                         <button
                             type="button"
                             className="caltool-icon-button"
-                            aria-label="删除待办"
+                            aria-label={todo.bullet ? "删除要点" : "删除待办"}
                             onClick={() => onChange(todos.filter((_, i) => i !== index))}
                         >
                             ×
                         </button>
-                        {allowDeadline ? (
+                        {allowDeadline && !todo.bullet ? (
                             <div className="caltool-deadline-editor">
                                 <span className="caltool-deadline-label">截止</span>
                                 <input
@@ -215,19 +220,25 @@ export function TodoListEditor({
                     </div>
                 ))}
             </div>
-            <button
-                type="button"
-                className="caltool-add-row"
-                onClick={() => {
-                    focusNewRef.current = true;
-                    onChange([...todos, {
-                        id: makeId("todo"), text: "", done: false, dueDate: "", dueTime: "",
-                        createdAt: new Date().toISOString(),
-                    }]);
-                }}
-            >
-                ＋ 添加待办
-            </button>
+            <div className="caltool-add-rows">
+                {([false, true] as const).map((bullet) => (
+                    <button
+                        key={bullet ? "bullet" : "todo"}
+                        type="button"
+                        className="caltool-add-row"
+                        onClick={() => {
+                            focusNewRef.current = true;
+                            onChange([...todos, {
+                                id: makeId("todo"), text: "", done: false, dueDate: "", dueTime: "",
+                                createdAt: new Date().toISOString(),
+                                ...(bullet ? { bullet: true } : {}),
+                            }]);
+                        }}
+                    >
+                        {bullet ? "＋ 添加要点" : "＋ 添加待办"}
+                    </button>
+                ))}
+            </div>
         </>
     );
 }
@@ -343,6 +354,14 @@ function MemoViewer({ memoId, nav, close }: { memoId: string; nav: CalendarToolN
                 <section className="caltool-memo-view-checklist">
                     <label className="menu-desc">清单</label>
                     {checklist.map((todo) => {
+                        if (todo.bullet) {
+                            return (
+                                <div key={todo.id} className="caltool-view-todo is-bullet">
+                                    <span className="caltool-bullet-mark" aria-hidden="true">•</span>
+                                    <span className="caltool-view-todo-content"><b>{todo.text}</b></span>
+                                </div>
+                            );
+                        }
                         const deadline = formatTodoDeadline(todo);
                         return (
                             <label key={todo.id} className={`caltool-view-todo${todo.done ? " is-done" : ""}`}>

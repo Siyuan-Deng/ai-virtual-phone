@@ -65,6 +65,20 @@ function normalizeTodoItems(value: unknown): DiaryEntryTodoItem[] {
     .slice(0, 10);
 }
 
+/** 要点：字符串或 { text } 都认 */
+function normalizeBulletItems(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(item => {
+      if (typeof item === "string") return cleanText(item, 120);
+      if (!item || typeof item !== "object") return "";
+      const record = item as Record<string, unknown>;
+      return cleanText(record.text ?? record.content ?? record.title, 120);
+    })
+    .filter(Boolean)
+    .slice(0, 10);
+}
+
 function normalizeBlocks(value: unknown, fallbackBody: string): DiaryEntryBlock[] {
   const raw = Array.isArray(value) ? value : [];
   const blocks = raw
@@ -76,6 +90,16 @@ function normalizeBlocks(value: unknown, fallbackBody: string): DiaryEntryBlock[
       if (!block || typeof block !== "object") return null;
       const record = block as Record<string, unknown>;
       const type = cleanText(record.type, 32).toLowerCase();
+
+      if (type === "bullet" || type === "bullets" || type === "points") {
+        const items = normalizeBulletItems(record.items ?? record.points ?? record.list);
+        if (items.length === 0) return null;
+        return {
+          type: "bullet",
+          title: cleanText(record.title ?? record.heading, 40),
+          items,
+        };
+      }
 
       if (type === "todo" || type === "todos" || type === "list") {
         const items = normalizeTodoItems(record.items ?? record.todos ?? record.list);
@@ -153,6 +177,7 @@ export function parseDiaryEntryContent(content: string): ParsedDiaryEntry {
     if (block.type === "correction") return block.replacement || block.text;
     if (block.type === "image") return block.description;
     if (block.type === "todo") return block.items.map(item => `${item.done ? "完成" : "待办"}：${item.text}`).join("\n");
+    if (block.type === "bullet") return block.items.map(item => `• ${item}`).join("\n");
     return "";
   }).filter(Boolean).join("\n\n");
 

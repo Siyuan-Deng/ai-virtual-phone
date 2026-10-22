@@ -31,6 +31,7 @@ import { holidaysForDate } from "./calendar-holidays";
 import {
     loadCalendarExtras,
     activeCalendarMemos,
+    isCheckableCalendarTodo,
     normalizeCalendarTodos,
     saveCalendarExtras,
     setCalendarTodoListener,
@@ -169,8 +170,8 @@ type CalendarIdLabels = { event: Map<string, string>; series: Map<string, string
 
 function buildCalendarIdLabels(items: CalendarScheduleItem[], extras: CalendarExtras): CalendarIdLabels {
     const todoIds = [
-        ...Object.values(extras.eventDetails).flatMap((details) => normalizeCalendarTodos(details.todos).map((todo) => todo.id)),
-        ...extras.memos.flatMap((memo) => normalizeCalendarTodos(memo.checklist).map((todo) => todo.id)),
+        ...Object.values(extras.eventDetails).flatMap((details) => normalizeCalendarTodos(details.todos).filter(isCheckableCalendarTodo).map((todo) => todo.id)),
+        ...extras.memos.flatMap((memo) => normalizeCalendarTodos(memo.checklist).filter(isCheckableCalendarTodo).map((todo) => todo.id)),
     ];
     return {
         event: calendarIdLabels(items.map((item) => item.id)),
@@ -194,8 +195,11 @@ function eventStateLabel(entry: VisibleEntry, now: Date, nearMinutes: number, al
     return "";
 }
 
+/** 要点（•）只是列表项：不带 todoId，也没有完成状态 */
 function formatTodosForContext(todos: CalendarTodo[], labels: CalendarIdLabels | null): string {
-    return todos.map((todo) => `${labels ? `[todoId=${idLabel(labels.todo, todo.id)}]` : ""}${todo.done ? "[已完成]" : "[未完成]"}${oneLine(todo.text)}`).join("；");
+    return todos.map((todo) => (isCheckableCalendarTodo(todo)
+        ? `${labels ? `[todoId=${idLabel(labels.todo, todo.id)}]` : ""}${todo.done ? "[已完成]" : "[未完成]"}${oneLine(todo.text)}`
+        : `•${oneLine(todo.text)}`)).join("；");
 }
 
 function eventTitleWithLocation(item: CalendarScheduleItem): string {
@@ -224,7 +228,7 @@ function formatEventForContext(
     if (series && !changedOccurrence) lines.push(`  重复：${recurrenceRuleLabel(series)}，${series.forever ? "无截止日期" : `至 ${series.untilDate}`}`);
     if (details?.note) lines.push(`  备注：${fullText(details.note).replace(/\n+/g, " / ")}`);
     const todos = normalizeCalendarTodos(details?.todos);
-    if (todos.length) lines.push(`  待办：${formatTodosForContext(todos, labels)}`);
+    if (todos.length) lines.push(`  ${todos.some(isCheckableCalendarTodo) ? "待办" : "要点"}：${formatTodosForContext(todos, labels)}`);
     return lines;
 }
 
@@ -300,7 +304,7 @@ function formatRoutineLines(
             const todayDetails = extras.eventDetails[todayEntry.item.id];
             const state = eventStateLabel(todayEntry, now, config.nearMinutes, todayDetails?.allDay === true);
             const todos = normalizeCalendarTodos(todayDetails?.todos);
-            const parts = [state, todos.length ? `待办：${formatTodosForContext(todos, labels)}` : ""].filter(Boolean);
+            const parts = [state, todos.length ? `${todos.some(isCheckableCalendarTodo) ? "待办" : "要点"}：${formatTodosForContext(todos, labels)}` : ""].filter(Boolean);
             // 今天这一次的 eventId 也写上：勾今天的待办、改今天这一次都直接用它
             const todayId = labels ? `[eventId=${idLabel(labels.event, todayEntry.item.id)}]` : "";
             if (parts.length) todayPart = `｜今天${todayId}${parts.join("，")}`;
@@ -378,6 +382,7 @@ export function buildUserCalendarContext(now = new Date(), options: { includeWri
         if (memo.body) memoLines.push(`  正文：${fullText(memo.body).replace(/\n+/g, " / ")}`);
         if (checklist.length) {
             memoLines.push(`  清单：${checklist.map((todo) => {
+                if (!isCheckableCalendarTodo(todo)) return `•${oneLine(todo.text)}`;
                 const deadline = todo.dueDate ? `（截止 ${todo.dueDate}${todo.dueTime ? ` ${todo.dueTime}` : " 当天"}）` : "";
                 return `${labels ? `[todoId=${idLabel(labels.todo, todo.id)}]` : ""}${todo.done ? "[已完成]" : "[未完成]"}${oneLine(todo.text)}${deadline}`;
             }).join("；")}`);
@@ -739,7 +744,7 @@ function collectDueReminderItems(now: Date, nearMinutes: number, extras: Calenda
     const items: DueItem[] = [];
     for (const item of userItems()) {
         const details = extras.eventDetails[item.id];
-        const todos = normalizeCalendarTodos(details?.todos);
+        const todos = normalizeCalendarTodos(details?.todos).filter(isCheckableCalendarTodo);
         if (details?.allDay === true && todos.length > 0) {
             // 全天待办以当天 24:00 为截止，只有没勾的才提醒
             const target = parseLocalDateTime(addDaysIso(item.date, 1), "00:00");

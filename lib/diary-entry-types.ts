@@ -16,6 +16,8 @@ export type DiaryEntryBlock =
   | { type: "quote"; text: string }
   | { type: "correction"; text: string; replacement?: string }
   | { type: "todo"; title?: string; items: DiaryEntryTodoItem[] }
+  /** 要点：一串 • 列表项，不能勾 */
+  | { type: "bullet"; title?: string; items: string[] }
   | { type: "image"; caption?: string; description: string };
 
 export type DiaryEntry = {

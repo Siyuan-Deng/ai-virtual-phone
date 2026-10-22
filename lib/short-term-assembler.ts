@@ -137,6 +137,7 @@ function formatDiaryBlockForTimeline(block: DiaryEntryBlock): string {
         block.title,
         block.items.map(item => `${item.done ? "完成" : "待办"}:${item.text}`).join(" / "),
     ].filter(Boolean).join(" ");
+    if (block.type === "bullet") return [block.title, block.items.map(item => `•${item}`).join(" ")].filter(Boolean).join(" ");
     return "";
 }
 

@@ -29,7 +29,14 @@ export type CalendarTodo = {
     /** HH:MM */
     dueTime: string;
     createdAt: string;
+    /** 要点：清单里只是一条列表项（•），不能勾、没有截止，不算待办 */
+    bullet?: boolean;
 };
+
+/** 真正的待办（能勾的那些）；要点不算 */
+export function isCheckableCalendarTodo(todo: CalendarTodo): boolean {
+    return todo.bullet !== true;
+}
 
 /** 一条日程的附加信息，key 是日程条目的 id */
 export type CalendarEventDetails = {
@@ -142,13 +149,15 @@ export function normalizeCalendarTodos(value: unknown): CalendarTodo[] {
     return value
         .map((raw) => {
             const todo = raw as Record<string, unknown>;
+            const bullet = todo?.bullet === true;
             return {
                 id: String(todo?.id || `todo_${Math.random().toString(36).slice(2, 10)}`),
                 text: oneLine(todo?.text, 240),
-                done: todo?.done === true,
-                dueDate: /^\d{4}-\d{2}-\d{2}$/.test(String(todo?.dueDate || "")) ? String(todo.dueDate) : "",
-                dueTime: /^\d{2}:\d{2}$/.test(String(todo?.dueTime || "")) ? String(todo.dueTime) : "",
+                done: !bullet && todo?.done === true,
+                dueDate: !bullet && /^\d{4}-\d{2}-\d{2}$/.test(String(todo?.dueDate || "")) ? String(todo.dueDate) : "",
+                dueTime: !bullet && /^\d{2}:\d{2}$/.test(String(todo?.dueTime || "")) ? String(todo.dueTime) : "",
                 createdAt: typeof todo?.createdAt === "string" ? todo.createdAt : "",
+                ...(bullet ? { bullet: true } : {}),
             };
         })
         .filter((todo) => todo.text);

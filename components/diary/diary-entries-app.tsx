@@ -84,6 +84,7 @@ function blockPlainText(block: DiaryEntryBlock): string {
   if (block.type === "correction") return block.replacement || block.text;
   if (block.type === "image") return block.caption || block.description;
   if (block.type === "todo") return block.items.map(item => item.text).join(" / ");
+  if (block.type === "bullet") return block.items.join(" / ");
   return "";
 }
 
@@ -1057,6 +1058,7 @@ function makeEmptyBlock(type: DiaryEntryBlock["type"]): DraftBlock {
   if (type === "quote") return { localId, type, text: "" };
   if (type === "correction") return { localId, type, text: "", replacement: "" };
   if (type === "todo") return { localId, type, title: "", items: [] };
+  if (type === "bullet") return { localId, type, title: "", items: [] };
   if (type === "image") return { localId, type, caption: "", description: "" };
   return { localId, type: "paragraph", text: "" };
 }
@@ -1066,6 +1068,7 @@ function draftBlockHasContent(block: DiaryEntryBlock): boolean {
   if (block.type === "correction") return block.text.trim().length > 0 || (block.replacement ?? "").trim().length > 0;
   if (block.type === "image") return block.description.trim().length > 0;
   if (block.type === "todo") return block.items.some(item => item.text.trim().length > 0);
+  if (block.type === "bullet") return block.items.some(item => item.trim().length > 0);
   return false;
 }
 
@@ -1074,6 +1077,7 @@ const DIARY_BLOCK_TYPE_LABELS: Record<DiaryEntryBlock["type"], string> = {
   quote: "引用",
   correction: "涂改",
   todo: "待办",
+  bullet: "要点",
   image: "配图",
 };
 
@@ -1111,25 +1115,29 @@ function DiaryEntryComposeForm({ target, characters, onSave, onClose }: {
     setDraftBlocks(blocks => [...blocks, makeEmptyBlock(type)]);
   }, []);
 
+  // 待办和要点两种清单共用：要点的一项就是一段文字，没有 done
   const updateTodoItem = useCallback((localId: string, index: number, patch: Partial<{ text: string; done: boolean }>) => {
     setDraftBlocks(blocks => blocks.map(block => {
-      if (block.localId !== localId || block.type !== "todo") return block;
-      return { ...block, items: block.items.map((item, i) => (i === index ? { ...item, ...patch } : item)) };
+      if (block.localId !== localId) return block;
+      if (block.type === "todo") return { ...block, items: block.items.map((item, i) => (i === index ? { ...item, ...patch } : item)) };
+      if (block.type === "bullet") return { ...block, items: block.items.map((item, i) => (i === index ? patch.text ?? item : item)) };
+      return block;
     }));
   }, []);
 
   const addTodoItem = useCallback((localId: string) => {
-    setDraftBlocks(blocks => blocks.map(block => (
-      block.localId === localId && block.type === "todo"
-        ? { ...block, items: [...block.items, { text: "", done: false }] }
-        : block
-    )));
+    setDraftBlocks(blocks => blocks.map(block => {
+      if (block.localId !== localId) return block;
+      if (block.type === "todo") return { ...block, items: [...block.items, { text: "", done: false }] };
+      if (block.type === "bullet") return { ...block, items: [...block.items, ""] };
+      return block;
+    }));
   }, []);
 
   const removeTodoItem = useCallback((localId: string, index: number) => {
     setDraftBlocks(blocks => blocks.map(block => (
-      block.localId === localId && block.type === "todo"
-        ? { ...block, items: block.items.filter((_, i) => i !== index) }
+      block.localId === localId && (block.type === "todo" || block.type === "bullet")
+        ? { ...block, items: (block.items as unknown[]).filter((_, i) => i !== index) } as DraftBlock
         : block
     )));
   }, []);
@@ -1189,7 +1197,7 @@ function DiaryEntryComposeForm({ target, characters, onSave, onClose }: {
         </div>
 
         <div className="diary-compose-add-block">
-          {(["paragraph", "quote", "correction", "todo", "image"] as const).map(type => (
+          {(["paragraph", "quote", "correction", "todo", "bullet", "image"] as const).map(type => (
             <button key={type} type="button" onClick={() => addBlock(type)}>
               + {DIARY_BLOCK_TYPE_LABELS[type]}
             </button>
@@ -1293,6 +1301,34 @@ function DiaryBlockEditor({ block, canRemove, onChange, onRemove, onAddTodoItem,
                   value={item.text}
                   onChange={event => onUpdateTodoItem(index, { text: event.target.value })}
                   placeholder="待办事项"
+                />
+                <button type="button" onClick={() => onRemoveTodoItem(index)} aria-label="删除这一项">
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button type="button" className="diary-compose-add-todo-item" onClick={onAddTodoItem}>+ 加一项</button>
+        </div>
+      ) : null}
+
+      {block.type === "bullet" ? (
+        <div className="diary-compose-todo">
+          <input
+            type="text"
+            value={block.title ?? ""}
+            onChange={event => onChange({ title: event.target.value })}
+            placeholder="标题（可选）"
+          />
+          <div className="diary-compose-todo-items">
+            {block.items.map((item, index) => (
+              <div key={index} className="diary-compose-todo-item">
+                <span className="diary-compose-bullet-mark" aria-hidden="true" />
+                <input
+                  type="text"
+                  value={item}
+                  onChange={event => onUpdateTodoItem(index, { text: event.target.value })}
+                  placeholder="要点"
                 />
                 <button type="button" onClick={() => onRemoveTodoItem(index)} aria-label="删除这一项">
                   <X size={13} />
@@ -1470,6 +1506,21 @@ function DiaryBlockView({ block }: { block: DiaryEntryBlock }) {
             <li key={`${item.text}-${index}`} data-done={item.done ? "true" : "false"}>
               <span />
               <p>{item.text}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+    );
+  }
+  if (block.type === "bullet") {
+    return (
+      <section className="diary-entry-todo diary-entry-bullets">
+        {block.title ? <h3>{block.title}</h3> : null}
+        <ul>
+          {block.items.map((item, index) => (
+            <li key={`${item}-${index}`}>
+              <span />
+              <p>{item}</p>
             </li>
           ))}
         </ul>
