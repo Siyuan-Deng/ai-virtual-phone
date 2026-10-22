@@ -18,7 +18,7 @@ import { prepareShortTermContext } from "./short-term-assembler";
 import { buildCalendarScheduleMarker, getCurrentCalendarScheduleForPrompt } from "./calendar-storage";
 import { getWeekStartIso } from "./calendar-utils";
 import { parseStoryResponse } from "./story-parser";
-import { swapNightRegexes } from "./night-mode";
+import { nightSlotKeys, resolveNightRegexes } from "./night-mode";
 import { STORY_PARSER_VERSION } from "./story-parser";
 import { loadStoryMessages, replaceStoryMessages, type StoryExtraBindings, type StoryMessage } from "./story-storage";
 import type { ChatMessage } from "./chat-storage";
@@ -108,12 +108,13 @@ function storyAppTags(extra?: boolean): string[] {
   return extra ? ["story", "story_extra"] : ["story"];
 }
 
-/** overrides：番外单独的绑定。哪项没填（或绑的东西已经删了）就跟随剧情 */
-function resolveStoryConfigs(characterId: string, overrides?: StoryExtraBindings): {
+/** overrides：番外单独的绑定。哪项没填（或绑的东西已经删了）就跟随剧情。
+ *  sessionId：哪个剧情窗口（正篇 / 番外），夜间模式里它另绑了一套正则就拿来渲染 */
+function resolveStoryConfigs(characterId: string, overrides?: StoryExtraBindings, sessionId?: string): {
   apiConfig: ApiConfig;
   preset: PresetConfig | null;
   regexes: RegexConfig[];
-  /** 渲染用的正则：夜间模式里配了「换成」的换掉（提示词照白天的 regexes） */
+  /** 渲染用的正则：夜间模式里这个窗口另绑了一套就用它（提示词照日间的 regexes） */
   renderRegexes: RegexConfig[];
   worldBooks: WorldBookConfig[];
   regexSignature: string;
@@ -161,7 +162,7 @@ function resolveStoryConfigs(characterId: string, overrides?: StoryExtraBindings
     .filter(Boolean) as WorldBookConfig[];
   const summaryTag = preset?.story_summary_tag?.trim() || "summary";
 
-  const renderRegexes = swapNightRegexes(regexes, allRegexes);
+  const renderRegexes = resolveNightRegexes(sessionId ? nightSlotKeys.storyRegex(sessionId) : undefined, regexes, allRegexes);
 
   return {
     apiConfig,
@@ -169,14 +170,14 @@ function resolveStoryConfigs(characterId: string, overrides?: StoryExtraBindings
     regexes,
     renderRegexes,
     worldBooks,
-    // 签名跟着渲染用的正则走：白天 / 夜间换了正则，消息要重新渲染
+    // 签名跟着渲染用的正则走：日间 / 夜间换了正则，消息要重新渲染
     regexSignature: [...renderRegexes.map((regex) => `${regex.id}:${regex.updatedAt}`), `summary:${summaryTag}`].join("|"),
     summaryTag,
   };
 }
 
-export function getStoryRenderSignature(characterId: string, overrides?: StoryExtraBindings): { regexSignature: string; parserVersion: number; regexes: RegexConfig[] } {
-  const { regexSignature, regexes } = resolveStoryConfigs(characterId, overrides);
+export function getStoryRenderSignature(characterId: string, overrides?: StoryExtraBindings, sessionId?: string): { regexSignature: string; parserVersion: number; regexes: RegexConfig[] } {
+  const { regexSignature, regexes } = resolveStoryConfigs(characterId, overrides, sessionId);
   return {
     regexSignature,
     parserVersion: STORY_PARSER_VERSION,
@@ -194,7 +195,8 @@ export async function generateStoryCompletion(
     throw new ChatEngineError(`Character not found: ${characterId}`);
   }
 
-  const { apiConfig, preset, regexes, renderRegexes, worldBooks, regexSignature, summaryTag } = resolveStoryConfigs(characterId, options?.bindings);
+  const sessionId = history[history.length - 1]?.sessionId;
+  const { apiConfig, preset, regexes, renderRegexes, worldBooks, regexSignature, summaryTag } = resolveStoryConfigs(characterId, options?.bindings, sessionId);
   const effectiveFoldTags = options?.sessionFoldTags?.trim() || DEFAULT_STORY_FOLD_TAGS;
   const effectiveContextExcludedTags = options?.sessionContextExcludedTags?.trim() || DEFAULT_STORY_CONTEXT_EXCLUDED_TAGS;
   const llmMessages = await buildStoryPromptMessages(characterId, history, preset, regexes, worldBooks, effectiveContextExcludedTags);
@@ -249,7 +251,7 @@ export async function generateStoryContinuation(
     throw new ChatEngineError(`Character not found: ${characterId}`);
   }
 
-  const { apiConfig, preset, regexes, renderRegexes, worldBooks, regexSignature, summaryTag } = resolveStoryConfigs(characterId, options?.bindings);
+  const { apiConfig, preset, regexes, renderRegexes, worldBooks, regexSignature, summaryTag } = resolveStoryConfigs(characterId, options?.bindings, partial.sessionId);
   const effectiveFoldTags = options?.sessionFoldTags?.trim() || DEFAULT_STORY_FOLD_TAGS;
   const effectiveContextExcludedTags = options?.sessionContextExcludedTags?.trim() || DEFAULT_STORY_CONTEXT_EXCLUDED_TAGS;
   // 续写提示词排在写了一半的那条后面：历史以 assistant 收尾，不会被挪到输入前面
@@ -364,8 +366,8 @@ export function rebuildStorySessionRenderCache(
   sessionId: string,
   options?: { sessionFoldTags?: string; bindings?: StoryExtraBindings },
 ): StoryMessage[] {
-  const { regexSignature, parserVersion } = getStoryRenderSignature(characterId, options?.bindings);
-  const { renderRegexes, summaryTag } = resolveStoryConfigs(characterId, options?.bindings);
+  const { regexSignature, parserVersion } = getStoryRenderSignature(characterId, options?.bindings, sessionId);
+  const { renderRegexes, summaryTag } = resolveStoryConfigs(characterId, options?.bindings, sessionId);
   const effectiveFoldTags = options?.sessionFoldTags?.trim() || DEFAULT_STORY_FOLD_TAGS;
 
   const character = loadCharacters().find((c) => c.id === characterId);

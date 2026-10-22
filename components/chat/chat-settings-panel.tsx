@@ -184,7 +184,7 @@ import {
 } from "@/lib/bilingual-prompt-defaults";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
 import { NightSideTabs, useNightDraft } from "@/components/ui/night-side-tabs";
-import { getNightBinding, nightSlotKeys, setNightBinding, useNightActive, useNightRevision } from "@/lib/night-mode";
+import { getNightBinding, nightSlotKeys, setNightBinding, useNightRevision } from "@/lib/night-mode";
 import { MessageBubble, isStandaloneHtmlPreviewContent } from "./message-bubble";
 import { ScreenEffectSettingsModal } from "./screen-effect-settings-modal";
 
@@ -446,8 +446,7 @@ export function ChatSettingsPanel({
         const latest = sessions.find(s => s.id === session.id);
         return (latest as Record<string, unknown>)?.customCSS as string || session.customCSS || "";
     });
-    // 「白天 | 夜间」：编辑的是哪一份
-    const nightActive = useNightActive();
+    // 「日间模式 | 夜间模式」：编辑的是哪一份
     useNightRevision();
     const nightBgBinding = getNightBinding(nightSlotKeys.chatBg(session.id));
     const nightCSS = useNightDraft(nightSlotKeys.chatSession(session.id));
@@ -1222,29 +1221,29 @@ export function ChatSettingsPanel({
                 <div className="menu-group">
                     <label className="menu-item">
                         <ChatInfoIcon icon={ImageIcon} color={BINDING_ACCENTS.api} />
-                        <div className="menu-label-group">
-                            <span className="menu-label">聊天背景</span>
-                            {nightActive ? <span className="menu-desc">夜间模式开着：换的是夜间那张</span> : null}
-                        </div>
+                        <div className="menu-label-group"><span className="menu-label">聊天背景</span></div>
                         <div className="menu-right">
-                            {nightActive ? (
-                                nightBgBinding?.kind === "own"
-                                    ? <><span className="menu-desc mr-1">夜间已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setNightBinding(nightSlotKeys.chatBg(session.id), null); }}>清除</button></>
-                                    : <span className="menu-desc mr-1">跟白天</span>
-                            ) : (
-                                backgroundImage && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setBackgroundImage(""); updateSession({ backgroundImage: "" }); }}>清除</button></>
-                            )}
+                            {backgroundImage && <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setBackgroundImage(""); updateSession({ backgroundImage: "" }); }}>清除</button></>}
+                            <ChevronRight size={16} />
+                        </div>
+                        <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setBackgroundImage, "backgroundImage")} className="hidden" />
+                    </label>
+                    {/* 夜间模式用的那张：没设就跟随日间 */}
+                    <label className="menu-item">
+                        <ChatInfoIcon icon={ImageIcon} color={BINDING_ACCENTS.api} />
+                        <div className="menu-label-group"><span className="menu-label">夜间模式背景</span></div>
+                        <div className="menu-right">
+                            {nightBgBinding?.kind === "own"
+                                ? <><span className="menu-desc mr-1">已设置</span><button className="menu-desc mr-1 text-[var(--c-danger)]" onClick={e => { e.preventDefault(); setNightBinding(nightSlotKeys.chatBg(session.id), null); }}>清除</button></>
+                                : <span className="menu-desc mr-1">跟随日间</span>}
                             <ChevronRight size={16} />
                         </div>
                         <input
                             type="file"
                             accept="image/*"
                             onChange={e => {
-                                if (!nightActive) {
-                                    void handleImageUpload(e, setBackgroundImage, "backgroundImage");
-                                    return;
-                                }
                                 const file = e.target.files?.[0];
+                                e.target.value = "";
                                 if (!file) return;
                                 void import("@/lib/chat-asset-storage")
                                     .then(({ saveChatImageToIndexedDB }) => saveChatImageToIndexedDB(file))
@@ -1831,7 +1830,7 @@ export function ChatSettingsPanel({
                                 <span className="ts-10 opacity-40">HTML · 沙盒运行</span>
                             </div>
                             <div className="mt-1">
-                                <NightSideTabs state={nightRender} dayValue={draftRender} nightNote="夜间只换渲染，上面的契约照白天；夜间这份要的字段和契约对不上，夜里可能显示不全。" />
+                                <NightSideTabs state={nightRender} dayValue={draftRender} nightNote="夜间只换渲染，上面的契约照日间；夜间这份要的字段和契约对不上，夜里可能显示不全。" />
                             </div>
                             <textarea
                                 value={renderEditing}

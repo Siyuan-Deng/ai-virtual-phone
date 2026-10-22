@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Moon, Sun } from "lucide-react";
 import { findScheme } from "@/lib/css-scheme-storage";
 import { getNightBinding, setNightBinding, useNightActive, useNightRevision } from "@/lib/night-mode";
 
@@ -33,12 +32,10 @@ function readNightDraft(slotKey: string, revision: number, pickScheme?: (css: st
     return { key: slotKey, revision, draft: "", schemeName: null, touched: false };
 }
 
-/** 各 CSS 编辑框的夜间那份：停在现在的模式那一侧（白天 / 夜间切了也跟着换）；格子换了（比如剧情换了角色）就重新读。
+/** 各 CSS 编辑框的夜间那份：停在现在的模式那一侧（日间 / 夜间切了也跟着换）；格子换了（比如剧情换了角色）就重新读。
  *  pickScheme：方案里存的不是直接能用的那段时（状态栏存的是一整包），从里面取出要的部分 */
 export function useNightDraft(slotKey: string, pickScheme?: (css: string) => string): NightDraftState {
-    const nightActive = useNightActive();
-    const [side, setSide] = useState<NightSide>(nightActive ? "night" : "day");
-    useEffect(() => { setSide(nightActive ? "night" : "day"); }, [nightActive]);
+    const [side, setSide] = useNightSide();
     // 夜间套装在别处（总表、小卷）改了，这里还没动过就重新读
     const revision = useNightRevision();
     const [state, setState] = useState(() => readNightDraft(slotKey, revision, pickScheme));
@@ -61,8 +58,14 @@ export function useNightDraft(slotKey: string, pickScheme?: (css: string) => str
     };
 }
 
-/** 编辑框顶上的「白天 | 夜间」，夜间那侧下面一行说明现在夜里用的是什么 */
-export function NightSideTabs({ state, dayValue, nightNote }: { state: NightDraftState; dayValue: string; nightNote?: string }) {
+/** 编辑框顶上的「日间模式 | 夜间模式」，夜间那侧下面一行说明现在夜里用的是什么 */
+export function NightSideTabs({ state, dayValue, nightNote, hideSwitch }: {
+    state: NightDraftState;
+    dayValue: string;
+    nightNote?: string;
+    /** 切换条已经放在别处（日历、剧情的主题面板顶上），这里只要说明那一行 */
+    hideSwitch?: boolean;
+}) {
     const { side, setSide, draft, touched, schemeName } = state;
     let hint: React.ReactNode = null;
     if (side === "night") {
@@ -71,27 +74,43 @@ export function NightSideTabs({ state, dayValue, nightNote }: { state: NightDraf
         } else if (!draft.trim()) {
             hint = (
                 <>
-                    夜间现在跟白天一样。在这里写就是夜间单独一份。
+                    夜间现在跟随日间。在这里写就是夜间单独一份。
                     {dayValue.trim() ? (
-                        <button type="button" className="night-side-copy" onClick={() => state.setDraft(dayValue)}>从白天复制</button>
+                        <button type="button" className="night-side-copy" onClick={() => state.setDraft(dayValue)}>从日间复制</button>
                     ) : null}
                 </>
             );
         } else {
-            hint = <>现在改的是夜间那份。清空就是夜里跟白天一样。</>;
+            hint = <>现在改的是夜间那份。清空就是夜里跟随日间。</>;
         }
     }
+    if (hideSwitch) return hint ? <div className="night-side-hint night-side-hint-alone">{nightNote ? <>{nightNote}<br /></> : null}{hint}</div> : null;
     return (
         <div className="night-side">
-            <div className="night-side-tabs" role="tablist" aria-label="编辑白天还是夜间那份">
-                <button type="button" role="tab" aria-selected={side === "day"} data-on={side === "day" ? "true" : undefined} onClick={() => setSide("day")}>
-                    <Sun size={13} aria-hidden="true" />白天
-                </button>
-                <button type="button" role="tab" aria-selected={side === "night"} data-on={side === "night" ? "true" : undefined} data-night="true" onClick={() => setSide("night")}>
-                    <Moon size={13} aria-hidden="true" />夜间
-                </button>
-            </div>
+            <NightSideSwitch side={side} onChange={setSide} />
             {hint ? <div className="night-side-hint">{nightNote ? <>{nightNote}<br /></> : null}{hint}</div> : null}
         </div>
     );
+}
+
+/** 只有「日间模式 | 夜间模式」这一条（日历、剧情的主题面板，显示选项） */
+export function NightSideSwitch({ side, onChange }: { side: NightSide; onChange: (side: NightSide) => void }) {
+    return (
+        <div className="night-side-tabs" role="tablist" aria-label="编辑日间还是夜间那份">
+            <button type="button" role="tab" aria-selected={side === "day"} data-on={side === "day" ? "true" : undefined} onClick={() => onChange("day")}>
+                日间模式
+            </button>
+            <button type="button" role="tab" aria-selected={side === "night"} data-on={side === "night" ? "true" : undefined} data-night="true" onClick={() => onChange("night")}>
+                夜间模式
+            </button>
+        </div>
+    );
+}
+
+/** 停在现在的模式那一侧，日间 / 夜间切了也跟着换 */
+export function useNightSide(): [NightSide, (side: NightSide) => void] {
+    const nightActive = useNightActive();
+    const [side, setSide] = useState<NightSide>(nightActive ? "night" : "day");
+    useEffect(() => { setSide(nightActive ? "night" : "day"); }, [nightActive]);
+    return [side, setSide];
 }

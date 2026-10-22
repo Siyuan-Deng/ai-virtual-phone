@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Check, ChevronLeft, ChevronRight, Plus, Trash2, Wand2, X } from "lucide-react";
 import { Avatar } from "./ui/primitives";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
-import { NightSideTabs, useNightDraft } from "@/components/ui/night-side-tabs";
-import { isNightActive, nightSlotKeys, setNightBinding, useNightText } from "@/lib/night-mode";
+import { NightSideSwitch, NightSideTabs, useNightDraft } from "@/components/ui/night-side-tabs";
+import { getNightBinding, nightSlotKeys, setNightBinding, useNightText } from "@/lib/night-mode";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { CALENDAR_CSS_EXAMPLE } from "@/lib/css-examples";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
@@ -13,7 +13,7 @@ import { Input } from "./ui/form";
 import type { CalendarOwnerType, CalendarScheduleItem, CalendarWeekPlan } from "@/lib/calendar-types";
 import {
   CALENDAR_DAYS_PER_PAGE_OPTIONS,
-  CALENDAR_THEME_IDS,
+  CALENDAR_THEMES,
   deleteCalendarScheduleItem,
   loadCalendarConfig,
   loadOwnerCalendarPlans,
@@ -85,15 +85,6 @@ type OwnerOption = {
   avatar?: string | null;
 };
 
-const CALENDAR_THEMES: Array<{ id: (typeof CALENDAR_THEME_IDS)[number]; name: string }> = [
-  { id: "light", name: "默认" },
-  { id: "dark", name: "深色" },
-  { id: "cream", name: "奶油" },
-  { id: "mint", name: "薄荷" },
-  { id: "mist", name: "雾紫" },
-  { id: "sakura", name: "樱粉" },
-];
-
 function buildOwnerOptions(): OwnerOption[] {
   const options: OwnerOption[] = [];
   const identity = resolveUserIdentity(undefined, "calendar") ?? resolveUserIdentity() ?? null;
@@ -158,9 +149,20 @@ export function PhoneCalendarApp({
   const [appliedCalendarCss, setAppliedCalendarCss] = useState(() =>
     typeof window !== "undefined" ? kvGet("calendar-custom-css") || "" : ""
   );
-  // 「白天 | 夜间」：编辑的是哪一份；主题夜里也能单独选
+  // 主题面板顶上的「日间模式 | 夜间模式」同时管主题和 CSS；主题点了先放草稿，「应用」才存
   const nightCss = useNightDraft(nightSlotKeys.calendar);
   const calendarTheme = useNightText(nightSlotKeys.calendarTheme, config.theme);
+  const [themeDraft, setThemeDraft] = useState<{ day: string; night: string } | null>(null);
+  useEffect(() => {
+    if (!showThemePanel) { setThemeDraft(null); return; }
+    const binding = getNightBinding(nightSlotKeys.calendarTheme);
+    setThemeDraft({ day: config.theme, night: binding?.kind === "own" ? binding.value : "" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showThemePanel]);
+  // 面板开着时日历按正在改的那一侧预览（夜间没选就是跟随日间）
+  const shownTheme = themeDraft
+    ? (nightCss.side === "night" ? themeDraft.night || themeDraft.day : themeDraft.day)
+    : calendarTheme;
   const editingCss = nightCss.side === "night" ? nightCss.draft : calendarCustomCss;
   const setEditingCss = nightCss.side === "night" ? nightCss.setDraft : setCalendarCustomCss;
   const handleApplyCalendarCss = () => {
@@ -168,6 +170,14 @@ export function PhoneCalendarApp({
     if (trimmed) kvSet("calendar-custom-css", trimmed);
     else kvRemove("calendar-custom-css");
     nightCss.commit();
+    if (themeDraft) {
+      if (themeDraft.day !== config.theme) {
+        const nextConfig = { ...config, theme: themeDraft.day as typeof config.theme };
+        setConfig(nextConfig);
+        saveCalendarConfig(nextConfig);
+      }
+      setNightBinding(nightSlotKeys.calendarTheme, themeDraft.night ? { kind: "own", value: themeDraft.night } : null);
+    }
     setAppliedCalendarCss(trimmed);
     window.dispatchEvent(new CustomEvent("calendar-css-updated", { detail: trimmed }));
   };
@@ -678,7 +688,7 @@ export function PhoneCalendarApp({
   };
 
   return (
-    <div className="calendar-app-shell" data-calendar-theme={calendarTheme}>
+    <div className="calendar-app-shell" data-calendar-theme={shownTheme}>
       <SessionCustomCSS css={appliedCalendarCss || ""} scope=".calendar-app-shell" nightKey={nightSlotKeys.calendar} />
       <div className="calendar-app">
         {view === "month" ? (
@@ -817,37 +827,43 @@ export function PhoneCalendarApp({
         <div className="modal-overlay calendar-edit-modal-overlay" onClick={() => setShowThemePanel(false)}>
           <div className="calendar-edit-modal calendar-theme-modal" onClick={e => e.stopPropagation()}>
             <div className="calendar-theme-modal-head">
-              <strong>主题{nightCss.side === "night" && isNightActive() ? <small className="calendar-theme-night-note"> · 夜间</small> : null}</strong>
+              <strong>主题</strong>
               <button type="button" onClick={() => setShowThemePanel(false)} className="calendar-icon-btn" aria-label="关闭">
                 <X size={16} />
               </button>
             </div>
+            <NightSideSwitch side={nightCss.side} onChange={nightCss.setSide} />
             <div className="calendar-theme-grid">
-              {CALENDAR_THEMES.map(theme => (
+              {nightCss.side === "night" ? (
                 <button
-                  key={theme.id}
                   type="button"
                   className="calendar-theme-option"
-                  data-active={calendarTheme === theme.id ? "true" : undefined}
-                  onClick={() => {
-                    // 夜间模式开着：选的是夜间用的主题
-                    if (isNightActive()) {
-                      setNightBinding(nightSlotKeys.calendarTheme, { kind: "own", value: theme.id });
-                      return;
-                    }
-                    const nextConfig = { ...config, theme: theme.id };
-                    setConfig(nextConfig);
-                    saveCalendarConfig(nextConfig);
-                  }}
+                  data-active={themeDraft && !themeDraft.night ? "true" : undefined}
+                  onClick={() => setThemeDraft(prev => prev && { ...prev, night: "" })}
                 >
-                  <span className="calendar-theme-swatch" data-theme-id={theme.id} aria-hidden="true" />
-                  <span>{theme.name}</span>
+                  <span className="calendar-theme-swatch calendar-theme-swatch-follow" aria-hidden="true" />
+                  <span>跟随日间</span>
                 </button>
-              ))}
+              ) : null}
+              {CALENDAR_THEMES.map(theme => {
+                const selected = nightCss.side === "night" ? themeDraft?.night : themeDraft?.day;
+                return (
+                  <button
+                    key={theme.id}
+                    type="button"
+                    className="calendar-theme-option"
+                    data-active={selected === theme.id ? "true" : undefined}
+                    onClick={() => setThemeDraft(prev => prev && (nightCss.side === "night" ? { ...prev, night: theme.id } : { ...prev, day: theme.id }))}
+                  >
+                    <span className="calendar-theme-swatch" data-theme-id={theme.id} aria-hidden="true" />
+                    <span>{theme.name}</span>
+                  </button>
+                );
+              })}
             </div>
 
             <div className="calendar-theme-css-label">自定义 CSS</div>
-            <NightSideTabs state={nightCss} dayValue={calendarCustomCss} />
+            <NightSideTabs state={nightCss} dayValue={calendarCustomCss} hideSwitch />
             <textarea
               className="calendar-css-textarea"
               value={editingCss}

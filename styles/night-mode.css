@@ -219,11 +219,6 @@
   line-height: 1.55;
 }
 
-.night-time-row {
-  padding-left: 48px;
-  cursor: default;
-}
-
 .night-time-input {
   margin-left: auto;
   padding: 5px 10px;
@@ -250,23 +245,6 @@
 }
 
 /* ── 夜间套装总表 ── */
-.night-set-summary {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: var(--ui-radius-panel, 16px);
-  background: #1e2433;
-  color: #e7ebf6;
-  font-size: calc(12.5px * var(--app-text-scale, 1));
-  line-height: 1.45;
-}
-
-.night-set-summary b {
-  display: block;
-  font-size: calc(14px * var(--app-text-scale, 1));
-}
-
 .night-set-group {
   display: flex;
   flex-direction: column;
@@ -294,47 +272,12 @@
   cursor: pointer;
 }
 
-.night-set-badge {
-  flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  background: var(--c-input);
-  color: var(--c-text);
-  font-size: calc(12px * var(--app-text-scale, 1));
-}
-
 .night-set-label {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.night-set-chip {
-  max-width: 132px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 2px 9px;
-  border-radius: 999px;
-  background: var(--c-input);
-  color: var(--c-icon);
-  font-size: calc(11px * var(--app-text-scale, 1));
-}
-
-.night-set-chip[data-tone="scheme"] {
-  background: color-mix(in srgb, var(--c-icon-active) 14%, transparent);
-  color: var(--c-icon-active);
-}
-
-.night-set-chip[data-tone="own"] {
-  background: #2a3045;
-  color: #dfe4f5;
 }
 
 /* 点一格从底下弹出来 */
@@ -494,15 +437,204 @@
   cursor: default;
 }
 
-.calendar-theme-night-note {
-  font-size: 0.8em;
-  font-weight: 500;
-  opacity: 0.6;
-}
-
 /* 夜间模式的提示条：深底浅字，晚上不刺眼 */
 :root[data-night-mode="true"] .phone-shell-notice {
   background: rgba(30, 34, 46, 0.94);
   color: #e7ebf6;
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* 外观卡：「按时间 | 跟随系统」 */
+.night-card-seg {
+  display: flex;
+  flex: 1;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--c-page-body-bg);
+}
+
+.night-card-seg button {
+  flex: 1;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--c-icon);
+  font: inherit;
+  font-size: calc(12.5px * var(--app-text-scale, 1));
+  cursor: pointer;
+}
+
+.night-card-seg button[data-on="true"] {
+  background: var(--c-panel, #ffffff);
+  color: var(--c-text-title);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* 时间一行：两个时间中间一个箭头 */
+.night-card-time .menu-right {
+  gap: 6px;
+}
+
+.night-card-time .night-time-input {
+  margin-left: 0;
+}
+
+/* 夜间套装：一格右边那行小字（夜里用什么） */
+.night-set-value {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.night-set-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--c-panel, #ffffff);
+  color: var(--c-icon);
+}
+
+.night-set-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--c-text-title);
+  font: inherit;
+  font-size: calc(13px * var(--app-text-scale, 1));
+}
+
+.night-set-filter {
+  display: flex;
+}
+
+.night-set-filter button {
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--c-panel, #ffffff);
+  color: var(--c-icon);
+  font: inherit;
+  font-size: calc(12px * var(--app-text-scale, 1));
+  cursor: pointer;
+}
+
+.night-set-filter button[data-on="true"] {
+  background: var(--c-text-title);
+  color: var(--c-panel, #ffffff);
+}
+
+.night-set-empty {
+  color: var(--c-icon);
+  font-size: calc(12.5px * var(--app-text-scale, 1));
+  cursor: default;
+}
+
+/* 正则：夜里换一套（多选） */
+.night-sheet-checks {
+  display: flex;
+  flex-direction: column;
+  padding: 0 0 8px 30px;
+}
+
+.night-sheet-checks button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: calc(13px * var(--app-text-scale, 1));
+  text-align: left;
+  cursor: pointer;
+}
+
+.night-sheet-box {
+  position: relative;
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  border: 1.5px solid color-mix(in srgb, var(--c-icon) 70%, transparent);
+}
+
+.night-sheet-box[data-on="true"] {
+  border-color: var(--c-icon-active);
+  background: var(--c-icon-active);
+}
+
+.night-sheet-box[data-on="true"]::after {
+  content: "";
+  position: absolute;
+  left: 4.5px;
+  top: 1.5px;
+  width: 4px;
+  height: 8px;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.night-sheet-choice:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.night-sheet-bg {
+  width: 96px;
+  height: 140px;
+  object-fit: cover;
+  border-radius: 10px;
+}
+
+/* 批量设置：挑哪一项 */
+.night-batch-projects {
+  padding: 2px 0 8px;
+}
+
+/* 只剩说明那一行时（切换条在面板顶上） */
+.night-side-hint-alone {
+  margin: 0 0 8px;
+}
+
+/* 日历主题：夜间那侧的「跟随日间」 */
+.calendar-theme-swatch-follow {
+  background: repeating-linear-gradient(45deg, #f2f3f6 0 4px, #e3e5ea 4px 8px);
+}
+
+/* 剧情侧栏「显示选项」顶上的切换、日历主题面板顶上的切换 */
+.story-look-side {
+  margin: 2px 0 10px;
+}
+
+.calendar-theme-modal .night-side-tabs {
+  margin: 10px 0 4px;
+}
+
+.night-card-time .menu-label {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.night-card-time .menu-right {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.night-card-time .night-time-input {
+  min-width: 0;
+  padding: 5px 8px;
+}
+
+.night-card-time .night-time-input::-webkit-calendar-picker-indicator {
+  display: none;
 }

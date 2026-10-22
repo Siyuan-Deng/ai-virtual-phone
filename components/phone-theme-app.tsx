@@ -17,9 +17,9 @@ import {
   Wallpaper,
 } from "lucide-react";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
-import { NightAutoPage, NightModeCard } from "@/components/night/night-mode-card";
+import { NightModeCard } from "@/components/night/night-mode-card";
 import { isNightActive, useNightActive } from "@/lib/night-mode";
-import { NightSetPage } from "@/components/night/night-set-page";
+import { NightEntityPage, NightSetPage, type NightEntity } from "@/components/night/night-set-page";
 import { GlassIcon } from "@/components/ui/glass-icon";
 import { normalizeThemeProfile, resolveActiveIconSkins, DEFAULT_THEME_PROFILE, type ThemeProfile } from "@/lib/theme-types";
 import type { DesktopIconId, IconId } from "@/lib/desktop-config";
@@ -72,10 +72,10 @@ type ThemeSection =
   | "case"
   | "text"
   | "css"
-  | "nightAuto"
-  | "nightSet";
+  | "nightSet"
+  | "nightEntity";
 
-type ThemeMenuItemSection = Exclude<ThemeSection, "menu" | "nightAuto" | "nightSet"> | "transfer" | "reset";
+type ThemeMenuItemSection = Exclude<ThemeSection, "menu" | "nightSet" | "nightEntity"> | "transfer" | "reset";
 type WallpaperSliderField = "wallpaperOpacity" | "wallpaperBlur" | "wallpaperScale" | "wallpaperX" | "wallpaperY";
 
 type PhoneThemeAppProps = {
@@ -174,11 +174,11 @@ const SECTION_TITLES: Record<Exclude<ThemeSection, "menu">, string> = {
   case: "\u624B\u673A\u58F3",
   text: "\u6587\u5B57",
   css: "CSS \u53D8\u91CF",
-  nightAuto: "自动切换",
   nightSet: "夜间套装",
+  nightEntity: "夜间套装",
 };
 
-const THEME_SECTIONS = new Set<string>(["menu", "palette", "wallpaper", "icons", "widgets", "case", "text", "css", "nightAuto", "nightSet"]);
+const THEME_SECTIONS = new Set<string>(["menu", "palette", "wallpaper", "icons", "widgets", "case", "text", "css", "nightSet"]);
 
 function isThemeSection(value: string): value is ThemeSection {
   return THEME_SECTIONS.has(value);
@@ -277,15 +277,24 @@ export function PhoneThemeApp({
     }
   }, [onApply, onDesktopThemeChange, onDraftChange, onNotice]);
 
+  // 夜间套装里点进的那个角色
+  const [nightEntity, setNightEntity] = useState<NightEntity | null>(null);
+
   function handleBack() {
     if (section === "menu") {
       onClose();
+    } else if (section === "nightEntity") {
+      setSection("nightSet");
     } else {
       setSection("menu");
     }
   }
 
-  const title = section === "menu" ? "\u5916\u89C2" : SECTION_TITLES[section];
+  const title = section === "menu"
+    ? "\u5916\u89C2"
+    : section === "nightEntity" && nightEntity
+      ? `${nightEntity.name} · 夜间`
+      : SECTION_TITLES[section];
   const nightActive = useNightActive();
 
   return (
@@ -293,7 +302,7 @@ export function PhoneThemeApp({
         {nightActive && ["palette", "wallpaper", "icons", "css"].includes(section) ? (
           <div className="night-theme-banner">
             <Moon size={14} aria-hidden="true" />
-            <span>夜间模式开着：这里改的只改夜间那份，白天的不动。</span>
+            <span>夜间模式开着：这里改的只改夜间那份，日间的不动。</span>
           </div>
         ) : null}
         {section === "menu" ? (
@@ -302,7 +311,7 @@ export function PhoneThemeApp({
             <div>
               <h3 className="appearance-menu-section-title">Display</h3>
               <div className="mt-2.5">
-                <NightModeCard onOpenAuto={() => setSection("nightAuto")} onOpenSet={() => setSection("nightSet")} />
+                <NightModeCard onOpenSet={() => setSection("nightSet")} />
               </div>
             </div>
 
@@ -442,10 +451,10 @@ export function PhoneThemeApp({
               </div>
             </div>
           </div>
-        ) : section === "nightAuto" ? (
-          <NightAutoPage />
         ) : section === "nightSet" ? (
-          <NightSetPage />
+          <NightSetPage onOpenEntity={(entity) => { setNightEntity(entity); setSection("nightEntity"); }} />
+        ) : section === "nightEntity" && nightEntity ? (
+          <NightEntityPage entityId={nightEntity.id} />
         ) : section === "wallpaper" ? (
           <WallpaperPage
             draft={draft}

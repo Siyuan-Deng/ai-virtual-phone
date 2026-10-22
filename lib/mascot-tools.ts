@@ -1908,7 +1908,7 @@ async function handleClearCss(args: Record<string, unknown>, ctx: MascotToolCont
     const sessionName = args.sessionName as string | undefined;
     if (!location || !CSS_LOCATION_LABELS[location]) return { name: "清除CSS", success: false, error: `未知位置：${location}` };
     const result = await writeCssAt(location, "", ctx, sessionName);
-    return { name: "清除CSS", success: true, data: `已清除 ${location}${result.displayName ? `（${result.displayName}）` : ""} 的${result.night ? "夜间" : ""} CSS${result.night ? "（夜里回到和白天一样）" : ""}` };
+    return { name: "清除CSS", success: true, data: `已清除 ${location}${result.displayName ? `（${result.displayName}）` : ""} 的${result.night ? "夜间" : ""} CSS${result.night ? "（夜里回到跟随日间）" : ""}` };
 }
 
 // ── Character Handlers ──────────────────────────

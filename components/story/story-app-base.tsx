@@ -96,7 +96,7 @@ import {
   type StoryBindingKind,
 } from "@/components/story/story-extra-ui";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
-import { NightSideTabs, useNightDraft } from "@/components/ui/night-side-tabs";
+import { NightSideSwitch, NightSideTabs, useNightDraft, useNightSide } from "@/components/ui/night-side-tabs";
 import { getNightBinding, isNightActive, nightSlotKeys, setNightBinding, useNightRevision } from "@/lib/night-mode";
 import {
   DEFAULT_STORY_CONTINUE_PROMPT,
@@ -187,9 +187,6 @@ function getStoryPreview(messages: StoryMessage[]): string {
 
 const DEFAULT_STORY_META_QUOTE = "“有些故事，在开始之前就已经写好了结局。”";
 
-/** 显示选项里夜间能单独改的几项（夜间模式开着时在显示选项里改的，只改夜间那份） */
-const STORY_LOOK_FIELDS = ["uiPrefs", "backgroundImage", "backgroundBrightness", "paperHidden", "fontAsset", "textColor"] as const;
-
 /** 夜间那份显示选项：这个窗口自己的，番外没有就跟正篇的 */
 function storyNightLook(session: StorySession, main?: StorySession): Partial<StorySession> | null {
   for (const owner of [session, main]) {
@@ -207,9 +204,14 @@ function storyNightLook(session: StorySession, main?: StorySession): Partial<Sto
 
 /** 番外窗口的主题 / CSS / 折叠标签 / 引言没单独改过就跟正篇一样；夜间模式开着就叠上夜间那份显示选项 */
 function storyDisplaySettings(session: StorySession) {
+  return storyLookFor(session, isNightActive() ? "night" : "day");
+}
+
+/** 日间那份，或者日间叠上夜间那份（显示选项里切到哪一侧就看哪一份） */
+function storyLookFor(session: StorySession, side: "day" | "night") {
   const main = session.kind === "extra" ? findMainStorySession(session.characterId) : undefined;
   const day = storyDayDisplaySettings(session, main);
-  const look = isNightActive() ? storyNightLook(session, main) : null;
+  const look = side === "night" ? storyNightLook(session, main) : null;
   if (!look) return day;
   return {
     ...day,
@@ -589,22 +591,38 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
   const nightCss = useNightDraft(nightSlotKeys.story(display?.cssOwnerId ?? ""));
   const cssEditing = nightCss.side === "night" ? nightCss.draft : customCssDraft;
   const setCssEditing = nightCss.side === "night" ? nightCss.setDraft : setCustomCssDraft;
-  const uiPrefs = display?.uiPrefs || {};
+  // 侧栏「显示选项」的「日间模式 | 夜间模式」：侧栏开着时页面按正在改的那一侧预览
+  const [lookSide, setLookSide] = useNightSide();
+  const look = currentSession && drawerOpen ? storyLookFor(currentSession, lookSide) : display;
+  const lookMain = currentSession?.kind === "extra" ? findMainStorySession(currentSession.characterId) : undefined;
+  const nightLook = currentSession ? storyNightLook(currentSession, lookMain) : null;
+  // 页面样式弹窗：主题点了先放草稿（日间 / 夜间各一份），「应用」才存；弹窗开着时按正在改的那一侧预览
+  const [themeDraft, setThemeDraft] = useState<{ day: string; night: string } | null>(null);
+  useEffect(() => {
+    if (!cssModalOpen || !currentSession) { setThemeDraft(null); return; }
+    setThemeDraft({
+      day: storyLookFor(currentSession, "day").uiPrefs?.theme || "paper",
+      night: nightLook?.uiPrefs?.theme || "",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cssModalOpen, currentSession?.id]);
+  const previewTheme = themeDraft ? (nightCss.side === "night" ? themeDraft.night || themeDraft.day : themeDraft.day) : null;
+  const uiPrefs = previewTheme ? { ...(look?.uiPrefs || {}), theme: previewTheme } : look?.uiPrefs || {};
   // 剧情背景：存的是图片库 id，读成地址后放进 --story-wallpaper（自定义 CSS 也用这个变量）
-  const backgroundImageId = display?.backgroundImage || "";
+  const backgroundImageId = look?.backgroundImage || "";
   const [wallpaperUrl, setWallpaperUrl] = useState<string | null>(null);
   const backgroundInputRef = useRef<HTMLInputElement | null>(null);
   // 背景亮度：拖的时候先只改页面，停手一会儿再存，免得每挪一格都写一次库
   const [brightnessOpen, setBrightnessOpen] = useState(false);
   const [brightnessDraft, setBrightnessDraft] = useState<number | null>(null);
   const brightnessSaveRef = useRef<number | null>(null);
-  const backgroundBrightness = brightnessDraft ?? display?.backgroundBrightness ?? 100;
+  const backgroundBrightness = brightnessDraft ?? look?.backgroundBrightness ?? 100;
   const wallpaperDim = (100 - backgroundBrightness) / 100;
   // 上传的字体、文字颜色：写成一条只有一个 class 权重的规则，放在自定义 CSS 前面——
   // 主题默认值压得住，自定义 CSS 里写了同样的变量就以 CSS 为准
-  const fontAssetId = display?.fontAsset || "";
-  const customTextColor = display?.textColor || "";
-  const paperHidden = display?.paperHidden === true;
+  const fontAssetId = look?.fontAsset || "";
+  const customTextColor = look?.textColor || "";
+  const paperHidden = look?.paperHidden === true;
   const [loadedFontFamily, setLoadedFontFamily] = useState<string | null>(null);
   const fontInputRef = useRef<HTMLInputElement | null>(null);
   // 折叠标签 / 不进上下文标签：平时只露一行，点开才是输入框
@@ -924,7 +942,7 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
     // 抛出去会让整个剧情页白屏，所以失败时跳过缓存刷新，错误留到发送时提示
     let signature: { regexSignature: string; parserVersion: number };
     try {
-      signature = getStoryRenderSignature(activeCharacterId, extraBindings);
+      signature = getStoryRenderSignature(activeCharacterId, extraBindings, currentSession.id);
     } catch {
       return;
     }
@@ -989,23 +1007,6 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
 
   function applySessionUpdates(updates: Partial<StorySession>) {
     if (!currentSession) return;
-    if (isNightActive()) {
-      // 夜间模式：显示选项那几项存进夜间那份，其余（CSS、折叠标签……）照常
-      const lookUpdates: Partial<StorySession> = {};
-      const rest: Partial<StorySession> = {};
-      for (const [field, value] of Object.entries(updates) as Array<[keyof StorySession, unknown]>) {
-        const target = (STORY_LOOK_FIELDS as readonly string[]).includes(field) ? lookUpdates : rest;
-        (target as Record<string, unknown>)[field] = value;
-      }
-      if (Object.keys(lookUpdates).length) {
-        const main = currentSession.kind === "extra" ? findMainStorySession(currentSession.characterId) : undefined;
-        const base = storyNightLook(currentSession, main) ?? {};
-        setNightBinding(nightSlotKeys.storyLook(currentSession.id), { kind: "own", value: JSON.stringify({ ...base, ...lookUpdates }) });
-        setStorageVersion((value) => value + 1);
-      }
-      updates = rest;
-      if (Object.keys(updates).every((field) => field === "updatedAt")) return;
-    }
     const next = updateStorySession(currentSession.id, updates);
     if (!next) return;
     const nextDisplay = storyDisplaySettings(next);
@@ -1013,6 +1014,25 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
     setFoldTagsDraft(nextDisplay.foldTags ?? "think,thinking");
     setContextExcludedTagsDraft(nextDisplay.contextExcludedTags ?? "think,thinking");
     setStorageVersion((value) => value + 1);
+  }
+
+  /** 夜间那份显示选项改几项；值是 undefined 的就是那项回到跟随日间 */
+  function updateStoryNightLook(patch: Partial<StorySession>) {
+    if (!currentSession) return;
+    const base: Record<string, unknown> = { ...(nightLook ?? {}) };
+    for (const [field, value] of Object.entries(patch)) {
+      if (field === "updatedAt") continue;
+      if (value === undefined) delete base[field];
+      else base[field] = value;
+    }
+    setNightBinding(nightSlotKeys.storyLook(currentSession.id), Object.keys(base).length ? { kind: "own", value: JSON.stringify(base) } : null);
+    setStorageVersion((value) => value + 1);
+  }
+
+  /** 侧栏显示选项改了：改的是正在编辑的那一侧 */
+  function applyLook(patch: Partial<StorySession>) {
+    if (lookSide === "night") updateStoryNightLook(patch);
+    else applySessionUpdates(patch);
   }
 
   async function handleFontFile(file: File | undefined) {
@@ -1024,7 +1044,7 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
         alert("这个字体文件用不了，换一个 ttf / otf / woff 试试");
         return;
       }
-      applySessionUpdates({ fontAsset: id, updatedAt: currentSession.updatedAt });
+      applyLook({ fontAsset: id, updatedAt: currentSession.updatedAt });
     } catch (error) {
       alert(error instanceof Error ? error.message : "字体保存失败，请重试");
     }
@@ -1035,21 +1055,22 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
     try {
       const id = await saveChatImageToIndexedDB(await shrinkStoryBackground(file));
       // 换背景不算一次阅读，不改「最近」的顺序
-      applySessionUpdates({ backgroundImage: id, updatedAt: currentSession.updatedAt });
+      applyLook({ backgroundImage: id, updatedAt: currentSession.updatedAt });
     } catch (error) {
       alert(error instanceof Error ? error.message : "背景保存失败，请重试");
     }
   }
 
-  // 番外里清除 = 番外用默认（空字符串）；正篇清除就是去掉，跟着正篇的番外也一起回到默认
+  // 番外里清除 = 番外用默认（空字符串）；正篇清除就是去掉，跟着正篇的番外也一起回到默认。
+  // 夜间那侧的「跟随日间」= 夜间那份去掉这一项
   function clearFont() {
     if (!currentSession) return;
-    applySessionUpdates({ fontAsset: isExtra ? "" : undefined, updatedAt: currentSession.updatedAt });
+    applyLook({ fontAsset: lookSide === "night" || !isExtra ? undefined : "", updatedAt: currentSession.updatedAt });
   }
 
   function clearTextColor() {
     if (!currentSession) return;
-    applySessionUpdates({ textColor: isExtra ? "" : undefined, updatedAt: currentSession.updatedAt });
+    applyLook({ textColor: lookSide === "night" || !isExtra ? undefined : "", updatedAt: currentSession.updatedAt });
   }
 
   function changeBackgroundBrightness(value: number) {
@@ -1059,7 +1080,7 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
     brightnessSaveRef.current = window.setTimeout(() => {
       brightnessSaveRef.current = null;
       // 和换背景一样不算一次阅读，不改「最近」的顺序
-      if (session) applySessionUpdates({ backgroundBrightness: value, updatedAt: session.updatedAt });
+      if (session) applyLook({ backgroundBrightness: value, updatedAt: session.updatedAt });
       setBrightnessDraft(null);
     }, 300);
   }
@@ -1068,7 +1089,7 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
     if (!currentSession) return;
     setBrightnessOpen(false);
     // 正篇清掉就没有了（跟着正篇的番外也一起没了）；番外清掉是「番外不要背景」，正篇不受影响
-    applySessionUpdates({ backgroundImage: isExtra ? "" : undefined, updatedAt: currentSession.updatedAt });
+    applyLook({ backgroundImage: lookSide === "night" || !isExtra ? undefined : "", updatedAt: currentSession.updatedAt });
   }
 
   function storySlotMessageCount(characterId: string, kind: "main" | "extra"): number {
@@ -1637,7 +1658,7 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
 
         <div className="story-drawer-section">
           <div className="story-drawer-eyebrow">显示选项</div>
-          {nightActive ? <div className="story-drawer-note">夜间模式开着：这里改的只改夜间那份，白天的不动。</div> : null}
+          <div className="story-look-side"><NightSideSwitch side={lookSide} onChange={setLookSide} /></div>
           <div className="story-bg-row">
             <span className="story-bg-row-label">纸张显示</span>
             <button
@@ -1649,7 +1670,7 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
               data-on={paperHidden ? undefined : "true"}
               onClick={() => {
                 if (!currentSession) return;
-                applySessionUpdates({ paperHidden: !paperHidden, updatedAt: currentSession.updatedAt });
+                applyLook({ paperHidden: !paperHidden, updatedAt: currentSession.updatedAt });
               }}
             >
               <i aria-hidden="true" />
@@ -1670,7 +1691,9 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
                 </button>
               ) : null}
               <button type="button" onClick={() => backgroundInputRef.current?.click()}>更换</button>
-              {backgroundImageId ? <button type="button" onClick={clearBackground}>清除</button> : null}
+              {lookSide === "night"
+                ? (nightLook?.backgroundImage !== undefined ? <button type="button" onClick={clearBackground}>跟随日间</button> : null)
+                : (backgroundImageId ? <button type="button" onClick={clearBackground}>清除</button> : null)}
             </span>
             <input
               ref={backgroundInputRef}
@@ -1704,7 +1727,9 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
             <span className="story-bg-row-label">正文字体</span>
             <span className="story-bg-row-actions">
               <button type="button" onClick={() => fontInputRef.current?.click()}>更换</button>
-              {fontAssetId ? <button type="button" onClick={clearFont}>清除</button> : null}
+              {lookSide === "night"
+                ? (nightLook?.fontAsset !== undefined ? <button type="button" onClick={clearFont}>跟随日间</button> : null)
+                : (fontAssetId ? <button type="button" onClick={clearFont}>清除</button> : null)}
             </span>
             <input
               ref={fontInputRef}
@@ -1730,11 +1755,13 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
                   value={customTextColor || "#3a3b3c"}
                   onChange={(event) => {
                     if (!currentSession) return;
-                    applySessionUpdates({ textColor: event.target.value, updatedAt: currentSession.updatedAt });
+                    applyLook({ textColor: event.target.value, updatedAt: currentSession.updatedAt });
                   }}
                 />
               </span>
-              {customTextColor ? <button type="button" onClick={clearTextColor}>清除</button> : null}
+              {lookSide === "night"
+                ? (nightLook?.textColor !== undefined ? <button type="button" onClick={clearTextColor}>跟随日间</button> : null)
+                : (customTextColor ? <button type="button" onClick={clearTextColor}>清除</button> : null)}
             </span>
           </div>
           <button
@@ -2234,17 +2261,22 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
             </button>
           </div>
           <div style={{ flex: 1, overflow: "auto", padding: "14px 20px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+            <NightSideSwitch side={nightCss.side} onChange={nightCss.setSide} />
             <div style={{ display: "flex", flexDirection: "column" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 8 }}>
-                {STORY_THEMES.map(t => {
-                  const active = (uiPrefs.theme || "paper") === t.id;
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(${nightCss.side === "night" ? 7 : 6}, minmax(0, 1fr))`, gap: nightCss.side === "night" ? 4 : 8 }}>
+                {[
+                  ...(nightCss.side === "night" ? [{ id: "", name: "跟随日间", color: "repeating-linear-gradient(45deg, #f2f3f6 0 3px, #dfe2e8 3px 6px)" }] : []),
+                  ...STORY_THEMES,
+                ].map(t => {
+                  const selected = nightCss.side === "night" ? themeDraft?.night : themeDraft?.day;
+                  const active = selected === t.id;
                   return (
                     <button
-                      key={t.id}
+                      key={t.id || "follow"}
                       type="button"
-                      aria-label={`切换到${t.name}主题`}
+                      aria-label={t.id ? `${nightCss.side === "night" ? "夜间" : "日间"}用${t.name}主题` : "夜间主题跟随日间"}
                       aria-pressed={active}
-                      onClick={() => applySessionUpdates({ uiPrefs: { ...uiPrefs, theme: t.id } })}
+                      onClick={() => setThemeDraft(prev => prev && (nightCss.side === "night" ? { ...prev, night: t.id } : { ...prev, day: t.id }))}
                       style={{
                         minHeight: 54,
                         borderRadius: 0,
@@ -2271,13 +2303,13 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
                           ? "inset 0 0 0 2px var(--c-story-bg-top, #fdfdfd), 0 0 0 2px var(--c-story-text, #3a3b3c)"
                           : "none",
                       }} />
-                      <span style={{ fontSize: "calc(11px*var(--app-text-scale,1))", color: "var(--c-story-sub, #94a3b8)", lineHeight: 1.1 }}>{t.name}</span>
+                      <span style={{ fontSize: "calc(11px*var(--app-text-scale,1))", color: "var(--c-story-sub, #94a3b8)", lineHeight: 1.1, whiteSpace: "nowrap" }}>{t.name}</span>
                     </button>
                   );
                 })}
               </div>
             </div>
-            <NightSideTabs state={nightCss} dayValue={customCssDraft} />
+            <NightSideTabs state={nightCss} dayValue={customCssDraft} hideSwitch />
             <textarea
               className="story-css-box"
               value={cssEditing}
@@ -2326,8 +2358,15 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
               <button
                 onClick={() => {
                   // 应用以后这一格就是当前这个窗口自己的了（番外也是），夜间那份跟着存到它名下
-                  applySessionUpdates({ customCSS: customCssDraft });
+                  const dayTheme = currentSession ? storyLookFor(currentSession, "day").uiPrefs : undefined;
+                  applySessionUpdates({
+                    customCSS: customCssDraft,
+                    ...(themeDraft && themeDraft.day !== (dayTheme?.theme || "paper") ? { uiPrefs: { ...(dayTheme ?? {}), theme: themeDraft.day } } : {}),
+                  });
                   if (currentSession) nightCss.commit(nightSlotKeys.story(currentSession.id));
+                  if (themeDraft && themeDraft.night !== (nightLook?.uiPrefs?.theme || "")) {
+                    updateStoryNightLook({ uiPrefs: themeDraft.night ? { ...(nightLook?.uiPrefs ?? dayTheme ?? {}), theme: themeDraft.night } : undefined });
+                  }
                   setCssModalOpen(false);
                 }}
                 style={{

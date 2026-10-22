@@ -8,7 +8,7 @@
 //   没配         → 跟白天一样
 //   scheme       → 用一个存过的方案（css-scheme-storage，就是各编辑框左下角「存方案」存的）
 //   own          → 夜间单独一份
-//   swap         → 只给正则用：这个正则夜里换成另一个，只换显示，不碰提示词
+// 正则另算：角色在聊天 / 剧情里夜里绑另一套（own 存正则 id 列表），只换显示，不碰提示词。
 //
 // 自动切换：按时间段，或者跟着手机系统的深色模式。自动开着时手动点了，
 // 按时间的到下一个切换点之前听手动的；跟系统的到系统下次切换之前听手动的。
@@ -47,8 +47,7 @@ export type NightModeState = {
 
 export type NightBinding =
     | { kind: "scheme"; schemeId: string }
-    | { kind: "own"; value: string }
-    | { kind: "swap"; targetId: string };
+    | { kind: "own"; value: string };
 
 const DEFAULT_STATE: NightModeState = { night: false, auto: "off", start: "22:30", end: "07:00" };
 
@@ -208,7 +207,13 @@ export function loadNightSet(): Record<string, NightBinding> {
     if (typeof window === "undefined") return {};
     try {
         const parsed = JSON.parse(kvGet(SET_KEY) || "{}") as unknown;
-        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, NightBinding> : {};
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+        // 早先「某个正则夜里换成另一个」的配法已经不用了，读的时候跳过
+        const result: Record<string, NightBinding> = {};
+        for (const [key, binding] of Object.entries(parsed as Record<string, { kind?: string }>)) {
+            if (binding?.kind === "scheme" || binding?.kind === "own") result[key] = binding as NightBinding;
+        }
+        return result;
     } catch {
         return {};
     }
@@ -261,21 +266,26 @@ export function resolveNightStatusRender(sessionId: string, dayRender: string): 
     return dayRender;
 }
 
-/** 正则：夜里把配了「换成」的那几个换掉（只在显示 / 剧情渲染时调） */
-export function swapNightRegexes(groups: RegexConfig[], all: RegexConfig[]): RegexConfig[] {
-    if (!isNightActive()) return groups;
-    const set = loadNightSet();
-    const byId = new Map(all.map((group) => [group.id, group]));
-    const seen = new Set<string>();
-    const result: RegexConfig[] = [];
-    for (const group of groups) {
-        const binding = set[nightSlotKeys.regex(group.id)];
-        const next = binding?.kind === "swap" ? byId.get(binding.targetId) ?? group : group;
-        if (seen.has(next.id)) continue;
-        seen.add(next.id);
-        result.push(next);
+/** 正则：这个角色在聊天 / 剧情里夜里绑的另一套（存的是正则 id 列表）；没配就是 null */
+export function nightRegexIds(key: string): string[] | null {
+    const binding = getNightBinding(key);
+    if (binding?.kind !== "own") return null;
+    try {
+        const ids = JSON.parse(binding.value) as unknown;
+        return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : null;
+    } catch {
+        return null;
     }
-    return result;
+}
+
+/** 显示 / 剧情渲染用的正则：夜间模式里这个角色配了另一套就换成它（提示词照日间那套） */
+export function resolveNightRegexes(key: string | undefined, dayRegexes: RegexConfig[], all: RegexConfig[]): RegexConfig[] {
+    if (!key || !isNightActive()) return dayRegexes;
+    const ids = nightRegexIds(key);
+    if (!ids) return dayRegexes;
+    return ids
+        .map((id) => all.find((regex) => regex.id === id))
+        .filter((regex): regex is RegexConfig => Boolean(regex));
 }
 
 /** 各格的 key */
@@ -292,10 +302,13 @@ export const nightSlotKeys = {
     chatStatus: (sessionId: string) => `chatSession.status:${sessionId}`,
     /** 聊天背景：夜间单独一张图（聊天图片库的 id） */
     chatBg: (sessionId: string) => `chatSession.bg:${sessionId}`,
+    /** 聊天里夜间绑的另一套正则 */
+    chatRegex: (sessionId: string) => `chatSession.regex:${sessionId}`,
     story: (sessionId: string) => `story.css:${sessionId}`,
+    /** 剧情（正篇 / 番外各自）夜间绑的另一套正则 */
+    storyRegex: (sessionId: string) => `story.regex:${sessionId}`,
     /** 剧情显示选项（主题、背景、亮度、纸张、字体、文字颜色）：夜间改过的那几项，JSON */
     storyLook: (sessionId: string) => `story.look:${sessionId}`,
-    regex: (regexId: string) => `regex:${regexId}`,
 };
 
 // ── React ──

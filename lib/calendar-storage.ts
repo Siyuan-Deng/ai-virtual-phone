@@ -115,6 +115,16 @@ const LEGACY_THEME_MAP: Record<string, string> = {
 
 export const CALENDAR_THEME_IDS = ["light", "dark", "cream", "mint", "mist", "sakura"] as const;
 
+/** 日历主题的名字（主题面板、夜间套装都用） */
+export const CALENDAR_THEMES: Array<{ id: (typeof CALENDAR_THEME_IDS)[number]; name: string }> = [
+  { id: "light", name: "默认" },
+  { id: "dark", name: "深色" },
+  { id: "cream", name: "奶油" },
+  { id: "mint", name: "薄荷" },
+  { id: "mist", name: "雾紫" },
+  { id: "sakura", name: "樱粉" },
+];
+
 export function normalizeCalendarTheme(theme: unknown): string {
   if (typeof theme !== "string" || !theme) return DEFAULT_CALENDAR_CONFIG.theme;
   const mapped = LEGACY_THEME_MAP[theme] ?? theme;

@@ -57,7 +57,7 @@ import type { UserIdentity } from "@/components/settings/user-identity";
 import { AlertCircle, Blocks, Bookmark, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, ImageDown, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
 import { setDebugChatState } from "@/lib/debug-store";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
-import { nightSlotKeys, resolveNightStatusRender, swapNightRegexes, useNightRevision, useNightText } from "@/lib/night-mode";
+import { nightSlotKeys, resolveNightRegexes, resolveNightStatusRender, useNightRevision, useNightText } from "@/lib/night-mode";
 import { setChatActive } from "@/lib/music-action-queue";
 import { getMusicControlBridge } from "@/lib/music-control-bridge";
 import { findPlayableMatch, getNeteaseLyrics, getNeteaseSongDetail } from "@/lib/music-service";
@@ -1648,12 +1648,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             .map(id => allRegexes.find(regex => regex.id === id))
             .filter((regex): regex is RegexConfig => Boolean(regex));
     }, [regexRevision, session.contactId, session.isGroup]);
-    // 显示用的正则：夜间模式里配了「换成」的换掉（只换显示，编辑时跑的正则照白天）
+    // 显示用的正则：夜间模式里这个聊天另绑了一套就用它（只换显示，编辑时跑的正则照日间）
     const nightRevision = useNightRevision();
     const displayRegexes = useMemo(
-        () => swapNightRegexes(activeRegexes, loadRegexes()),
+        () => resolveNightRegexes(nightSlotKeys.chatRegex(session.id), activeRegexes, loadRegexes()),
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [activeRegexes, nightRevision],
+        [activeRegexes, nightRevision, session.id],
     );
 
     // 流式预览的标签净化配置：与引擎同源（当前会话绑定的预设）。预设开启标签式思维链时，

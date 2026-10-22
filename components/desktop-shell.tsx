@@ -1143,7 +1143,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     const onChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ night: boolean; source: string }>).detail;
       if (detail?.source !== "manual" && detail?.source !== "auto") return;
-      setNotice(detail.night ? "🌙 夜间模式" : "☀️ 白天模式");
+      setNotice(detail.night ? "🌙 夜间模式" : "☀️ 日间模式");
     };
     window.addEventListener(NIGHT_MODE_CHANGED_EVENT, onChanged);
     const tickIfVisible = () => { if (document.visibilityState === "visible") tickNightAuto(); };
