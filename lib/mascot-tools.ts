@@ -961,7 +961,7 @@ export const MASCOT_TOOL_PACKAGES: MascotToolPackage[] = [
         subTools: [
             { name: "列出世界卷宗", description: "列出所有世界卷宗，含成员名单、关系线（带 relationId）与世界观描述。操作前建议先看。", parameterSchema: LIST_CHARACTER_WORLDS_SCHEMA },
             { name: "创建世界卷宗", description: "新建一个世界卷宗（如：现代都市 / 仙侠界），初始为空，之后用「移动角色到世界」把角色放进去。", parameterSchema: CREATE_CHARACTER_WORLD_SCHEMA },
-            { name: "重命名世界卷宗", description: "修改某个世界卷宗的名字（默认世界不可改名）。", parameterSchema: RENAME_CHARACTER_WORLD_SCHEMA },
+            { name: "重命名世界卷宗", description: "修改某个世界卷宗的名字（默认世界也能改名）。", parameterSchema: RENAME_CHARACTER_WORLD_SCHEMA },
             { name: "更新世界描述", description: "写入或修改某个世界卷宗的世界观描述，会注入该世界所有角色的上下文。", parameterSchema: UPDATE_CHARACTER_WORLD_DESC_SCHEMA },
             { name: "删除世界卷宗", description: "删除某个世界卷宗（默认世界不可删除），其成员自动并回默认世界。", parameterSchema: DELETE_CHARACTER_WORLD_SCHEMA },
             { name: "移动角色到世界", description: "把某个角色移入目标世界卷宗；角色会自动从原世界移出。", parameterSchema: MOVE_CHARACTER_TO_WORLD_SCHEMA },
@@ -2094,7 +2094,7 @@ async function handleListCharacterWorlds(): Promise<ToolResult> {
     const nameById = new Map(chars.map((c) => [c.id, c.name || c.id]));
     const lines: string[] = [];
     for (const group of groups) {
-        lines.push(`· ${group.name} [id: ${group.id}]${group.id === DEFAULT_CHARACTER_WORLD_ID ? "（默认世界，不可改名/删除）" : ""}`);
+        lines.push(`· ${group.name} [id: ${group.id}]${group.id === DEFAULT_CHARACTER_WORLD_ID ? "（默认世界，不可删除）" : ""}`);
         if (group.description.trim()) lines.push(`  描述：${group.description.trim().replace(/\s+/g, " ").slice(0, 80)}`);
         const memberNames = group.memberIds.map((id) => nameById.get(id) || id);
         lines.push(`  成员（${memberNames.length}）：${memberNames.join("、") || "（空）"}`);
@@ -2122,7 +2122,6 @@ async function handleRenameCharacterWorld(args: Record<string, unknown>): Promis
     if (!newName) return { name: "重命名世界卷宗", success: false, error: "newName 不能为空" };
     const world = await resolveCharacterWorldIdByName(name);
     if (!world) return { name: "重命名世界卷宗", success: false, error: `找不到世界卷宗：${name}。用「列出世界卷宗」确认名称。` };
-    if (world.isDefault) return { name: "重命名世界卷宗", success: false, error: "默认世界不可改名" };
     renameCharacterWorldGroup(world.id, newName);
     return { name: "重命名世界卷宗", success: true, data: `世界卷宗「${world.name}」已改名为「${newName}」` };
 }
