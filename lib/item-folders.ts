@@ -3,7 +3,8 @@
 // 设置页列表的文件夹（世界书、API 配置共用）：只用来分组。一项最多在一个文件夹里（folderId），
 // 文件夹本身只存名字。删文件夹时里面的东西回到「未分类」，不会跟着删。
 // 最外层是「文件夹」和「没进文件夹的项」混排的，顺序单独存一份 id 列表（rootOrder）；
-// 置顶的（文件夹和项都能置顶）另外放在最上面一组，这一组的顺序也存在 rootOrder 里。
+// 置顶的（文件夹和没进文件夹的项都能置顶）另外放在最上面一组，这一组的顺序也存在 rootOrder 里；
+// 文件夹里的项置顶只在那个文件夹里排前面。
 
 import { kvGet, kvSet } from "./kv-db";
 import { mergeOrder } from "./list-order";
@@ -65,16 +66,17 @@ export function saveRootOrder(key: string, ids: string[]): void {
     kvSet(key, JSON.stringify(ids));
 }
 
-/** 按文件夹分组。置顶的单独一组（在文件夹里的也算，最外层要把它们放在最上面），
- *  未分类的不含置顶的；文件夹里面照常列出全部（置顶的在前）。指向不存在文件夹的算未分类。 */
+/** 按文件夹分组。最外层置顶的单独一组，只算没进文件夹的；文件夹里置顶的只在文件夹里排前面，
+ *  不跑到外面来。指向不存在文件夹的算未分类。 */
 export function groupItemsByFolder<T extends FolderItem>(
     items: T[],
     folders: ItemFolder[],
 ): { pinned: T[]; unfiled: T[]; inFolder: (folderId: string) => T[] } {
     const known = new Set(folders.map((folder) => folder.id));
+    const inFolder = (item: T) => Boolean(item.folderId && known.has(item.folderId));
     return {
-        pinned: items.filter((item) => item.pinned === true),
-        unfiled: items.filter((item) => item.pinned !== true && (!item.folderId || !known.has(item.folderId))),
+        pinned: items.filter((item) => item.pinned === true && !inFolder(item)),
+        unfiled: items.filter((item) => item.pinned !== true && !inFolder(item)),
         inFolder: (folderId: string) => items.filter((item) => item.folderId === folderId),
     };
 }
@@ -88,7 +90,7 @@ function orderEntries<T>(defaults: RootEntry<T>[], rootOrder: string[]): RootEnt
         .filter((entry): entry is RootEntry<T> => Boolean(entry));
 }
 
-/** 最外层最上面那组：置顶的文件夹和置顶的项（在文件夹里的也算）混排，按存过的顺序；没存过就是文件夹在前 */
+/** 最外层最上面那组：置顶的文件夹和没进文件夹的置顶项混排，按存过的顺序；没存过就是文件夹在前 */
 export function buildPinnedEntries<T extends FolderItem>(items: T[], folders: ItemFolder[], rootOrder: string[]): RootEntry<T>[] {
     return orderEntries([
         ...folders.filter((folder) => folder.pinned).map((folder) => ({ id: folder.id, folder })),
