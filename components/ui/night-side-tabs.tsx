@@ -20,9 +20,9 @@ export type NightDraftState = {
     commit: (key?: string) => void;
 };
 
-type DraftState = { key: string; revision: string; draft: string; schemeName: string | null; touched: boolean };
+type DraftState = { key: string; revision: number; draft: string; schemeName: string | null; touched: boolean };
 
-function readNightDraft(slotKey: string, revision: string, pickScheme?: (css: string) => string): DraftState {
+function readNightDraft(slotKey: string, revision: number, pickScheme?: (css: string) => string): DraftState {
     const binding = getNightBinding(slotKey);
     if (binding?.kind === "own") return { key: slotKey, revision, draft: binding.value, schemeName: null, touched: false };
     if (binding?.kind === "scheme") {

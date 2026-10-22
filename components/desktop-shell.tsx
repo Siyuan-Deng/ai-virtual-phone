@@ -105,7 +105,7 @@ import {
   writeThemeProfile
 } from "@/lib/theme-storage";
 import { bgSetInterval } from "@/lib/bg-timer";
-import { NIGHT_MODE_CHANGED_EVENT, nightSlotKeys, tickNightAuto, useNightActive, useNightRevision, useNightText } from "@/lib/night-mode";
+import { NIGHT_MODE_CHANGED_EVENT, announceNightHydrated, nightSlotKeys, tickNightAuto, useNightActive, useNightRevision, useNightText } from "@/lib/night-mode";
 import { overlayNightTheme, saveNightThemeGroups, splitNightThemeChange } from "@/lib/night-theme";
 import { THEME_PACKAGE_INSTALLED_EVENT } from "@/lib/theme-package";
 import {
@@ -1135,28 +1135,44 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     [nightActive, nightRevision, dayDraftTheme, nightThemeDraft],
   );
   useEffect(() => { setNightThemeDraft(null); }, [nightActive]);
-  // 自动切换：每半分钟、回到前台、手机深浅色变了都对一次；切了就提示一句
+  // 自动切换：只在 App 在前台时对表（每半分钟、回到前台、手机深浅色变了）。
+  // iOS 把 App 切到后台时会在浅色 / 深色之间各拍一张快照，网页会收到一次「变深色了」又变回来；
+  // 后台收到的不理，前台收到的也等它稳定一会儿再对，免得回来时闪一下夜间。
+  // 真切了才提示一句（手动点的、到点 / 跟手机自动切的）。
   useEffect(() => {
     const onChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ night: boolean; source: string }>).detail;
-      if (detail?.source === "settings") return;
-      setNotice(detail?.night ? "🌙 夜间模式" : "☀️ 白天模式");
+      if (detail?.source !== "manual" && detail?.source !== "auto") return;
+      setNotice(detail.night ? "🌙 夜间模式" : "☀️ 白天模式");
     };
     window.addEventListener(NIGHT_MODE_CHANGED_EVENT, onChanged);
-    const tick = () => tickNightAuto();
-    void hydrateKvDb().then(tick);
-    const stop = bgSetInterval(tick, 30_000);
-    const onVisible = () => { if (document.visibilityState === "visible") tick(); };
+    const tickIfVisible = () => { if (document.visibilityState === "visible") tickNightAuto(); };
+    let settleTimer: number | null = null;
+    const tickWhenSettled = () => {
+      if (settleTimer != null) window.clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(() => { settleTimer = null; tickIfVisible(); }, 800);
+    };
+    void hydrateKvDb().then(() => { announceNightHydrated(); tickIfVisible(); });
+    const stop = bgSetInterval(tickIfVisible, 30_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") tickWhenSettled();
+      else if (settleTimer != null) { window.clearTimeout(settleTimer); settleTimer = null; }
+    };
     document.addEventListener("visibilitychange", onVisible);
     const media = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
-    media?.addEventListener?.("change", tick);
+    media?.addEventListener?.("change", tickWhenSettled);
     return () => {
       window.removeEventListener(NIGHT_MODE_CHANGED_EVENT, onChanged);
       stop();
+      if (settleTimer != null) window.clearTimeout(settleTimer);
       document.removeEventListener("visibilitychange", onVisible);
-      media?.removeEventListener?.("change", tick);
+      media?.removeEventListener?.("change", tickWhenSettled);
     };
   }, []);
+  // 夜间模式时在最外层标一下：提示条之类跟着变暗；自己写 CSS 也能用 :root[data-night-mode="true"]
+  useEffect(() => {
+    document.documentElement.dataset.nightMode = nightActive ? "true" : "false";
+  }, [nightActive]);
   useEffect(() => {
     activeAppRef.current = activeApp;
   }, [activeApp]);

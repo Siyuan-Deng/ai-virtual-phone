@@ -37,6 +37,8 @@ export type NightModeState = {
     start: string;
     /** HH:MM，几点回到白天 */
     end: string;
+    /** 上次开着时用的是哪种，关了再开还用它 */
+    lastAuto?: "time" | "system";
     /** 按时间：手动切了以后，到这个时刻（下一个切换点）之前不自动切 */
     manualUntil?: number;
     /** 跟系统：手动切的那一刻系统是不是深色；系统还是这个状态就不自动切 */
@@ -50,6 +52,24 @@ export type NightBinding =
 
 const DEFAULT_STATE: NightModeState = { night: false, auto: "off", start: "22:30", end: "07:00" };
 
+/** 白天 / 夜间、自动切换设置、夜间套装，哪个改了都加一：页面靠它知道要重画 */
+let revision = 0;
+
+/** 状态在 localStorage 另存一份：App 刚打开、IndexedDB 还没读出来时也知道是不是夜间，
+ *  不会先闪一下白天再变回夜间 */
+const STATE_MIRROR_KEY = "ai_phone_night_mode_mirror_v1";
+let mirrorCache: string | null | undefined;
+
+function readMirror(): string | null {
+    if (mirrorCache !== undefined) return mirrorCache;
+    try {
+        mirrorCache = window.localStorage.getItem(STATE_MIRROR_KEY);
+    } catch {
+        mirrorCache = null;
+    }
+    return mirrorCache;
+}
+
 function isTime(value: unknown): value is string {
     return typeof value === "string" && /^\d{2}:\d{2}$/.test(value);
 }
@@ -57,12 +77,13 @@ function isTime(value: unknown): value is string {
 export function loadNightModeState(): NightModeState {
     if (typeof window === "undefined") return { ...DEFAULT_STATE };
     try {
-        const raw = JSON.parse(kvGet(STATE_KEY) || "{}") as Partial<NightModeState>;
+        const raw = JSON.parse(kvGet(STATE_KEY) || readMirror() || "{}") as Partial<NightModeState>;
         return {
             night: raw.night === true,
             auto: raw.auto === "time" || raw.auto === "system" ? raw.auto : "off",
             start: isTime(raw.start) ? raw.start : DEFAULT_STATE.start,
             end: isTime(raw.end) ? raw.end : DEFAULT_STATE.end,
+            ...(raw.lastAuto === "time" || raw.lastAuto === "system" ? { lastAuto: raw.lastAuto } : {}),
             ...(typeof raw.manualUntil === "number" ? { manualUntil: raw.manualUntil } : {}),
             ...(typeof raw.manualSystemDark === "boolean" ? { manualSystemDark: raw.manualSystemDark } : {}),
         };
@@ -72,7 +93,21 @@ export function loadNightModeState(): NightModeState {
 }
 
 function saveState(state: NightModeState): void {
-    kvSet(STATE_KEY, JSON.stringify(state));
+    const json = JSON.stringify(state);
+    kvSet(STATE_KEY, json);
+    mirrorCache = json;
+    try {
+        window.localStorage.setItem(STATE_MIRROR_KEY, json);
+    } catch {
+        // 存不进去也没关系，只是刚打开那一下可能先按白天画
+    }
+    revision += 1;
+}
+
+/** IndexedDB 读出来以后调一次：让已经画出来的页面按读到的状态重画（不弹提示） */
+export function announceNightHydrated(): void {
+    revision += 1;
+    window.dispatchEvent(new CustomEvent(NIGHT_SET_CHANGED_EVENT, { detail: { key: "" } }));
 }
 
 export function isNightActive(): boolean {
@@ -136,6 +171,7 @@ export function setNightModeManual(night: boolean): void {
 export function updateNightAuto(patch: Partial<Pick<NightModeState, "auto" | "start" | "end">>): void {
     const state = loadNightModeState();
     const next: NightModeState = { ...state, ...patch };
+    if (next.auto === "time" || next.auto === "system") next.lastAuto = next.auto;
     delete next.manualUntil;
     delete next.manualSystemDark;
     saveState(next);
@@ -168,8 +204,6 @@ export function tickNightAuto(): void {
 
 // ── 夜间套装 ──
 
-let setVersion = 0;
-
 export function loadNightSet(): Record<string, NightBinding> {
     if (typeof window === "undefined") return {};
     try {
@@ -190,7 +224,7 @@ export function setNightBinding(key: string, binding: NightBinding | null): void
     if (binding) set[key] = binding;
     else delete set[key];
     kvSet(SET_KEY, JSON.stringify(set));
-    setVersion += 1;
+    revision += 1;
     if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent(NIGHT_SET_CHANGED_EVENT, { detail: { key } }));
     }
@@ -284,13 +318,9 @@ export function useNightActive(): boolean {
     return useSyncExternalStore(subscribeMode, isNightActive, () => false);
 }
 
-/** 白天 / 夜间切了、套装改了都会变：拿它当依赖，让用到夜间值的地方重算 */
-export function useNightRevision(): string {
-    return useSyncExternalStore(
-        subscribeAll,
-        () => `${isNightActive() ? 1 : 0}:${setVersion}`,
-        () => "0:0",
-    );
+/** 白天 / 夜间切了、自动切换设置改了、套装改了都会变：拿它当依赖，让用到夜间值的地方重算 */
+export function useNightRevision(): number {
+    return useSyncExternalStore(subscribeAll, () => revision, () => 0);
 }
 
 /** 渲染一格 CSS：自动跟着白天 / 夜间、套装变 */

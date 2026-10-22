@@ -74,7 +74,7 @@ export function NightModeCard({ onOpenAuto, onOpenSet }: { onOpenAuto: () => voi
                     <Switch
                         on={state.auto !== "off"}
                         label="自动切换"
-                        onChange={(on) => updateNightAuto({ auto: on ? "time" : "off" })}
+                        onChange={(on) => updateNightAuto({ auto: on ? (state.lastAuto ?? "time") : "off" })}
                     />
                 </span>
             </div>
