@@ -524,7 +524,7 @@ export function StoryBindingPicker({
   // 世界书、API 有文件夹时分层：外面是置顶的、文件夹和未分类的，点文件夹进去选；不同文件夹里的世界书可以同时勾
   const folders = useMemo(() => (kind === "worldBooks" ? loadWorldBookFolders() : kind === "api" ? loadApiConfigFolders() : []), [kind]);
   const [openFolderId, setOpenFolderId] = useState<string | null>(null);
-  // 最外层跟设置页一样：置顶的在最上面（在文件夹里的也会出现），然后文件夹和其余的按拖出来的顺序混排
+  // 最外层跟设置页一样：置顶的在最上面（文件夹里置顶的只在文件夹里排前面），然后文件夹和其余的按拖出来的顺序混排
   const rootEntries = useMemo(() => {
     if (folders.length === 0) return null;
     return buildPickerEntries(options, folders, kind === "api" ? loadApiConfigRootOrder() : loadWorldBookRootOrder());
