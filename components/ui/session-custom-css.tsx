@@ -15,7 +15,7 @@ import { useNightText } from "@/lib/night-mode";
  * <link> 带 precedence 属性由 React 19 提升进 <head> 并按 href 去重，跨重渲染
  * 保持稳定；字体加载失败只缺字体，不影响其余自定义样式。
  *
- * nightKey：这一格在夜间套装里的 key（lib/night-mode），夜间模式开着就换成夜间那份。
+ * nightKey：这一格在搭配里的 key（lib/night-mode），用着日间以外的搭配就换成那套的那份。
  */
 export function SessionCustomCSS({ css, scope, nightKey }: { css: string; scope: string; nightKey?: string }) {
     const resolved = useNightText(nightKey, css || "");

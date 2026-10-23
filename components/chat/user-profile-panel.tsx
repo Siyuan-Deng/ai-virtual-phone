@@ -492,7 +492,7 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
    ══════════════════════════════════════════ */
 function ChatCSSEditor({ onBack }: { onBack: () => void }) {
     const [css, setCss] = useState(() => kvGet("chat-app-custom-css") || "");
-    // 「白天 | 夜间」：编辑的是哪一份
+    // 「日间模式 | 某套搭配」：编辑的是哪一份
     const night = useNightDraft(nightSlotKeys.chatApp);
     const editing = night.side === "night" ? night.draft : css;
     const setEditing = night.side === "night" ? night.setDraft : setCss;
@@ -508,7 +508,7 @@ function ChatCSSEditor({ onBack }: { onBack: () => void }) {
     const handleClear = () => {
         if (night.side === "night") {
             night.setDraft("");
-            setNightBinding(nightSlotKeys.chatApp, null);
+            setNightBinding(nightSlotKeys.chatApp, null, night.target);
             return;
         }
         setCss("");

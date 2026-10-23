@@ -1,12 +1,12 @@
 "use client";
 
-// 外观（主题）的夜间那份。外观里的东西按组配：主题色 / 全局 CSS / 壁纸 / 图标 / Dock / 文字，
-// 每组夜里要么跟白天，要么单独一份（存在夜间套装里，全局 CSS 也能用存过的方案）。
-// 夜间模式开着时在外观 App 里改的，改到哪组就只改那组的夜间那份；壁纸库、图标方案库、
-// 状态栏开关这些不分白天夜间。
+// 外观（主题）在各套搭配里的那份。外观里的东西按组配：主题色 / 全局 CSS / 壁纸 / 图标 / Dock / 文字，
+// 每组在一套搭配里要么跟随日间，要么单独一份（存在那套搭配里，全局 CSS 也能用存过的方案）。
+// 用着日间以外的搭配时在外观 App 里改的，改到哪组就只改那组在当前搭配的那份；壁纸库、图标方案库、
+// 状态栏开关这些不分搭配。
 
 import { findScheme } from "./css-scheme-storage";
-import { getNightBinding, setNightBinding } from "./night-mode";
+import { activeLookSet, getNightBinding, setNightBinding } from "./night-mode";
 import type { ThemeProfile } from "./theme-types";
 
 export const NIGHT_THEME_GROUPS = {
@@ -41,9 +41,9 @@ function sameGroup(a: ThemeProfile, b: ThemeProfile, group: NightThemeGroup): bo
     return NIGHT_THEME_GROUPS[group].every((field) => JSON.stringify(a[field]) === JSON.stringify(b[field]));
 }
 
-/** 这组夜里的值；没配就是 null（跟白天） */
+/** 这组在当前搭配里的值；没配就是 null（跟随日间） */
 function nightGroupValue(group: NightThemeGroup): Partial<ThemeProfile> | null {
-    const binding = getNightBinding(group);
+    const binding = getNightBinding(group, activeLookSet());
     if (!binding) return null;
     if (group === "theme.css") {
         if (binding.kind === "own") return { globalCustomCSS: binding.value };
@@ -62,7 +62,7 @@ function nightGroupValue(group: NightThemeGroup): Partial<ThemeProfile> | null {
     }
 }
 
-/** 白天的主题叠上配了的夜间组 */
+/** 日间的主题叠上当前搭配配了的组 */
 export function overlayNightTheme(day: ThemeProfile): ThemeProfile {
     let result = day;
     for (const group of GROUP_KEYS) {
@@ -72,7 +72,7 @@ export function overlayNightTheme(day: ThemeProfile): ThemeProfile {
     return result;
 }
 
-/** 夜间模式里在外观 App 改了东西：分成「改到了哪几组的夜间那份」和「不分白天夜间、直接改白天的」 */
+/** 用着别的搭配时在外观 App 改了东西：分成「改到了哪几组的搭配那份」和「不分搭配、直接改日间的」 */
 export function splitNightThemeChange(
     before: ThemeProfile,
     next: ThemeProfile,
@@ -88,13 +88,13 @@ export function splitNightThemeChange(
     return { nightPatch, dayPatch: dayPatch as Partial<ThemeProfile>, groups };
 }
 
-/** 把这几组存成夜间单独一份 */
+/** 把这几组存成当前搭配单独一份 */
 export function saveNightThemeGroups(next: ThemeProfile, groups: NightThemeGroup[]): void {
     for (const group of groups) {
         if (group === "theme.css") {
-            setNightBinding(group, { kind: "own", value: next.globalCustomCSS || "" });
+            setNightBinding(group, { kind: "own", value: next.globalCustomCSS || "" }, activeLookSet());
         } else {
-            setNightBinding(group, { kind: "own", value: JSON.stringify(pick(next, group)) });
+            setNightBinding(group, { kind: "own", value: JSON.stringify(pick(next, group)) }, activeLookSet());
         }
     }
 }

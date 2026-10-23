@@ -149,16 +149,17 @@ export function PhoneCalendarApp({
   const [appliedCalendarCss, setAppliedCalendarCss] = useState(() =>
     typeof window !== "undefined" ? kvGet("calendar-custom-css") || "" : ""
   );
-  // 主题面板顶上的「日间模式 | 夜间模式」同时管主题和 CSS；主题点了先放草稿，「应用」才存
+  // 主题面板顶上的「日间模式 | 某套搭配」同时管主题和 CSS；主题点了先放草稿，「应用」才存。
+  // 右边换了一套搭配，那套的主题重新读
   const nightCss = useNightDraft(nightSlotKeys.calendar);
   const calendarTheme = useNightText(nightSlotKeys.calendarTheme, config.theme);
   const [themeDraft, setThemeDraft] = useState<{ day: string; night: string } | null>(null);
   useEffect(() => {
     if (!showThemePanel) { setThemeDraft(null); return; }
-    const binding = getNightBinding(nightSlotKeys.calendarTheme);
-    setThemeDraft({ day: config.theme, night: binding?.kind === "own" ? binding.value : "" });
+    const binding = getNightBinding(nightSlotKeys.calendarTheme, nightCss.target);
+    setThemeDraft(prev => ({ day: prev?.day ?? config.theme, night: binding?.kind === "own" ? binding.value : "" }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showThemePanel]);
+  }, [showThemePanel, nightCss.target]);
   // 面板开着时日历按正在改的那一侧预览（夜间没选就是跟随日间）
   const shownTheme = themeDraft
     ? (nightCss.side === "night" ? themeDraft.night || themeDraft.day : themeDraft.day)
@@ -176,7 +177,7 @@ export function PhoneCalendarApp({
         setConfig(nextConfig);
         saveCalendarConfig(nextConfig);
       }
-      setNightBinding(nightSlotKeys.calendarTheme, themeDraft.night ? { kind: "own", value: themeDraft.night } : null);
+      setNightBinding(nightSlotKeys.calendarTheme, themeDraft.night ? { kind: "own", value: themeDraft.night } : null, nightCss.target);
     }
     setAppliedCalendarCss(trimmed);
     window.dispatchEvent(new CustomEvent("calendar-css-updated", { detail: trimmed }));
@@ -832,7 +833,7 @@ export function PhoneCalendarApp({
                 <X size={16} />
               </button>
             </div>
-            <NightSideSwitch side={nightCss.side} onChange={nightCss.setSide} />
+            <NightSideSwitch side={nightCss.side} onChange={nightCss.setSide} target={nightCss.target} onTarget={nightCss.setTarget} />
             <div className="calendar-theme-grid">
               {nightCss.side === "night" ? (
                 <button

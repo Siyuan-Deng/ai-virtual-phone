@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════
-   一键夜间：编辑框顶上的「白天 | 夜间」、外观里的夜间卡和夜间套装
+   搭配（日间、夜间、自己建的）：编辑框顶上的「日间模式 | 某套 ▾」、外观里的搭配卡、各套的配置页
    编辑框散在各个 App 里，颜色尽量跟着当前文字色走
    ══════════════════════════════════════════ */
 
@@ -11,6 +11,7 @@
 }
 
 .night-side-tabs {
+  position: relative;
   display: flex;
   gap: 3px;
   padding: 3px;
@@ -67,13 +68,6 @@
 }
 
 /* ── 外观 App：白天 / 夜间卡 ── */
-.night-card-modes {
-  display: flex;
-  justify-content: center;
-  gap: 34px;
-  padding: 18px 16px 10px;
-}
-
 .night-card-mode {
   display: flex;
   flex-direction: column;
@@ -146,16 +140,18 @@
   background: var(--c-icon-active);
 }
 
+/* 勾：右边和下边两条边转 45°；按圆心摆，往上提一点让勾的重心落在正中 */
 .night-card-radio[data-on="true"]::after {
   content: "";
   position: absolute;
-  left: 7px;
-  top: 3.5px;
-  width: 4px;
-  height: 9px;
+  left: 50%;
+  top: 50%;
+  box-sizing: border-box;
+  width: 6px;
+  height: 10px;
   border: solid #ffffff;
   border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
+  transform: translate(-50%, -70%) rotate(45deg);
 }
 
 .night-card-row .menu-right {
@@ -199,7 +195,7 @@
   left: 20px;
 }
 
-/* 自动切换页 / 夜间套装页 */
+/* 搭配配置页 */
 .night-page {
   flex: 1 1 auto;
   /* 和外观里其他页一样：嵌套 flex 列里要 min-height:0 才滚得动（iOS） */
@@ -219,17 +215,6 @@
   line-height: 1.55;
 }
 
-.night-time-input {
-  margin-left: auto;
-  padding: 5px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--c-input);
-  color: var(--c-text-title);
-  font: inherit;
-  font-variant-numeric: tabular-nums;
-}
-
 /* 外观里各页：夜间模式开着时顶上那句 */
 .night-theme-banner {
   display: flex;
@@ -244,7 +229,7 @@
   line-height: 1.45;
 }
 
-/* ── 夜间套装总表 ── */
+/* ── 搭配配置页的格子 ── */
 .night-set-group {
   display: flex;
   flex-direction: column;
@@ -473,29 +458,6 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
-/* 时间一行：「开始」「结束」两格并排，小字在上、时间放大 */
-.night-card-row.night-card-time {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.night-time-box {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-  padding: 6px 10px 5px;
-  border-radius: 10px;
-  background: var(--c-input);
-  cursor: pointer;
-}
-
-.night-time-box > span {
-  font-size: calc(10.8px * var(--app-text-scale, 1));
-  color: var(--c-text);
-}
-
 /* 跟随系统读不到手机深浅色时那句 */
 .night-card-warn {
   font-size: calc(11.5px * var(--app-text-scale, 1));
@@ -503,7 +465,7 @@
   line-height: 1.4;
 }
 
-/* 夜间套装：一格右边那行小字（夜里用什么） */
+/* 搭配配置页：一格右边那行小字（这套用什么） */
 .night-set-value {
   max-width: 150px;
   overflow: hidden;
@@ -641,24 +603,365 @@
   margin: 10px 0 4px;
 }
 
-.night-card-time .night-time-input {
-  width: 100%;
-  min-width: 0;
-  margin: 0;
+/* 「日间模式 | 某套 ▾」右边点开的那张小菜单 */
+.night-side-tabs .night-side-menu-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  flex: none;
   padding: 0;
+  border-radius: 0;
   background: transparent;
-  font-size: calc(17px * var(--app-text-scale, 1));
-  font-weight: 600;
+  opacity: 1;
+  cursor: default;
+}
+
+.night-side-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 41;
+  min-width: 140px;
+  padding: 4px 0;
+  border-radius: 12px;
+  background: var(--c-panel, #ffffff);
+  color: var(--c-text-title, #1f2229);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
+
+.night-side-tabs .night-side-menu button {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 9px 14px;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  opacity: 1;
+  box-shadow: none;
+  font-weight: 400;
+}
+
+.night-side-tabs .night-side-menu button + button {
+  border-top: 1px solid var(--c-card-border, rgba(0, 0, 0, 0.06));
+}
+
+.night-side-menu-check {
+  margin-left: auto;
+  font-weight: 700;
+}
+
+/* 一套搭配的颜色小圆点 */
+.look-set-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+/* 外观卡：一排小手机，少的时候居中，多了左右滑 */
+.look-strip {
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.look-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.look-strip-inner {
+  display: flex;
+  gap: 26px;
+  width: max-content;
+  margin: 0 auto;
+  padding: 18px 18px 10px;
+}
+
+.night-card-mode-label {
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.night-card-thumb.is-custom {
+  background: linear-gradient(color-mix(in srgb, var(--look-color) 45%, #ffffff), var(--look-color));
+}
+
+.night-card-thumb.is-custom i {
+  background: color-mix(in srgb, var(--look-color) 12%, #ffffff);
+}
+
+.night-card-thumb.is-custom i:nth-child(2) {
+  background: color-mix(in srgb, var(--look-color) 70%, #ffffff);
+}
+
+.night-card-thumb.look-thumb-add {
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed color-mix(in srgb, var(--c-icon) 60%, transparent);
+  background: transparent;
+  color: var(--c-icon);
+  font-size: 24px;
+  font-weight: 300;
+}
+
+.look-radio-blank {
+  visibility: hidden;
+}
+
+.night-card-thumb.is-mini {
+  width: 26px;
+  height: 46px;
+  gap: 3px;
+  padding: 7px 4px;
+  border-radius: 6px;
+}
+
+.night-card-thumb.is-mini i {
+  height: 5px;
+  border-radius: 3px;
+}
+
+/* 自动切换：一行一个时间点 / 浅色深色各用哪套 */
+.night-card-row.look-points {
+  display: block;
+  padding-top: 0;
+  padding-bottom: 0;
+  cursor: default;
+}
+
+.look-points .ui-swipe-wrap {
+  border-radius: 0;
+}
+
+.look-points .ui-swipe-content {
+  background: var(--c-card);
+}
+
+.look-point {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 46px;
+  padding: 7px 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-text-title);
+  font: inherit;
+  font-size: calc(12.6px * var(--app-text-scale, 1));
   text-align: left;
+}
+
+.look-points > .ui-swipe-wrap + .ui-swipe-wrap .look-point,
+.look-points > .ui-swipe-wrap + .look-point,
+.look-points > .look-point + .look-point {
+  border-top: 1px solid color-mix(in srgb, var(--c-card-border) 20%, transparent);
+}
+
+.look-point-time {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--c-input);
+  color: var(--c-text-title);
+  font: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   -webkit-appearance: none;
   appearance: none;
 }
 
-/* iOS 的时间框默认居中，跟小字对齐要靠左 */
-.night-card-time .night-time-input::-webkit-date-and-time-value {
-  text-align: left;
+.look-point-time::-webkit-calendar-picker-indicator {
+  display: none;
 }
 
-.night-card-time .night-time-input::-webkit-calendar-picker-indicator {
-  display: none;
+.look-point-to {
+  color: var(--c-text);
+  font-size: calc(11.5px * var(--app-text-scale, 1));
+}
+
+.look-point-to.look-point-lead {
+  color: var(--c-text-title);
+  font-size: inherit;
+}
+
+.look-point-set {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--c-text-title);
+  font: inherit;
+  cursor: pointer;
+}
+
+.look-point-set svg {
+  color: var(--c-icon);
+}
+
+.look-point.look-point-add {
+  color: var(--c-text);
+  cursor: pointer;
+}
+
+/* 外观首页「Display」那行右边的「管理」 */
+.look-display-head {
+  display: flex;
+  align-items: center;
+}
+
+.look-display-head .appearance-menu-section-title {
+  flex: 1;
+}
+
+.look-display-head button {
+  margin: 8px 4px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-text-title);
+  font: inherit;
+  font-size: calc(12px * var(--app-text-scale, 1));
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* 管理搭配：每套一行，左滑删除，右边三条杠拖动换顺序 */
+.look-manage .ui-swipe-wrap {
+  border-radius: 0;
+}
+
+.look-manage .ui-swipe-content {
+  background: var(--c-card);
+}
+
+.look-manage-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  transition: background-color 0.15s;
+}
+
+.look-manage-row[data-dragging="true"] {
+  background: color-mix(in srgb, var(--c-icon-active) 8%, var(--c-card));
+}
+
+.look-manage .ui-swipe-wrap + .ui-swipe-wrap .look-manage-row,
+.look-manage .ui-swipe-wrap + .look-manage-add {
+  border-top: 1px solid color-mix(in srgb, var(--c-card-border) 20%, transparent);
+}
+
+.look-manage-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.look-manage-main:disabled {
+  cursor: default;
+}
+
+.look-manage-main .menu-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.look-manage-meta {
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
+.look-manage-handle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 40px;
+  margin-right: -8px;
+  color: var(--c-icon);
+  touch-action: none;
+  cursor: grab;
+}
+
+.look-manage-add {
+  gap: 6px;
+  color: var(--c-text);
+  font-size: calc(12.6px * var(--app-text-scale, 1));
+}
+
+/* 新建 / 编辑搭配 */
+.night-sheet-input {
+  margin: 4px 0 6px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--c-input);
+  color: var(--c-text-title);
+  font: inherit;
+  font-size: calc(14px * var(--app-text-scale, 1));
+}
+
+.look-sheet-label {
+  margin-top: 10px;
+  color: var(--c-icon);
+  font-size: calc(11.5px * var(--app-text-scale, 1));
+  line-height: 1.45;
+}
+
+.look-swatches {
+  display: flex;
+  gap: 12px;
+  padding: 10px 2px 4px;
+}
+
+.look-swatches button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.look-swatches button[data-on="true"] {
+  outline: 2px solid var(--c-text-title);
+  outline-offset: 2px;
+}
+
+.look-pick-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 自建搭配配置页右上角「编辑」 */
+.look-set-edit-btn {
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--c-text-title);
+  font: inherit;
+  font-size: calc(13px * var(--app-text-scale, 1));
+  cursor: pointer;
 }

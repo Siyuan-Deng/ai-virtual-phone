@@ -105,7 +105,7 @@ import {
   writeThemeProfile
 } from "@/lib/theme-storage";
 import { bgSetInterval } from "@/lib/bg-timer";
-import { NIGHT_MODE_CHANGED_EVENT, announceNightHydrated, nightSlotKeys, tickNightAuto, useNightActive, useNightRevision, useNightText } from "@/lib/night-mode";
+import { DAY_SET_ID, NIGHT_MODE_CHANGED_EVENT, NIGHT_SET_ID, announceNightHydrated, lookSetName, nightSlotKeys, tickNightAuto, useActiveLookSet, useNightActive, useNightRevision, useNightText } from "@/lib/night-mode";
 import { overlayNightTheme, saveNightThemeGroups, splitNightThemeChange } from "@/lib/night-theme";
 import { THEME_PACKAGE_INSTALLED_EVENT } from "@/lib/theme-package";
 import {
@@ -1124,26 +1124,27 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const resolvedMusicCss = useNightText(nightSlotKeys.music, musicCustomCss);
   const [savedTheme, setSavedTheme] = useState<ThemeProfile>(() => initialThemeProfile ?? readInitialThemeProfile());
   const [dayDraftTheme, setDraftTheme] = useState<ThemeProfile>(() => initialThemeProfile ?? readInitialThemeProfile());
-  // 夜间模式：外观里配了夜间那份的组叠上去；夜间时在外观 App 里拖着还没保存的那几组先放 nightThemeDraft
+  // 用着日间以外的搭配：外观里配了那套那份的组叠上去；这时在外观 App 里拖着还没保存的那几组先放 nightThemeDraft
   const nightActive = useNightActive();
+  const activeLookSet = useActiveLookSet();
   const nightRevision = useNightRevision();
   const [nightThemeDraft, setNightThemeDraft] = useState<Partial<ThemeProfile> | null>(null);
   const draftTheme = useMemo(
     () => (nightActive ? { ...overlayNightTheme(dayDraftTheme), ...(nightThemeDraft ?? {}) } : dayDraftTheme),
-    // nightRevision：夜间套装改了也要重算
+    // nightRevision：搭配里的格子改了、换了一套也要重算
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [nightActive, nightRevision, dayDraftTheme, nightThemeDraft],
   );
-  useEffect(() => { setNightThemeDraft(null); }, [nightActive]);
+  useEffect(() => { setNightThemeDraft(null); }, [activeLookSet]);
   // 自动切换：只在 App 在前台时对表（每半分钟、回到前台、手机深浅色变了）。
   // iOS 把 App 切到后台时会在浅色 / 深色之间各拍一张快照，网页会收到一次「变深色了」又变回来；
   // 后台收到的不理，前台收到的也等它稳定一会儿再对，免得回来时闪一下夜间。
   // 真切了才提示一句（手动点的、到点 / 跟手机自动切的）。
   useEffect(() => {
     const onChanged = (event: Event) => {
-      const detail = (event as CustomEvent<{ night: boolean; source: string }>).detail;
+      const detail = (event as CustomEvent<{ night: boolean; set: string; source: string }>).detail;
       if (detail?.source !== "manual" && detail?.source !== "auto") return;
-      setNotice(detail.night ? "🌙 夜间模式" : "☀️ 日间模式");
+      setNotice(detail.set === DAY_SET_ID ? "☀️ 日间模式" : detail.set === NIGHT_SET_ID ? "🌙 夜间模式" : `已切到「${lookSetName(detail.set)}」`);
     };
     window.addEventListener(NIGHT_MODE_CHANGED_EVENT, onChanged);
     const tickIfVisible = () => { if (document.visibilityState === "visible") tickNightAuto(); };
@@ -1169,10 +1170,12 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
       media?.removeEventListener?.("change", tickWhenSettled);
     };
   }, []);
-  // 夜间模式时在最外层标一下：提示条之类跟着变暗；自己写 CSS 也能用 :root[data-night-mode="true"]
+  // 在最外层标一下用的哪套：夜间时提示条之类跟着变暗；自己写 CSS 也能用 :root[data-night-mode="true"]、
+  // :root[data-look-set="搭配 id"]
   useEffect(() => {
-    document.documentElement.dataset.nightMode = nightActive ? "true" : "false";
-  }, [nightActive]);
+    document.documentElement.dataset.nightMode = activeLookSet === NIGHT_SET_ID ? "true" : "false";
+    document.documentElement.dataset.lookSet = activeLookSet;
+  }, [activeLookSet]);
   useEffect(() => {
     activeAppRef.current = activeApp;
   }, [activeApp]);

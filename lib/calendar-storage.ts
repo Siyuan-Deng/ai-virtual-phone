@@ -115,7 +115,7 @@ const LEGACY_THEME_MAP: Record<string, string> = {
 
 export const CALENDAR_THEME_IDS = ["light", "dark", "cream", "mint", "mist", "sakura"] as const;
 
-/** 日历主题的名字（主题面板、夜间套装都用） */
+/** 日历主题的名字（主题面板、搭配配置页都用） */
 export const CALENDAR_THEMES: Array<{ id: (typeof CALENDAR_THEME_IDS)[number]; name: string }> = [
   { id: "light", name: "默认" },
   { id: "dark", name: "深色" },

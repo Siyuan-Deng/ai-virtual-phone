@@ -1,17 +1,28 @@
 "use client";
 
-// 外观 App 最上面那张卡：日间 / 夜间两台小手机（点了就切），自动切换（按时间 / 跟随系统，直接在卡上调），
-// 夜间套装入口。
+// 外观 App 最上面那张卡：一排搭配的小手机（点了就换，多了左右滑，最后一个「＋」新建），
+// 自动切换（按时间：到几点开始用哪套，可以加好几个时间点；跟随系统：浅色 / 深色各用哪套），
+// 下面一行进当前那套搭配的配置页（用日间时进夜间的）。
 
+import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import {
+    DAY_SET_ID,
+    NIGHT_SET_ID,
+    findLookSet,
+    listLookSets,
     loadNightModeState,
     loadNightSet,
-    setNightModeManual,
+    lookSetName,
+    setActiveLookSet,
+    sortPoints,
     systemPrefersDark,
     updateNightAuto,
     useNightRevision,
+    type AutoPoint,
 } from "@/lib/night-mode";
+import { SwipeActionRow, useSwipeActions } from "@/components/ui/swipe-actions";
+import { LookSetEditSheet, LookSetPickSheet, LookSetThumb } from "./look-set-sheets";
 
 function Switch({ on, onChange, label }: { on: boolean; onChange: (on: boolean) => void; label: string }) {
     return (
@@ -32,30 +43,71 @@ function Switch({ on, onChange, label }: { on: boolean; onChange: (on: boolean) 
     );
 }
 
-export function NightModeCard({ onOpenSet }: { onOpenSet: () => void }) {
+/** 「● 雨天 ›」：点了挑一套 */
+function SetPickButton({ setId, onClick }: { setId: string; onClick: () => void }) {
+    const set = findLookSet(setId) ?? findLookSet(DAY_SET_ID)!;
+    return (
+        <button type="button" className="look-point-set" onClick={onClick}>
+            <span className="look-set-dot" style={{ background: set.color }} aria-hidden="true" />
+            <span>{set.name}</span>
+            <ChevronRight size={15} aria-hidden="true" />
+        </button>
+    );
+}
+
+/** 新加的时间点挑一个还没用过的整点，从中午往后找 */
+function freeTime(points: AutoPoint[]): string {
+    const used = new Set(points.map((point) => point.time));
+    for (let step = 0; step < 24; step += 1) {
+        const time = `${String((12 + step) % 24).padStart(2, "0")}:00`;
+        if (!used.has(time)) return time;
+    }
+    return "12:00";
+}
+
+type Picking = { kind: "point"; index: number } | { kind: "light" } | { kind: "dark" };
+
+export function NightModeCard({ onOpenSet }: { onOpenSet: (setId: string) => void }) {
     useNightRevision();
+    const [creating, setCreating] = useState(false);
+    const [picking, setPicking] = useState<Picking | null>(null);
+    const swipe = useSwipeActions(62);
     const state = loadNightModeState();
-    const count = Object.keys(loadNightSet()).length;
+    const sets = listLookSets();
+    const points = sortPoints(state.points);
+    const configTarget = state.active === DAY_SET_ID ? NIGHT_SET_ID : state.active;
+    const configured = Object.keys(loadNightSet(configTarget)).length > 0;
     const systemDark = state.auto === "system" ? systemPrefersDark() : null;
+
+    const savePoints = (next: AutoPoint[]) => updateNightAuto({ points: sortPoints(next) });
+    const pickValue = picking?.kind === "point" ? points[picking.index]?.set ?? DAY_SET_ID
+        : picking?.kind === "light" ? state.systemLight
+            : picking?.kind === "dark" ? state.systemDark : DAY_SET_ID;
+
     return (
         <div className="menu-group night-card">
-            <div className="night-card-modes" role="radiogroup" aria-label="日间还是夜间">
-                {([false, true] as const).map((night) => (
-                    <button
-                        key={night ? "night" : "day"}
-                        type="button"
-                        role="radio"
-                        aria-checked={state.night === night}
-                        className="night-card-mode"
-                        onClick={() => { if (state.night !== night) setNightModeManual(night); }}
-                    >
-                        <span className={`night-card-thumb${night ? " is-night" : ""}`} aria-hidden="true">
-                            <i /><i /><i />
-                        </span>
-                        <span className="night-card-mode-label">{night ? "夜间" : "日间"}</span>
-                        <span className="night-card-radio" data-on={state.night === night ? "true" : undefined} aria-hidden="true" />
+            <div className="look-strip">
+                <div className="look-strip-inner" role="radiogroup" aria-label="用哪套搭配">
+                    {sets.map((set) => (
+                        <button
+                            key={set.id}
+                            type="button"
+                            role="radio"
+                            aria-checked={state.active === set.id}
+                            className="night-card-mode"
+                            onClick={() => { if (state.active !== set.id) setActiveLookSet(set.id); }}
+                        >
+                            <LookSetThumb set={set} />
+                            <span className="night-card-mode-label">{set.name}</span>
+                            <span className="night-card-radio" data-on={state.active === set.id ? "true" : undefined} aria-hidden="true" />
+                        </button>
+                    ))}
+                    <button type="button" className="night-card-mode" onClick={() => setCreating(true)}>
+                        <span className="night-card-thumb look-thumb-add" aria-hidden="true">+</span>
+                        <span className="night-card-mode-label">新建</span>
+                        <span className="night-card-radio look-radio-blank" aria-hidden="true" />
                     </button>
-                ))}
+                </div>
             </div>
             <div className="menu-item night-card-row">
                 <span className="menu-label">自动切换</span>
@@ -86,42 +138,91 @@ export function NightModeCard({ onOpenSet }: { onOpenSet: () => void }) {
                         </div>
                     </div>
                     {state.auto === "time" ? (
-                        <div className="menu-item night-card-row night-card-time">
-                            <label className="night-time-box">
-                                <span>开始</span>
-                                <input
-                                    type="time"
-                                    className="night-time-input"
-                                    aria-label="夜间开始"
-                                    value={state.start}
-                                    onChange={(event) => { if (event.target.value) updateNightAuto({ start: event.target.value }); }}
-                                />
-                            </label>
-                            <label className="night-time-box">
-                                <span>结束</span>
-                                <input
-                                    type="time"
-                                    className="night-time-input"
-                                    aria-label="回到日间"
-                                    value={state.end}
-                                    onChange={(event) => { if (event.target.value) updateNightAuto({ end: event.target.value }); }}
-                                />
-                            </label>
+                        <div className="menu-item night-card-row look-points">
+                            {points.map((point, index) => (
+                                <SwipeActionRow
+                                    key={`${index}:${point.time}`}
+                                    controller={swipe}
+                                    id={`point-${index}`}
+                                    disabled={points.length <= 1}
+                                    actions={(
+                                        <button
+                                            type="button"
+                                            className="ui-swipe-action"
+                                            data-variant="delete"
+                                            onClick={() => { swipe.close(); savePoints(points.filter((_, i) => i !== index)); }}
+                                        >
+                                            删除
+                                        </button>
+                                    )}
+                                >
+                                    <div className="look-point">
+                                        {/* 滚轮转的时候不存（一存就重新排序，行会跳走），收起来再存 */}
+                                        <input
+                                            type="time"
+                                            className="look-point-time"
+                                            aria-label="时间点"
+                                            defaultValue={point.time}
+                                            onBlur={(event) => {
+                                                const time = event.target.value;
+                                                if (time && time !== point.time) savePoints(points.map((item, i) => (i === index ? { ...item, time } : item)));
+                                            }}
+                                        />
+                                        <span className="look-point-to">开始用</span>
+                                        <SetPickButton setId={point.set} onClick={() => setPicking({ kind: "point", index })} />
+                                    </div>
+                                </SwipeActionRow>
+                            ))}
+                            <button
+                                type="button"
+                                className="look-point look-point-add"
+                                onClick={() => savePoints([...points, { time: freeTime(points), set: DAY_SET_ID }])}
+                            >
+                                ＋ 添加时间点
+                            </button>
                         </div>
-                    ) : systemDark === null ? (
-                        <div className="menu-item night-card-row">
-                            <span className="night-card-warn" role="alert">读不到手机的深浅色，跟随系统用不了</span>
-                        </div>
-                    ) : null}
+                    ) : (
+                        <>
+                            {systemDark === null ? (
+                                <div className="menu-item night-card-row">
+                                    <span className="night-card-warn" role="alert">读不到手机的深浅色，跟随系统用不了</span>
+                                </div>
+                            ) : null}
+                            <div className="menu-item night-card-row look-points">
+                                <div className="look-point">
+                                    <span className="look-point-to look-point-lead">浅色时用</span>
+                                    <SetPickButton setId={state.systemLight} onClick={() => setPicking({ kind: "light" })} />
+                                </div>
+                                <div className="look-point">
+                                    <span className="look-point-to look-point-lead">深色时用</span>
+                                    <SetPickButton setId={state.systemDark} onClick={() => setPicking({ kind: "dark" })} />
+                                </div>
+                            </div>
+                        </>
+                    )}
                 </>
             ) : null}
-            <button type="button" className="menu-item night-card-row" onClick={onOpenSet}>
-                <span className="menu-label-group">
-                    <span className="menu-label">夜间套装</span>
-                    <span className="menu-desc">{count ? `已经配了 ${count} 格` : "还没配，夜里和日间一样"}</span>
+            <button type="button" className="menu-item night-card-row" onClick={() => onOpenSet(configTarget)}>
+                <span className="menu-label">{lookSetName(configTarget)}搭配</span>
+                <span className="menu-right">
+                    {configured ? <span className="menu-desc">已配置</span> : null}
+                    <ChevronRight size={16} aria-hidden="true" />
                 </span>
-                <span className="menu-right"><ChevronRight size={16} aria-hidden="true" /></span>
             </button>
+
+            {creating ? <LookSetEditSheet onClose={() => setCreating(false)} onDone={onOpenSet} /> : null}
+            {picking ? (
+                <LookSetPickSheet
+                    title={picking.kind === "point" ? `${points[picking.index]?.time ?? ""} 开始用哪套` : picking.kind === "light" ? "浅色时用哪套" : "深色时用哪套"}
+                    value={pickValue}
+                    onClose={() => setPicking(null)}
+                    onPick={(setId) => {
+                        if (picking.kind === "point") savePoints(points.map((item, i) => (i === picking.index ? { ...item, set: setId } : item)));
+                        else if (picking.kind === "light") updateNightAuto({ systemLight: setId });
+                        else updateNightAuto({ systemDark: setId });
+                    }}
+                />
+            ) : null}
         </div>
     );
 }

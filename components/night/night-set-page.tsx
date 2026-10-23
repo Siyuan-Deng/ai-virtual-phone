@@ -1,14 +1,14 @@
 "use client";
 
-// 外观 → 夜间套装。上面是外观和各 App 的格子（一格一行）；下面是角色：一个角色一行，
-// 点进去是这个角色在聊天、剧情里能配夜间的几格。点一格从底下弹出来挑夜里用什么。
-// 和各编辑框顶上的「日间模式 | 夜间模式」存的是同一份（lib/night-mode 的夜间套装）。
+// 外观 → 某套搭配（夜间、自己建的雨天……）的配置页。上面是外观和各 App 的格子（一格一行）；
+// 下面是角色：一个角色一行，点进去是这个角色在聊天、剧情里能配的几格。点一格从底下弹出来挑这套用什么。
+// 和各编辑框顶上的「日间模式 | 某套搭配」存的是同一份（lib/night-mode 里那套搭配的格子）。
 
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, Search } from "lucide-react";
 import { getSchemes, findScheme } from "@/lib/css-scheme-storage";
-import { getNightBinding, loadNightSet, nightSlotKeys, setNightBinding, useNightRevision, type NightBinding } from "@/lib/night-mode";
+import { NIGHT_SET_ID, getNightBinding, loadNightSet, lookSetName, nightSlotKeys, setNightBinding, useNightRevision, type NightBinding } from "@/lib/night-mode";
 import { NIGHT_THEME_GROUP_LABELS, NIGHT_THEME_GROUPS, type NightThemeGroup } from "@/lib/night-theme";
 import { loadChatSessions, type ChatSession } from "@/lib/chat-storage";
 import { loadCharacters } from "@/lib/character-storage";
@@ -23,10 +23,10 @@ import { kvGet } from "@/lib/kv-db";
 
 /**
  * css / status：跟随日间 · 存过的方案 · 单独一份（这里就能写）
- * regex：跟随日间 · 夜里换一套（多选）
+ * regex：跟随日间 · 换一套（多选）
  * bg：跟随日间 · 单独一张图
  * calendarTheme：跟随日间 · 另选一个主题
- * look / theme：单独一份要回原来的地方切到「夜间模式」改，这里只能看、清掉
+ * look / theme：单独一份要回原来的地方切到这套搭配改，这里只能看、清掉
  */
 type SlotKind = "css" | "status" | "regex" | "bg" | "calendarTheme" | "look" | "theme";
 
@@ -42,7 +42,7 @@ type SlotRow = {
     dayContract?: string;
     /** 正则：日间绑的那几个 */
     dayRegexIds?: string[];
-    /** look / theme：去哪里改夜间那份 */
+    /** look / theme：去哪里改这套那份（{name} 换成搭配名） */
     where?: string;
 };
 
@@ -74,7 +74,7 @@ function parseIds(value: string): string[] {
     }
 }
 
-/** 一格右边那行小字：夜里用的是什么 */
+/** 一格右边那行小字：这套用的是什么 */
 function slotValueText(row: SlotRow, binding: NightBinding | undefined): string {
     if (!binding) return "跟随日间";
     if (binding.kind === "scheme") return findScheme(binding.schemeId)?.name || "方案已删";
@@ -89,7 +89,7 @@ function buildAppSections(): SlotSection[] {
     const themeRows: SlotRow[] = (Object.keys(NIGHT_THEME_GROUPS) as NightThemeGroup[]).map((group) => (
         group === "theme.css"
             ? { key: group, label: NIGHT_THEME_GROUP_LABELS[group], kind: "css", schemeTarget: "global", dayValue: () => theme.globalCustomCSS || "" }
-            : { key: group, label: NIGHT_THEME_GROUP_LABELS[group], kind: "theme", where: "切到夜间模式，在外观里改这一项" }
+            : { key: group, label: NIGHT_THEME_GROUP_LABELS[group], kind: "theme", where: "切到{name}，在外观里改这一项" }
     ));
     const appRows: SlotRow[] = [
         { key: nightSlotKeys.chatApp, label: "聊天 App 全局 CSS", kind: "css", schemeTarget: "chat_app", dayValue: () => kvGet("chat-app-custom-css") || "" },
@@ -128,11 +128,11 @@ function storyRows(session: StorySession, main: StorySession | undefined, dayReg
             dayValue: () => session.customCSS ?? main?.customCSS ?? "",
         },
         { key: nightSlotKeys.storyRegex(session.id), label: "正则", kind: "regex", dayRegexIds },
-        { key: nightSlotKeys.storyLook(session.id), label: "显示选项", kind: "look", where: "在剧情侧栏的显示选项里切到「夜间模式」改" },
+        { key: nightSlotKeys.storyLook(session.id), label: "显示选项", kind: "look", where: "在剧情侧栏的显示选项里切到「{name}」改" },
     ];
 }
 
-/** 能配夜间的角色（和群聊）：有聊天或剧情的才列 */
+/** 能配搭配的角色（和群聊）：有聊天或剧情的才列 */
 export function buildNightEntities(): NightEntity[] {
     const characters = loadCharacters();
     const bindings = loadBindingConfig();
@@ -176,8 +176,8 @@ function entityConfigured(entity: NightEntity, set: Record<string, NightBinding>
     return entity.sections.some((section) => section.rows.some((row) => set[row.key]));
 }
 
-function SlotRows({ rows, onOpen }: { rows: SlotRow[]; onOpen: (row: SlotRow) => void }) {
-    const set = loadNightSet();
+function SlotRows({ setId, rows, onOpen }: { setId: string; rows: SlotRow[]; onOpen: (row: SlotRow) => void }) {
+    const set = loadNightSet(setId);
     return (
         <div className="menu-group">
             {rows.map((row) => (
@@ -199,15 +199,15 @@ function useSheetHost(): HTMLElement | null {
     return host;
 }
 
-/** 外观 → 夜间套装 */
-export function NightSetPage({ onOpenEntity }: { onOpenEntity: (entity: NightEntity) => void }) {
+/** 外观 → 某套搭配 */
+export function NightSetPage({ setId, onOpenEntity }: { setId: string; onOpenEntity: (entity: NightEntity) => void }) {
     useNightRevision();
     const host = useSheetHost();
     const [sheet, setSheet] = useState<SlotRow | null>(null);
     const [batchOpen, setBatchOpen] = useState(false);
     const [query, setQuery] = useState("");
     const [onlyConfigured, setOnlyConfigured] = useState(false);
-    const set = loadNightSet();
+    const set = loadNightSet(setId);
     const appSections = buildAppSections();
     const entities = buildNightEntities();
     const shown = entities.filter((entity) => (
@@ -220,7 +220,7 @@ export function NightSetPage({ onOpenEntity }: { onOpenEntity: (entity: NightEnt
             {appSections.map((section) => (
                 <section key={section.title} className="night-set-group">
                     <h3 className="appearance-menu-section-title">{section.title}</h3>
-                    <SlotRows rows={section.rows} onOpen={setSheet} />
+                    <SlotRows setId={setId} rows={section.rows} onOpen={setSheet} />
                 </section>
             ))}
 
@@ -258,14 +258,14 @@ export function NightSetPage({ onOpenEntity }: { onOpenEntity: (entity: NightEnt
                 </section>
             ) : null}
 
-            {sheet && host ? createPortal(<NightSlotSheet row={sheet} keys={[sheet.key]} onClose={() => setSheet(null)} />, host) : null}
-            {batchOpen && host ? createPortal(<NightBatchSheet entities={entities} onClose={() => setBatchOpen(false)} />, host) : null}
+            {sheet && host ? createPortal(<NightSlotSheet setId={setId} row={sheet} keys={[sheet.key]} onClose={() => setSheet(null)} />, host) : null}
+            {batchOpen && host ? createPortal(<NightBatchSheet setId={setId} entities={entities} onClose={() => setBatchOpen(false)} />, host) : null}
         </div>
     );
 }
 
 /** 点进一个角色：聊天、剧情 · 正篇、剧情 · 番外 */
-export function NightEntityPage({ entityId }: { entityId: string }) {
+export function NightEntityPage({ setId, entityId }: { setId: string; entityId: string }) {
     useNightRevision();
     const host = useSheetHost();
     const [sheet, setSheet] = useState<SlotRow | null>(null);
@@ -276,10 +276,10 @@ export function NightEntityPage({ entityId }: { entityId: string }) {
             {entity.sections.map((section) => (
                 <section key={section.title} className="night-set-group">
                     <h3 className="appearance-menu-section-title">{section.title}</h3>
-                    <SlotRows rows={section.rows} onOpen={setSheet} />
+                    <SlotRows setId={setId} rows={section.rows} onOpen={setSheet} />
                 </section>
             ))}
-            {sheet && host ? createPortal(<NightSlotSheet row={sheet} keys={[sheet.key]} onClose={() => setSheet(null)} />, host) : null}
+            {sheet && host ? createPortal(<NightSlotSheet setId={setId} row={sheet} keys={[sheet.key]} onClose={() => setSheet(null)} />, host) : null}
         </div>
     );
 }
@@ -290,9 +290,11 @@ function Radio({ on }: { on: boolean }) {
     return <span className="night-card-radio" data-on={on ? "true" : undefined} aria-hidden="true" />;
 }
 
-/** 点一格从底下弹出来：夜间模式用什么。extra：标题下面多放的东西（批量设置挑项目） */
-function NightSlotSheet({ row, keys, onClose, extra }: { row: SlotRow; keys: string[]; onClose: () => void; extra?: ReactNode }) {
-    const single = keys.length === 1 ? getNightBinding(keys[0]) : undefined;
+/** 点一格从底下弹出来：这套搭配用什么。extra：标题下面多放的东西（批量设置挑项目） */
+function NightSlotSheet({ setId, row, keys, onClose, extra }: { setId: string; row: SlotRow; keys: string[]; onClose: () => void; extra?: ReactNode }) {
+    const name = lookSetName(setId);
+    const where = (row.where ?? "在原来的地方切到{name}改").replace("{name}", name);
+    const single = keys.length === 1 ? getNightBinding(keys[0], setId) : undefined;
     const [choice, setChoice] = useState<Choice>(() => single?.kind ?? "same");
     const [schemeId, setSchemeId] = useState(single?.kind === "scheme" ? single.schemeId : "");
     const [ownText, setOwnText] = useState(single?.kind === "own" && row.kind !== "regex" ? single.value : "");
@@ -303,7 +305,7 @@ function NightSlotSheet({ row, keys, onClose, extra }: { row: SlotRow; keys: str
     const schemes = row.schemeTarget ? getSchemes(row.schemeTarget) : [];
     const allRegexes = row.kind === "regex" ? loadRegexes() : [];
 
-    // 聊天背景：已经存了夜间那张就先显示出来
+    // 聊天背景：已经存了这套那张就先显示出来
     useEffect(() => {
         if (row.kind !== "bg" || !ownText) { setBgPreview(null); return; }
         let cancelled = false;
@@ -339,7 +341,7 @@ function NightSlotSheet({ row, keys, onClose, extra }: { row: SlotRow; keys: str
             else if (row.kind === "look" || row.kind === "theme") binding = single ?? null;
             else binding = { kind: "own", value: ownText };
         }
-        for (const key of keys) setNightBinding(key, binding);
+        for (const key of keys) setNightBinding(key, binding, setId);
         onClose();
     };
 
@@ -347,10 +349,10 @@ function NightSlotSheet({ row, keys, onClose, extra }: { row: SlotRow; keys: str
 
     return (
         <div className="night-sheet-overlay" onClick={onClose}>
-            <div className="night-sheet" role="dialog" aria-label={`${row.label} 夜间用什么`} onClick={(event) => event.stopPropagation()}>
+            <div className="night-sheet" role="dialog" aria-label={`${row.label} ${name}用什么`} onClick={(event) => event.stopPropagation()}>
                 <div className="night-sheet-grab" aria-hidden="true" />
                 <h4>{row.label}</h4>
-                <div className="night-sheet-sub">{keys.length > 1 ? `一起设 ${keys.length} 个，夜间模式用什么` : "夜间模式用什么"}</div>
+                <div className="night-sheet-sub">{keys.length > 1 ? `一起设 ${keys.length} 个，${name}用什么` : `${name}用什么`}</div>
                 {extra}
 
                 <button type="button" className="night-sheet-choice" onClick={() => setChoice("same")}>
@@ -373,7 +375,7 @@ function NightSlotSheet({ row, keys, onClose, extra }: { row: SlotRow; keys: str
                                 )) : <span className="night-sheet-empty">这一类还没存过方案</span>}
                             </div>
                         ) : null}
-                        {schemeMismatch ? <div className="night-sheet-warn">这个方案要 AI 输出的字段和日间那份不一样，夜里可能有几项是空的。</div> : null}
+                        {schemeMismatch ? <div className="night-sheet-warn">这个方案要 AI 输出的字段和日间那份不一样，用{name}时可能有几项是空的。</div> : null}
                     </>
                 ) : null}
 
@@ -381,7 +383,7 @@ function NightSlotSheet({ row, keys, onClose, extra }: { row: SlotRow; keys: str
                     <>
                         <button type="button" className="night-sheet-choice" onClick={() => setChoice("own")}>
                             <Radio on={choice === "own"} />
-                            <span>夜间用另一个主题</span>
+                            <span>{name}用另一个主题</span>
                         </button>
                         {choice === "own" ? (
                             <div className="night-sheet-chips">
@@ -397,7 +399,7 @@ function NightSlotSheet({ row, keys, onClose, extra }: { row: SlotRow; keys: str
                     <>
                         <button type="button" className="night-sheet-choice" onClick={() => setChoice("own")}>
                             <Radio on={choice === "own"} />
-                            <span>夜里换一套</span>
+                            <span>换一套</span>
                         </button>
                         {choice === "own" ? (
                             <>
@@ -418,7 +420,7 @@ function NightSlotSheet({ row, keys, onClose, extra }: { row: SlotRow; keys: str
                                         );
                                     }) : <span className="night-sheet-empty">还没有正则</span>}
                                 </div>
-                                <div className="night-sheet-warn">如果夜间模式正则的替换字符串与白天有出入，请自行切换对应世界书。</div>
+                                <div className="night-sheet-warn">{setId === NIGHT_SET_ID ? "如果夜间模式正则的替换字符串与白天有出入，请自行切换对应世界书。" : `如果${name}正则的替换字符串与日间有出入，请自行切换对应世界书。`}</div>
                             </>
                         ) : null}
                     </>
@@ -426,11 +428,11 @@ function NightSlotSheet({ row, keys, onClose, extra }: { row: SlotRow; keys: str
                     <>
                         <button type="button" className="night-sheet-choice" onClick={() => setChoice("own")}>
                             <Radio on={choice === "own"} />
-                            <span>夜间单独一张</span>
+                            <span>{name}单独一张</span>
                         </button>
                         {choice === "own" ? (
                             <div className="night-sheet-own">
-                                {bgPreview ? <img className="night-sheet-bg" src={bgPreview} alt="夜间背景" /> : null}
+                                {bgPreview ? <img className="night-sheet-bg" src={bgPreview} alt={`${name}背景`} /> : null}
                                 <label className="night-side-copy">
                                     {ownText ? "换一张" : "选一张图"}
                                     <input
@@ -455,22 +457,22 @@ function NightSlotSheet({ row, keys, onClose, extra }: { row: SlotRow; keys: str
                     <button type="button" className="night-sheet-choice" disabled={!ownAvailable} onClick={() => setChoice("own")}>
                         <Radio on={choice === "own"} />
                         <span>
-                            夜间单独一份
-                            <small>{ownAvailable ? `已经有一份了；${row.where ?? "在原来的地方切到夜间模式改"}` : row.where ?? "在原来的地方切到夜间模式改"}</small>
+                            {name}单独一份
+                            <small>{ownAvailable ? `已经有一份了；${where}` : where}</small>
                         </span>
                     </button>
                 ) : (
                     <>
                         <button type="button" className="night-sheet-choice" onClick={() => setChoice("own")}>
                             <Radio on={choice === "own"} />
-                            <span>{row.kind === "status" ? "夜间单独一份（渲染代码）" : "夜间单独一份"}</span>
+                            <span>{row.kind === "status" ? `${name}单独一份（渲染代码）` : `${name}单独一份`}</span>
                         </button>
                         {choice === "own" ? (
                             <div className="night-sheet-own">
                                 <textarea
                                     value={ownText}
                                     onChange={(event) => setOwnText(event.target.value)}
-                                    placeholder={row.kind === "status" ? "夜间用的状态栏渲染代码（HTML）" : "夜间用的 CSS"}
+                                    placeholder={row.kind === "status" ? `${name}用的状态栏渲染代码（HTML）` : `${name}用的 CSS`}
                                     spellCheck={false}
                                     autoCapitalize="off"
                                     autoCorrect="off"
@@ -499,7 +501,7 @@ const BATCH_PROJECTS = [
 ] as const;
 
 /** 批量设置：挑一项，所有角色的这一格一起设 */
-function NightBatchSheet({ entities, onClose }: { entities: NightEntity[]; onClose: () => void }) {
+function NightBatchSheet({ setId, entities, onClose }: { setId: string; entities: NightEntity[]; onClose: () => void }) {
     const [projectId, setProjectId] = useState<(typeof BATCH_PROJECTS)[number]["id"]>("chat");
     const project = BATCH_PROJECTS.find((item) => item.id === projectId)!;
     const keys = entities.flatMap((entity) => entity.sections.flatMap((section) => (
@@ -508,6 +510,7 @@ function NightBatchSheet({ entities, onClose }: { entities: NightEntity[]; onClo
     return (
         <NightSlotSheet
             key={projectId}
+            setId={setId}
             row={{ key: "", label: "批量设置", kind: "css", schemeTarget: project.target }}
             keys={keys}
             onClose={onClose}

@@ -18,8 +18,10 @@ import {
 } from "lucide-react";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { NightModeCard } from "@/components/night/night-mode-card";
-import { isNightActive, useNightActive } from "@/lib/night-mode";
+import { DAY_SET_ID, NIGHT_SET_ID, findLookSet, isNightActive, lookSetName, useActiveLookSet, useNightRevision } from "@/lib/night-mode";
 import { NightEntityPage, NightSetPage, type NightEntity } from "@/components/night/night-set-page";
+import { LookSetManagePage } from "@/components/night/look-set-manage-page";
+import { LookSetEditSheet } from "@/components/night/look-set-sheets";
 import { GlassIcon } from "@/components/ui/glass-icon";
 import { normalizeThemeProfile, resolveActiveIconSkins, DEFAULT_THEME_PROFILE, type ThemeProfile } from "@/lib/theme-types";
 import type { DesktopIconId, IconId } from "@/lib/desktop-config";
@@ -73,9 +75,10 @@ type ThemeSection =
   | "text"
   | "css"
   | "nightSet"
-  | "nightEntity";
+  | "nightEntity"
+  | "lookSets";
 
-type ThemeMenuItemSection = Exclude<ThemeSection, "menu" | "nightSet" | "nightEntity"> | "transfer" | "reset";
+type ThemeMenuItemSection = Exclude<ThemeSection, "menu" | "nightSet" | "nightEntity" | "lookSets"> | "transfer" | "reset";
 type WallpaperSliderField = "wallpaperOpacity" | "wallpaperBlur" | "wallpaperScale" | "wallpaperX" | "wallpaperY";
 
 type PhoneThemeAppProps = {
@@ -174,11 +177,12 @@ const SECTION_TITLES: Record<Exclude<ThemeSection, "menu">, string> = {
   case: "\u624B\u673A\u58F3",
   text: "\u6587\u5B57",
   css: "CSS \u53D8\u91CF",
-  nightSet: "夜间套装",
-  nightEntity: "夜间套装",
+  nightSet: "搭配",
+  nightEntity: "搭配",
+  lookSets: "管理搭配",
 };
 
-const THEME_SECTIONS = new Set<string>(["menu", "palette", "wallpaper", "icons", "widgets", "case", "text", "css", "nightSet"]);
+const THEME_SECTIONS = new Set<string>(["menu", "palette", "wallpaper", "icons", "widgets", "case", "text", "css", "nightSet", "lookSets"]);
 
 function isThemeSection(value: string): value is ThemeSection {
   return THEME_SECTIONS.has(value);
@@ -277,14 +281,25 @@ export function PhoneThemeApp({
     }
   }, [onApply, onDesktopThemeChange, onDraftChange, onNotice]);
 
-  // 夜间套装里点进的那个角色
+  // 搭配配置页开的是哪套、从哪进来的（外观卡 / 管理搭配），点进的那个角色，编辑名字颜色的弹窗
+  useNightRevision();
+  const [lookSetId, setLookSetId] = useState(NIGHT_SET_ID);
+  const [lookSetBack, setLookSetBack] = useState<"menu" | "lookSets">("menu");
   const [nightEntity, setNightEntity] = useState<NightEntity | null>(null);
+  const [editingLookSet, setEditingLookSet] = useState(false);
+  const openLookSet = (setId: string, from: "menu" | "lookSets") => {
+    setLookSetId(setId);
+    setLookSetBack(from);
+    setSection("nightSet");
+  };
 
   function handleBack() {
     if (section === "menu") {
       onClose();
     } else if (section === "nightEntity") {
       setSection("nightSet");
+    } else if (section === "nightSet") {
+      setSection(lookSetBack);
     } else {
       setSection("menu");
     }
@@ -292,26 +307,40 @@ export function PhoneThemeApp({
 
   const title = section === "menu"
     ? "\u5916\u89C2"
-    : section === "nightEntity" && nightEntity
-      ? `${nightEntity.name} · 夜间`
-      : SECTION_TITLES[section];
-  const nightActive = useNightActive();
+    : section === "nightSet"
+      ? `${lookSetName(lookSetId)}搭配`
+      : section === "nightEntity" && nightEntity
+        ? `${nightEntity.name} · ${lookSetName(lookSetId)}`
+        : SECTION_TITLES[section];
+  const activeSet = useActiveLookSet();
+  const activeSetInfo = findLookSet(activeSet);
+  const editableLookSet = section === "nightSet" && findLookSet(lookSetId)?.builtin === false;
 
   return (
-    <PageShell title={title} onBack={handleBack}>
-        {nightActive && ["palette", "wallpaper", "icons", "css"].includes(section) ? (
+    <PageShell
+      title={title}
+      onBack={handleBack}
+      rightAction={editableLookSet ? <button type="button" className="look-set-edit-btn" onClick={() => setEditingLookSet(true)}>编辑</button> : undefined}
+    >
+        {activeSet !== DAY_SET_ID && ["palette", "wallpaper", "icons", "css"].includes(section) ? (
           <div className="night-theme-banner">
-            <Moon size={14} aria-hidden="true" />
-            <span>夜间模式开着：这里改的只改夜间那份，日间的不动。</span>
+            {activeSet === NIGHT_SET_ID
+              ? <Moon size={14} aria-hidden="true" />
+              : <span className="look-set-dot" style={{ background: activeSetInfo?.color }} aria-hidden="true" />}
+            <span>现在用的是「{lookSetName(activeSet)}」搭配：这里改的只改这套那份，日间的不动。</span>
           </div>
         ) : null}
+        {editingLookSet ? <LookSetEditSheet setId={lookSetId} onClose={() => setEditingLookSet(false)} /> : null}
         {section === "menu" ? (
           <div className="page-menu appearance-main-menu">
-            {/* 白天 / 夜间 */}
+            {/* 搭配：日间、夜间、自己建的 */}
             <div>
-              <h3 className="appearance-menu-section-title">Display</h3>
+              <div className="look-display-head">
+                <h3 className="appearance-menu-section-title">Display</h3>
+                <button type="button" onClick={() => setSection("lookSets")}>管理</button>
+              </div>
               <div className="mt-2.5">
-                <NightModeCard onOpenSet={() => setSection("nightSet")} />
+                <NightModeCard onOpenSet={(setId) => openLookSet(setId, "menu")} />
               </div>
             </div>
 
@@ -452,9 +481,11 @@ export function PhoneThemeApp({
             </div>
           </div>
         ) : section === "nightSet" ? (
-          <NightSetPage onOpenEntity={(entity) => { setNightEntity(entity); setSection("nightEntity"); }} />
+          <NightSetPage setId={lookSetId} onOpenEntity={(entity) => { setNightEntity(entity); setSection("nightEntity"); }} />
         ) : section === "nightEntity" && nightEntity ? (
-          <NightEntityPage entityId={nightEntity.id} />
+          <NightEntityPage setId={lookSetId} entityId={nightEntity.id} />
+        ) : section === "lookSets" ? (
+          <LookSetManagePage onOpenSet={(setId) => openLookSet(setId, "lookSets")} />
         ) : section === "wallpaper" ? (
           <WallpaperPage
             draft={draft}
