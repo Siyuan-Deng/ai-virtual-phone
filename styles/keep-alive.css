@@ -99,8 +99,24 @@
 
 .keepalive-np-bar {
   height: 4px;
+  overflow: hidden;
   border-radius: 2px;
   background: rgba(255, 255, 255, 0.25);
+}
+
+.keepalive-np-bar i {
+  display: block;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.keepalive-np-times {
+  display: flex;
+  justify-content: space-between;
+  margin-top: -6px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
 }
 
 .keepalive-np-ctl {
@@ -212,4 +228,16 @@
   align-self: flex-start;
   margin-left: 0;
   padding: 2px 0;
+}
+
+/* 进度条两边的时间：左右两格 */
+.keepalive-time-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.keepalive-time-error {
+  color: var(--c-danger);
+  font-size: calc(11.5px * var(--app-text-scale, 1));
 }

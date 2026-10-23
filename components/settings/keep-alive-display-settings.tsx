@@ -9,6 +9,7 @@ import {
     EMPTY_KEEP_ALIVE_DISPLAY,
     latestChatCharacter,
     loadKeepAliveDisplay,
+    parseClock,
     resolveKeepAliveNowPlaying,
     saveKeepAliveDisplay,
     type KeepAliveDisplay,
@@ -56,6 +57,54 @@ function Artwork({ src, size }: { src?: string; size: "island" | "card" }) {
     );
 }
 
+/** 秒数写成「分:秒」（够一小时就「时:分:秒」） */
+function formatClock(seconds: number): string {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const mm = h ? String(m).padStart(2, "0") : String(m);
+    return `${h ? `${h}:` : ""}${mm}:${String(s).padStart(2, "0")}`;
+}
+
+/** 能填好几个的一列（标题、副标题）：一行一个，右边 × 删掉，下面「＋ 再加一个」 */
+function TextList({ label, items, firstPlaceholder, onChange }: {
+    label: string;
+    items: string[];
+    firstPlaceholder: string;
+    onChange: (items: string[]) => void;
+}) {
+    return (
+        <div className="flex flex-col gap-1.5">
+            <span className="menu-desc !mt-0">{label}{items.length > 1 ? "（填了好几个就每小时随机换一个）" : ""}</span>
+            {items.map((value, index) => (
+                <div key={index} className="keepalive-title-row">
+                    <input
+                        className="ui-input"
+                        value={value}
+                        maxLength={40}
+                        placeholder={index === 0 ? firstPlaceholder : `再一个${label}`}
+                        aria-label={`${label} ${index + 1}`}
+                        onChange={(event) => onChange(items.map((item, i) => (i === index ? event.target.value : item)))}
+                    />
+                    {items.length > 1 ? (
+                        <button
+                            type="button"
+                            className="keepalive-title-remove"
+                            aria-label={`删掉${label} ${index + 1}`}
+                            onClick={() => onChange(items.filter((_, i) => i !== index))}
+                        >
+                            <X size={16} aria-hidden="true" />
+                        </button>
+                    ) : null}
+                </div>
+            ))}
+            <button type="button" className="keepalive-link keepalive-title-add" onClick={() => onChange([...items, ""])}>
+                ＋ 再加一个{label}
+            </button>
+        </div>
+    );
+}
+
 export function KeepAliveDisplaySettings() {
     const [display, setDisplay] = useState<KeepAliveDisplay | null>(() => loadKeepAliveDisplay());
     const fileRef = useRef<HTMLInputElement | null>(null);
@@ -91,7 +140,17 @@ export function KeepAliveDisplaySettings() {
                             {preview?.artist ? <span className="keepalive-np-sub">{preview.artist}</span> : null}
                         </span>
                     </div>
-                    <div className="keepalive-np-bar" />
+                    <div className="keepalive-np-bar">
+                        {preview?.position && preview.position.total > 0 ? (
+                            <i style={{ width: `${Math.min(100, (preview.position.elapsed / preview.position.total) * 100)}%` }} />
+                        ) : null}
+                    </div>
+                    {preview?.position ? (
+                        <div className="keepalive-np-times">
+                            <span>{formatClock(preview.position.elapsed)}</span>
+                            <span>-{formatClock(Math.max(0, preview.position.total - preview.position.elapsed))}</span>
+                        </div>
+                    ) : null}
                     <div className="keepalive-np-ctl" aria-hidden="true"><SkipBack size={18} fill="currentColor" /><Pause size={20} fill="currentColor" /><SkipForward size={18} fill="currentColor" /></div>
                 </div>
             </div>
@@ -139,34 +198,7 @@ export function KeepAliveDisplaySettings() {
                             />
                         </div>
                         <div className="ui-row-divider !mx-0" />
-                        <div className="flex flex-col gap-1.5">
-                            <span className="menu-desc !mt-0">标题{current.titles.length > 1 ? "（填了好几个就每小时随机换一个）" : ""}</span>
-                            {current.titles.map((title, index) => (
-                                <div key={index} className="keepalive-title-row">
-                                    <input
-                                        className="ui-input"
-                                        value={title}
-                                        maxLength={40}
-                                        placeholder={index === 0 ? "不填就用网页标题" : "再一个标题"}
-                                        aria-label={`标题 ${index + 1}`}
-                                        onChange={(event) => update({ titles: current.titles.map((item, i) => (i === index ? event.target.value : item)) })}
-                                    />
-                                    {current.titles.length > 1 ? (
-                                        <button
-                                            type="button"
-                                            className="keepalive-title-remove"
-                                            aria-label={`删掉标题 ${index + 1}`}
-                                            onClick={() => update({ titles: current.titles.filter((_, i) => i !== index) })}
-                                        >
-                                            <X size={16} aria-hidden="true" />
-                                        </button>
-                                    ) : null}
-                                </div>
-                            ))}
-                            <button type="button" className="keepalive-link keepalive-title-add" onClick={() => update({ titles: [...current.titles, ""] })}>
-                                ＋ 再加一个标题
-                            </button>
-                        </div>
+                        <TextList label="标题" items={current.titles} firstPlaceholder="不填就用网页标题" onChange={(titles) => update({ titles })} />
                     </>
                 ) : (
                     <div className="keepalive-cover-row">
@@ -178,10 +210,29 @@ export function KeepAliveDisplaySettings() {
                     </div>
                 )}
                 <div className="ui-row-divider !mx-0" />
-                <label className="flex flex-col gap-1.5">
-                    <span className="menu-desc !mt-0">副标题</span>
-                    <input className="ui-input" value={current.subtitle} maxLength={40} placeholder="比如：在线" onChange={(event) => update({ subtitle: event.target.value })} />
-                </label>
+                <TextList label="副标题" items={current.subtitles} firstPlaceholder="比如：在线" onChange={(subtitles) => update({ subtitles })} />
+            </div>
+
+            <div className="g-card">
+                <span className="menu-label">进度条两边的时间</span>
+                <div className="keepalive-time-row">
+                    {([["elapsed", "左边（已播放）", "比如 13:14"], ["remaining", "右边（还剩）", "比如 5:20"]] as const).map(([field, label, placeholder]) => (
+                        <label key={field} className="flex flex-col gap-1.5 min-w-0">
+                            <span className="menu-desc !mt-0">{label}</span>
+                            <input
+                                className="ui-input"
+                                value={current[field]}
+                                inputMode="numeric"
+                                placeholder={placeholder}
+                                onChange={(event) => update({ [field]: event.target.value })}
+                            />
+                        </label>
+                    ))}
+                </div>
+                {(current.elapsed.trim() && parseClock(current.elapsed) === null) || (current.remaining.trim() && parseClock(current.remaining) === null) ? (
+                    <span className="keepalive-time-error">写成「分:秒」，比如 13:14；超过一小时写「时:分:秒」</span>
+                ) : null}
+                <span className="menu-desc !mt-0 leading-relaxed">会像真在放歌一样往前走：左边越来越大、右边越来越小，每个整点重新从填的数开始。不填就照系统默认。</span>
             </div>
 
             <p className="menu-desc mx-2 leading-relaxed">

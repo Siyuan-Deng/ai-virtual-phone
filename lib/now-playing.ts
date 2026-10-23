@@ -10,6 +10,8 @@ export type NowPlaying = {
     album?: string;
     /** 图片地址（data: / http(s):）；锁屏和灵动岛都用它 */
     artwork?: string;
+    /** 进度条：已播放几秒、一共几秒（左边显示已播放，右边显示还剩）；不给就照播放器自己的 */
+    position?: { elapsed: number; total: number };
 };
 
 let musicItem: NowPlaying | null = null;
@@ -34,6 +36,17 @@ function apply(): void {
             : null;
     } catch {
         // 图片地址不认之类的：不影响播放
+    }
+    if (typeof navigator.mediaSession.setPositionState !== "function") return;
+    try {
+        const position = item?.position;
+        if (position && position.total > 0) {
+            navigator.mediaSession.setPositionState({ duration: position.total, position: Math.min(position.elapsed, position.total), playbackRate: 1 });
+        } else {
+            navigator.mediaSession.setPositionState();
+        }
+    } catch {
+        // 不支持或者数不对：进度条照播放器自己的
     }
 }
 
