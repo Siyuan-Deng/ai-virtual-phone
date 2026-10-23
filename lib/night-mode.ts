@@ -141,7 +141,11 @@ function nextBoundary(now: Date, start: string, end: string): number {
 
 export function systemPrefersDark(): boolean | null {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return null;
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const dark = window.matchMedia("(prefers-color-scheme: dark)");
+    // 不认这个查询的浏览器 media 会是 "not all"；深浅两个都不匹配也算读不到
+    if (dark.media === "not all") return null;
+    if (dark.matches) return true;
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? false : null;
 }
 
 function apply(state: NightModeState, night: boolean, source: "manual" | "auto"): void {

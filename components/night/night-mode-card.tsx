@@ -58,10 +58,7 @@ export function NightModeCard({ onOpenSet }: { onOpenSet: () => void }) {
                 ))}
             </div>
             <div className="menu-item night-card-row">
-                <span className="menu-label-group">
-                    <span className="menu-label">自动切换</span>
-                    <span className="menu-desc">到点自己换</span>
-                </span>
+                <span className="menu-label">自动切换</span>
                 <span className="menu-right">
                     <Switch
                         on={state.auto !== "off"}
@@ -90,8 +87,8 @@ export function NightModeCard({ onOpenSet }: { onOpenSet: () => void }) {
                     </div>
                     {state.auto === "time" ? (
                         <div className="menu-item night-card-row night-card-time">
-                            <span className="menu-label">时间</span>
-                            <span className="menu-right">
+                            <label className="night-time-box">
+                                <span>开始</span>
                                 <input
                                     type="time"
                                     className="night-time-input"
@@ -99,7 +96,9 @@ export function NightModeCard({ onOpenSet }: { onOpenSet: () => void }) {
                                     value={state.start}
                                     onChange={(event) => { if (event.target.value) updateNightAuto({ start: event.target.value }); }}
                                 />
-                                <span aria-hidden="true">→</span>
+                            </label>
+                            <label className="night-time-box">
+                                <span>结束</span>
                                 <input
                                     type="time"
                                     className="night-time-input"
@@ -107,15 +106,13 @@ export function NightModeCard({ onOpenSet }: { onOpenSet: () => void }) {
                                     value={state.end}
                                     onChange={(event) => { if (event.target.value) updateNightAuto({ end: event.target.value }); }}
                                 />
-                            </span>
+                            </label>
                         </div>
-                    ) : (
+                    ) : systemDark === null ? (
                         <div className="menu-item night-card-row">
-                            <span className="menu-desc">
-                                {systemDark === null ? "这个浏览器读不到手机的深浅色" : `手机现在是${systemDark ? "深色" : "浅色"}`}
-                            </span>
+                            <span className="night-card-warn" role="alert">读不到手机的深浅色，跟随系统用不了</span>
                         </div>
-                    )}
+                    ) : null}
                 </>
             ) : null}
             <button type="button" className="menu-item night-card-row" onClick={onOpenSet}>
