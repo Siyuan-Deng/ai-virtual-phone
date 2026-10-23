@@ -26,6 +26,7 @@
 @import "../styles/cocreate.css";
 @import "../styles/qa.css";
 @import "../styles/night-mode.css";
+@import "../styles/keep-alive.css";
 
 @theme {
   /* 间距 (4px 基准) */

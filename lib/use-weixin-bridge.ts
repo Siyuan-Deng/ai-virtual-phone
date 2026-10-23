@@ -4,6 +4,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { loadWeixinBots, loadKeepAlive, type WeixinBotConfig } from "./weixin-storage";
 import { runBotLoop } from "./weixin-bridge";
+import { KEEP_ALIVE_DISPLAY_CHANGED_EVENT, resolveKeepAliveNowPlaying } from "./keep-alive-display";
+import { setKeepAliveNowPlaying } from "./now-playing";
 
 export type BotRunStatus = {
     status: "running" | "stopped" | "error";
@@ -70,6 +72,24 @@ function ensureAudioCreated() {
     _keepAliveAudio.volume = 0.01;
 }
 
+/** 锁屏、灵动岛上显示「后台保活」里设的那套。改了设置、切到后台时重新算一次
+ *  （跟着角色的要换成最近聊天的那个）。没设过就是 null，照系统默认 */
+function refreshLockScreen() {
+    setKeepAliveNowPlaying(_keepAliveWanted ? resolveKeepAliveNowPlaying() : null);
+}
+
+function onVisibilityForLockScreen() {
+    if (document.visibilityState === "hidden") refreshLockScreen();
+}
+
+function listenLockScreen(on: boolean) {
+    window.removeEventListener(KEEP_ALIVE_DISPLAY_CHANGED_EVENT, refreshLockScreen);
+    document.removeEventListener("visibilitychange", onVisibilityForLockScreen);
+    if (!on) return;
+    window.addEventListener(KEEP_ALIVE_DISPLAY_CHANGED_EVENT, refreshLockScreen);
+    document.addEventListener("visibilitychange", onVisibilityForLockScreen);
+}
+
 /** 用户触摸时尝试播放（浏览器要求音频必须在用户手势中启动） */
 function onUserGesture() {
     if (!_keepAliveWanted || !_keepAliveAudio) return;
@@ -93,6 +113,8 @@ async function startKeepAlive() {
 
     // 准备音频
     ensureAudioCreated();
+    refreshLockScreen();
+    listenLockScreen(true);
 
     // 先尝试直接播放（如果之前已有用户手势则可以成功）
     _keepAliveAudio!.play().catch(() => {
@@ -105,6 +127,8 @@ async function startKeepAlive() {
 function stopKeepAlive() {
     _keepAliveWanted = false;
     _suspendedForCall = false;
+    listenLockScreen(false);
+    setKeepAliveNowPlaying(null);
     _wakeLock?.release().catch(() => {});
     _wakeLock = null;
     if (_keepAliveAudio) {

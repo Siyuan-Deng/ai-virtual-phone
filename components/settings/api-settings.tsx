@@ -21,6 +21,7 @@ import { BottomSheet, ConfirmDialog, ContentDialog } from "@/components/ui/modal
 import { Toggle, Input } from "@/components/ui/form";
 import { Alert } from "@/components/ui/feedback";
 import { determineBaseUrl, simpleLLMCall } from "@/lib/api-helpers";
+import { getApiBalance, loadBalanceVisible, type ApiBalance } from "@/lib/api-balance";
 
 const DEFAULT_CONFIGS: ApiConfig[] = [
     {
@@ -35,6 +36,13 @@ const DEFAULT_CONFIGS: ApiConfig[] = [
         preventEmptyGenerateRambling: true,
     }
 ];
+
+/** 卡片上余额那行写什么；查不了的不写 */
+function balanceText(balance: ApiBalance | undefined): string | null {
+    if (balance?.kind === "ok") return `余额 ${balance.text}`;
+    if (balance?.kind === "failed") return "余额查不到";
+    return null;
+}
 
 function getNativeToolProtocolLabel(config: ApiConfig): string {
     if (config.provider === "Anthropic" && !config.baseUrl) return "Anthropic";
@@ -64,6 +72,9 @@ export function ApiSettings() {
     const [fetchedModels, setFetchedModels] = useState<Record<string, string[]>>({});
     const [isTesting, setIsTesting] = useState<Record<string, boolean>>({});
     const [testResult, setTestResult] = useState<Record<string, { success: boolean; message: string }>>({});
+    // 卡片上模型名下面那行余额：回到列表时挨个查（一分钟内查过的不重查），查不了的不显示
+    const [balanceVisible] = useState(() => loadBalanceVisible());
+    const [balances, setBalances] = useState<Record<string, ApiBalance>>({});
 
     // Load from localStorage on mount
     useEffect(() => {
@@ -78,6 +89,17 @@ export function ApiSettings() {
         setRootOrder(loadApiConfigRootOrder());
         setIsLoaded(true);
     }, []);
+
+    useEffect(() => {
+        if (!isLoaded || !balanceVisible || editingId) return;
+        let cancelled = false;
+        for (const config of configs) {
+            void getApiBalance(config).then((result) => {
+                if (!cancelled) setBalances((prev) => (prev[config.id] === result ? prev : { ...prev, [config.id]: result }));
+            });
+        }
+        return () => { cancelled = true; };
+    }, [isLoaded, balanceVisible, editingId, configs]);
 
     const persist = useCallback((newConfigs: ApiConfig[]) => {
         setConfigs(newConfigs);
@@ -363,6 +385,9 @@ export function ApiSettings() {
                     {config.pinned ? <Pin size={13} className="ml-auto shrink-0 opacity-45" aria-label="已置顶" /> : null}
                 </div>
                 <span className="menu-desc truncate">{config.defaultModel || config.provider || "未设置模型"}</span>
+                {balanceVisible && balanceText(balances[config.id]) ? (
+                    <span className="menu-desc truncate">{balanceText(balances[config.id])}</span>
+                ) : null}
             </div>
             <div className="flex gap-2 shrink-0 items-center justify-end">
                 <button

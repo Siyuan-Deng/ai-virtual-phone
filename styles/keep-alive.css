@@ -1,0 +1,184 @@
+/* ══════════════════════════════════════════
+   设置 → 后台保活：锁屏和灵动岛显示什么（上面一张锁屏预览）
+   ══════════════════════════════════════════ */
+
+.keepalive-lock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 14px 18px;
+  border-radius: 26px;
+  background: radial-gradient(120% 80% at 30% 0%, #5a6b8c 0%, #232a3a 55%, #11141c 100%);
+  color: #ffffff;
+}
+
+.keepalive-island {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 132px;
+  height: 32px;
+  padding: 0 10px 0 6px;
+  border-radius: 18px;
+  background: #000000;
+}
+
+.keepalive-wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 12px;
+}
+
+.keepalive-wave i {
+  width: 2px;
+  border-radius: 1px;
+  background: #f2a7c0;
+}
+
+.keepalive-wave i:nth-child(1) { height: 5px; }
+.keepalive-wave i:nth-child(2) { height: 10px; }
+.keepalive-wave i:nth-child(3) { height: 7px; }
+.keepalive-wave i:nth-child(4) { height: 12px; }
+.keepalive-wave i:nth-child(5) { height: 6px; }
+
+.keepalive-date {
+  margin-top: 4px;
+  font-size: calc(13px * var(--app-text-scale, 1));
+  opacity: 0.85;
+}
+
+.keepalive-clock {
+  margin-top: -6px;
+  font-size: 54px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -1px;
+}
+
+.keepalive-np {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.keepalive-np-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.keepalive-np-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.keepalive-np-title {
+  overflow: hidden;
+  font-size: calc(13.5px * var(--app-text-scale, 1));
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.keepalive-np-sub {
+  overflow: hidden;
+  font-size: calc(12px * var(--app-text-scale, 1));
+  opacity: 0.7;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.keepalive-np-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.keepalive-np-ctl {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 34px;
+}
+
+.keepalive-np-ctl svg:not(:nth-child(2)) {
+  opacity: 0.45;
+}
+
+/* 封面：没设时一块渐变 */
+.keepalive-art {
+  display: block;
+  flex: 0 0 auto;
+  overflow: hidden;
+  background: linear-gradient(135deg, #f6c9d7, #b7c6f3);
+}
+
+.keepalive-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.keepalive-art-island {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+}
+
+.keepalive-art-card {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+}
+
+.keepalive-cover-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.keepalive-cover {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--c-input);
+  color: var(--c-icon);
+  cursor: pointer;
+}
+
+.keepalive-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.keepalive-link {
+  margin-left: auto;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--c-text);
+  font: inherit;
+  font-size: calc(12.5px * var(--app-text-scale, 1));
+  cursor: pointer;
+}
+
+.keepalive-link.self-center {
+  margin-left: 0;
+}
