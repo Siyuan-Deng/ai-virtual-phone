@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { loadWeixinBots, loadKeepAlive, type WeixinBotConfig } from "./weixin-storage";
 import { runBotLoop } from "./weixin-bridge";
-import { KEEP_ALIVE_DISPLAY_CHANGED_EVENT, resolveKeepAliveNowPlaying } from "./keep-alive-display";
+import { KEEP_ALIVE_DISPLAY_CHANGED_EVENT, msUntilNextHour, resolveKeepAliveNowPlaying } from "./keep-alive-display";
 import { setKeepAliveNowPlaying } from "./now-playing";
 
 export type BotRunStatus = {
@@ -82,12 +82,26 @@ function onVisibilityForLockScreen() {
     if (document.visibilityState === "hidden") refreshLockScreen();
 }
 
+/** 标题填了好几个时每小时换一个：到整点重新算一次 */
+let _hourlyTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleHourlyLockScreen() {
+    if (_hourlyTimer) clearTimeout(_hourlyTimer);
+    _hourlyTimer = setTimeout(() => {
+        refreshLockScreen();
+        scheduleHourlyLockScreen();
+    }, msUntilNextHour());
+}
+
 function listenLockScreen(on: boolean) {
     window.removeEventListener(KEEP_ALIVE_DISPLAY_CHANGED_EVENT, refreshLockScreen);
     document.removeEventListener("visibilitychange", onVisibilityForLockScreen);
+    if (_hourlyTimer) clearTimeout(_hourlyTimer);
+    _hourlyTimer = null;
     if (!on) return;
     window.addEventListener(KEEP_ALIVE_DISPLAY_CHANGED_EVENT, refreshLockScreen);
     document.addEventListener("visibilitychange", onVisibilityForLockScreen);
+    scheduleHourlyLockScreen();
 }
 
 /** 用户触摸时尝试播放（浏览器要求音频必须在用户手势中启动） */

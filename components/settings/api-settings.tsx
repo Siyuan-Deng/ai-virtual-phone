@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useContext } from "react";
-import { Plus, RefreshCw, Rss, AlertCircle, FileEdit, Trash2, X, Check, Copy, Folder, FolderPlus, FolderInput, Pencil, ChevronRight, Pin } from "lucide-react";
+import { Plus, RefreshCw, Rss, AlertCircle, FileEdit, Trash2, X, Check, Copy, Folder, FolderPlus, FolderInput, Pencil, ChevronRight, Pin, Eye, EyeClosed } from "lucide-react";
 import { SettingsContext } from "../phone-settings-app";
 import { useLongPressReorder } from "./use-long-press-reorder";
 import { applyGroupOrder } from "@/lib/list-order";
@@ -21,7 +21,7 @@ import { BottomSheet, ConfirmDialog, ContentDialog } from "@/components/ui/modal
 import { Toggle, Input } from "@/components/ui/form";
 import { Alert } from "@/components/ui/feedback";
 import { determineBaseUrl, simpleLLMCall } from "@/lib/api-helpers";
-import { getApiBalance, loadBalanceVisible, type ApiBalance } from "@/lib/api-balance";
+import { getApiBalance, loadBalanceVisible, saveBalanceVisible, type ApiBalance } from "@/lib/api-balance";
 
 const DEFAULT_CONFIGS: ApiConfig[] = [
     {
@@ -72,8 +72,9 @@ export function ApiSettings() {
     const [fetchedModels, setFetchedModels] = useState<Record<string, string[]>>({});
     const [isTesting, setIsTesting] = useState<Record<string, boolean>>({});
     const [testResult, setTestResult] = useState<Record<string, { success: boolean; message: string }>>({});
-    // 卡片上模型名下面那行余额：回到列表时挨个查（一分钟内查过的不重查），查不了的不显示
-    const [balanceVisible] = useState(() => loadBalanceVisible());
+    // 卡片上模型名下面那行余额：回到列表时挨个查（一分钟内查过的不重查），查不了的不显示。
+    // 大标题右边的小眼睛闭上就不显示、也不查
+    const [balanceVisible, setBalanceVisible] = useState(() => loadBalanceVisible());
     const [balances, setBalances] = useState<Record<string, ApiBalance>>({});
 
     // Load from localStorage on mount
@@ -538,6 +539,21 @@ export function ApiSettings() {
                 <>
                     <div className="flex items-center">
                         <h2 className="m-0 mx-2 ts-28 font-bold italic leading-none text-black">API Settings</h2>
+                        {/* 斜体大字看着重心偏下，眼睛跟着往下挪一点；灰色，不抢标题 */}
+                        <button
+                            type="button"
+                            className="ui-link-btn"
+                            style={{ color: "var(--c-icon)", transform: "translateY(3px)" }}
+                            aria-label={balanceVisible ? "隐藏余额" : "显示余额"}
+                            aria-pressed={balanceVisible}
+                            onClick={() => {
+                                const next = !balanceVisible;
+                                setBalanceVisible(next);
+                                saveBalanceVisible(next);
+                            }}
+                        >
+                            {balanceVisible ? <Eye size={20} /> : <EyeClosed size={20} />}
+                        </button>
                     </div>
 
                     {configs.length === 0 && folders.length === 0 ? (

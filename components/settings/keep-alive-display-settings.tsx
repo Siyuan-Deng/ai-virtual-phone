@@ -4,7 +4,7 @@
 // 上面一张锁屏预览，下面「自己填 / 跟着角色」。改了马上存，保活开着的话锁屏上马上换。
 
 import { useEffect, useRef, useState } from "react";
-import { ImagePlus, Pause, SkipBack, SkipForward } from "lucide-react";
+import { ImagePlus, Pause, SkipBack, SkipForward, X } from "lucide-react";
 import {
     EMPTY_KEEP_ALIVE_DISPLAY,
     latestChatCharacter,
@@ -139,10 +139,34 @@ export function KeepAliveDisplaySettings() {
                             />
                         </div>
                         <div className="ui-row-divider !mx-0" />
-                        <label className="flex flex-col gap-1.5">
-                            <span className="menu-desc !mt-0">标题</span>
-                            <input className="ui-input" value={current.title} maxLength={40} placeholder="不填就用网页标题" onChange={(event) => update({ title: event.target.value })} />
-                        </label>
+                        <div className="flex flex-col gap-1.5">
+                            <span className="menu-desc !mt-0">标题{current.titles.length > 1 ? "（填了好几个就每小时随机换一个）" : ""}</span>
+                            {current.titles.map((title, index) => (
+                                <div key={index} className="keepalive-title-row">
+                                    <input
+                                        className="ui-input"
+                                        value={title}
+                                        maxLength={40}
+                                        placeholder={index === 0 ? "不填就用网页标题" : "再一个标题"}
+                                        aria-label={`标题 ${index + 1}`}
+                                        onChange={(event) => update({ titles: current.titles.map((item, i) => (i === index ? event.target.value : item)) })}
+                                    />
+                                    {current.titles.length > 1 ? (
+                                        <button
+                                            type="button"
+                                            className="keepalive-title-remove"
+                                            aria-label={`删掉标题 ${index + 1}`}
+                                            onClick={() => update({ titles: current.titles.filter((_, i) => i !== index) })}
+                                        >
+                                            <X size={16} aria-hidden="true" />
+                                        </button>
+                                    ) : null}
+                                </div>
+                            ))}
+                            <button type="button" className="keepalive-link keepalive-title-add" onClick={() => update({ titles: [...current.titles, ""] })}>
+                                ＋ 再加一个标题
+                            </button>
+                        </div>
                     </>
                 ) : (
                     <div className="keepalive-cover-row">

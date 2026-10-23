@@ -182,3 +182,34 @@
 .keepalive-link.self-center {
   margin-left: 0;
 }
+
+/* 标题可以填好几个：一行一个，右边 × 删掉 */
+.keepalive-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.keepalive-title-row .ui-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.keepalive-title-remove {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-icon);
+  cursor: pointer;
+}
+
+.keepalive-link.keepalive-title-add {
+  align-self: flex-start;
+  margin-left: 0;
+  padding: 2px 0;
+}
