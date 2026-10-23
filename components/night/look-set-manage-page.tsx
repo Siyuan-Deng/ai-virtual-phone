@@ -1,10 +1,11 @@
 "use client";
 
 // 外观 → 管理搭配：每套一行，点一行进那套的配置页（日间是底子，没有配置页）；
-// 左滑删除（日间、夜间删不了）；按住右边三条杠上下拖换顺序，松手才存。
+// 左滑删除（日间、夜间删不了，删之前再问一次）；按住右边三条杠上下拖换顺序，松手才存。
 
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Menu, Plus } from "lucide-react";
+import { createPortal } from "react-dom";
+import { AlertCircle, Menu, Plus } from "lucide-react";
 import {
     DAY_SET_ID,
     deleteLookSet,
@@ -12,9 +13,11 @@ import {
     loadNightSet,
     reorderLookSets,
     useNightRevision,
+    type LookSet,
 } from "@/lib/night-mode";
 import { SwipeActionRow, useSwipeActions } from "@/components/ui/swipe-actions";
-import { LookSetEditSheet, LookSetThumb } from "./look-set-sheets";
+import { ConfirmDialog } from "@/components/ui/modal";
+import { LookSetEditSheet, LookSetThumb, useSheetHost } from "./look-set-sheets";
 
 type Drag = { id: string; pointerId: number };
 
@@ -22,6 +25,8 @@ export function LookSetManagePage({ onOpenSet }: { onOpenSet: (setId: string) =>
     useNightRevision();
     const swipe = useSwipeActions(62);
     const [creating, setCreating] = useState(false);
+    const [deleting, setDeleting] = useState<LookSet | null>(null);
+    const host = useSheetHost();
     const [order, setOrder] = useState<string[] | null>(null);
     const dragRef = useRef<Drag | null>(null);
     const listRef = useRef<HTMLDivElement | null>(null);
@@ -78,7 +83,7 @@ export function LookSetManagePage({ onOpenSet }: { onOpenSet: (setId: string) =>
                                     type="button"
                                     className="ui-swipe-action"
                                     data-variant="delete"
-                                    onClick={() => { swipe.close(); deleteLookSet(set.id); }}
+                                    onClick={() => { swipe.close(); setDeleting(set); }}
                                 >
                                     删除
                                 </button>
@@ -116,6 +121,19 @@ export function LookSetManagePage({ onOpenSet }: { onOpenSet: (setId: string) =>
                 </button>
             </div>
             {creating ? <LookSetEditSheet onClose={() => setCreating(false)} onDone={onOpenSet} /> : null}
+            {deleting && host ? createPortal(
+                <ConfirmDialog
+                    title={`删除「${deleting.name}」搭配？`}
+                    message="这套里配的东西会一起删掉，删了找不回来。正在用这套的话会回到日间。"
+                    icon={AlertCircle}
+                    variant="danger"
+                    confirmLabel="删除"
+                    cancelLabel="取消"
+                    onConfirm={() => { deleteLookSet(deleting.id); setDeleting(null); }}
+                    onCancel={() => setDeleting(null)}
+                />,
+                host,
+            ) : null}
         </div>
     );
 }

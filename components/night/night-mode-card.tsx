@@ -1,19 +1,16 @@
 "use client";
 
-// 外观 App 最上面那张卡：一排搭配的小手机（点了就换，多了左右滑，最后一个「＋」新建），
-// 自动切换（按时间：到几点开始用哪套，可以加好几个时间点；跟随系统：浅色 / 深色各用哪套），
-// 下面一行进当前那套搭配的配置页（用日间时进夜间的）。
+// 外观 App 最上面那张卡：一排搭配的小手机（点了就换，多了左右滑，最后一个「＋」新建，建好进它的配置页），
+// 自动切换（按时间：到几点开始用哪套，可以加好几个时间点；跟随系统：浅色 / 深色各用哪套）。
+// 各套的配置页从「管理」进。
 
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import {
     DAY_SET_ID,
-    NIGHT_SET_ID,
     findLookSet,
     listLookSets,
     loadNightModeState,
-    loadNightSet,
-    lookSetName,
     setActiveLookSet,
     sortPoints,
     systemPrefersDark,
@@ -75,8 +72,6 @@ export function NightModeCard({ onOpenSet }: { onOpenSet: (setId: string) => voi
     const state = loadNightModeState();
     const sets = listLookSets();
     const points = sortPoints(state.points);
-    const configTarget = state.active === DAY_SET_ID ? NIGHT_SET_ID : state.active;
-    const configured = Object.keys(loadNightSet(configTarget)).length > 0;
     const systemDark = state.auto === "system" ? systemPrefersDark() : null;
 
     const savePoints = (next: AutoPoint[]) => updateNightAuto({ points: sortPoints(next) });
@@ -202,13 +197,6 @@ export function NightModeCard({ onOpenSet }: { onOpenSet: (setId: string) => voi
                     )}
                 </>
             ) : null}
-            <button type="button" className="menu-item night-card-row" onClick={() => onOpenSet(configTarget)}>
-                <span className="menu-label">{lookSetName(configTarget)}搭配</span>
-                <span className="menu-right">
-                    {configured ? <span className="menu-desc">已配置</span> : null}
-                    <ChevronRight size={16} aria-hidden="true" />
-                </span>
-            </button>
 
             {creating ? <LookSetEditSheet onClose={() => setCreating(false)} onDone={onOpenSet} /> : null}
             {picking ? (
