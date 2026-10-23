@@ -3891,7 +3891,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                                         <span className="reading-bookmark-where">
                                             {bookmark.chapterTitle}
                                             <span className="reading-bookmark-at">
-                                                {bookmark.pdfPage ? `第${bookmark.pdfPage}页` : `${Math.round(bookmark.fraction * 100)}%`}
+                                                {bookmark.pdfPage ? `第${bookmark.pdfPage}页` : `${Math.round(toBookFraction(bookmark.chapterIndex, bookmark.fraction) * 100)}%`}
                                             </span>
                                         </span>
                                         {bookmark.excerpt && (

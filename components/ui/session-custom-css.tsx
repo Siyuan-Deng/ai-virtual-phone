@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { extractCssImports, scopeSessionCSS } from "@/lib/css-scoper";
+import { useNightText } from "@/lib/night-mode";
 
 /**
  * 会话自定义 CSS 注入器。
@@ -13,12 +14,15 @@ import { extractCssImports, scopeSessionCSS } from "@/lib/css-scoper";
  *
  * <link> 带 precedence 属性由 React 19 提升进 <head> 并按 href 去重，跨重渲染
  * 保持稳定；字体加载失败只缺字体，不影响其余自定义样式。
+ *
+ * nightKey：这一格在搭配里的 key（lib/night-mode），用着日间以外的搭配就换成那套的那份。
  */
-export function SessionCustomCSS({ css, scope }: { css: string; scope: string }) {
+export function SessionCustomCSS({ css, scope, nightKey }: { css: string; scope: string; nightKey?: string }) {
+    const resolved = useNightText(nightKey, css || "");
     const { imports, body } = useMemo(() => {
-        const extracted = extractCssImports(css || "");
+        const extracted = extractCssImports(resolved);
         return { imports: extracted.imports, body: extracted.css };
-    }, [css]);
+    }, [resolved]);
     const scoped = useMemo(() => scopeSessionCSS(body, scope), [body, scope]);
 
     return (

@@ -41,7 +41,8 @@ export type CalendarEventDraft = {
   rememberedMonthDay?: string;
 };
 
-function newTodo(): CalendarTodo {
+/** bullet：要点（•），只是一条列表项，不能勾 */
+function newTodo(bullet = false): CalendarTodo {
     return {
         id: `todo_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
         text: "",
@@ -49,6 +50,7 @@ function newTodo(): CalendarTodo {
         dueDate: "",
         dueTime: "",
         createdAt: new Date().toISOString(),
+        ...(bullet ? { bullet: true } : {}),
     };
 }
 
@@ -381,18 +383,22 @@ export function CalendarEventEditModal({
                   <div className="calendar-checklist">
                     {(draft.todos || []).map((todo, index) => (
                       <div key={todo.id} className="calendar-check-row">
-                        <input
-                          type="checkbox"
-                          checked={todo.done}
-                          onChange={() => {
-                            const todos = [...(draft.todos || [])];
-                            todos[index] = { ...todo, done: !todo.done };
-                            onChange({ ...draft, todos });
-                          }}
-                        />
+                        {todo.bullet ? (
+                          <span className="calendar-bullet-mark" aria-hidden="true">•</span>
+                        ) : (
+                          <input
+                            type="checkbox"
+                            checked={todo.done}
+                            onChange={() => {
+                              const todos = [...(draft.todos || [])];
+                              todos[index] = { ...todo, done: !todo.done };
+                              onChange({ ...draft, todos });
+                            }}
+                          />
+                        )}
                         <Input
                           value={todo.text}
-                          placeholder="待办事项"
+                          placeholder={todo.bullet ? "要点" : "待办事项"}
                           onChange={e => {
                             const todos = [...(draft.todos || [])];
                             todos[index] = { ...todo, text: e.target.value };
@@ -402,7 +408,7 @@ export function CalendarEventEditModal({
                         <button
                           type="button"
                           className="calendar-icon-button"
-                          aria-label="删除待办"
+                          aria-label={todo.bullet ? "删除要点" : "删除待办"}
                           onClick={() => onChange({ ...draft, todos: (draft.todos || []).filter((_, i) => i !== index) })}
                         >
                           ×
@@ -410,13 +416,22 @@ export function CalendarEventEditModal({
                       </div>
                     ))}
                   </div>
-                  <button
-                    type="button"
-                    className="calendar-add-row"
-                    onClick={() => onChange({ ...draft, todos: [...(draft.todos || []), newTodo()] })}
-                  >
-                    ＋ 添加待办
-                  </button>
+                  <div className="calendar-add-rows">
+                    <button
+                      type="button"
+                      className="calendar-add-row"
+                      onClick={() => onChange({ ...draft, todos: [...(draft.todos || []), newTodo()] })}
+                    >
+                      ＋ 添加待办
+                    </button>
+                    <button
+                      type="button"
+                      className="calendar-add-row"
+                      onClick={() => onChange({ ...draft, todos: [...(draft.todos || []), newTodo(true)] })}
+                    >
+                      ＋ 添加要点
+                    </button>
+                  </div>
                 </div>
               </div>
             </>

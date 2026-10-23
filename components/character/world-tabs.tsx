@@ -56,15 +56,18 @@ export function WorldTabStrip({
   );
 }
 
-/** 卷宗编辑：改名 / 世界观描述 / 删除（角色并回默认世界） */
+/** 卷宗编辑：改名 / 世界观描述 / 删除（角色并回默认世界；默认世界能改名、不能删） */
 export function WorldCaseSheet({
   group,
+  defaultWorldName,
   onRename,
   onUpdateDescription,
   onDelete,
   onClose,
 }: {
   group: CharacterWorldGroup;
+  /** 默认世界现在叫什么（改过名就显示新名字） */
+  defaultWorldName: string;
   onRename: (name: string) => void;
   onUpdateDescription: (description: string) => void;
   onDelete: () => void;
@@ -92,9 +95,8 @@ export function WorldCaseSheet({
           value={name}
           onChange={e => setName(e.target.value)}
           placeholder="世界名称"
-          disabled={isDefault}
         />
-        {isDefault && <p className="wt-paper-hint">默认世界不可改名或删除，删除其他世界时角色会回到这里。</p>}
+        {isDefault && <p className="wt-paper-hint">这是默认世界，可以改名但不能删除，删除其他世界时角色会回到这里。</p>}
         <label className="wt-paper-label">世界观描述（会注入该世界所有角色的上下文）</label>
         <textarea
           className="wt-paper-textarea"
@@ -106,7 +108,7 @@ export function WorldCaseSheet({
           {!isDefault && (
             confirmDelete ? (
               <>
-                <span className="wt-paper-confirm">确认删除？角色将并回默认世界</span>
+                <span className="wt-paper-confirm">确认删除？角色将并回「{defaultWorldName}」</span>
                 <button type="button" className="wt-btn wt-btn-danger" onClick={onDelete}>删除</button>
                 <button type="button" className="wt-btn" onClick={() => setConfirmDelete(false)}>取消</button>
               </>

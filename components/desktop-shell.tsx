@@ -104,6 +104,9 @@ import {
   readThemeProfile,
   writeThemeProfile
 } from "@/lib/theme-storage";
+import { bgSetInterval } from "@/lib/bg-timer";
+import { DAY_SET_ID, NIGHT_MODE_CHANGED_EVENT, NIGHT_SET_ID, announceNightHydrated, lookSetName, nightSlotKeys, tickNightAuto, useActiveLookSet, useNightActive, useNightRevision, useNightText } from "@/lib/night-mode";
+import { overlayNightTheme, saveNightThemeGroups, splitNightThemeChange } from "@/lib/night-theme";
 import { THEME_PACKAGE_INSTALLED_EVENT } from "@/lib/theme-package";
 import {
   DEFAULT_THEME_PROFILE,
@@ -1118,8 +1121,61 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [musicCustomCss, setMusicCustomCss] = useState(() =>
     typeof window !== "undefined" ? kvGet("music-custom-css") || "" : ""
   );
+  const resolvedMusicCss = useNightText(nightSlotKeys.music, musicCustomCss);
   const [savedTheme, setSavedTheme] = useState<ThemeProfile>(() => initialThemeProfile ?? readInitialThemeProfile());
-  const [draftTheme, setDraftTheme] = useState<ThemeProfile>(() => initialThemeProfile ?? readInitialThemeProfile());
+  const [dayDraftTheme, setDraftTheme] = useState<ThemeProfile>(() => initialThemeProfile ?? readInitialThemeProfile());
+  // 用着日间以外的搭配：外观里配了那套那份的组叠上去；这时在外观 App 里拖着还没保存的那几组先放 nightThemeDraft
+  const nightActive = useNightActive();
+  const activeLookSet = useActiveLookSet();
+  const nightRevision = useNightRevision();
+  const [nightThemeDraft, setNightThemeDraft] = useState<Partial<ThemeProfile> | null>(null);
+  const draftTheme = useMemo(
+    () => (nightActive ? { ...overlayNightTheme(dayDraftTheme), ...(nightThemeDraft ?? {}) } : dayDraftTheme),
+    // nightRevision：搭配里的格子改了、换了一套也要重算
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [nightActive, nightRevision, dayDraftTheme, nightThemeDraft],
+  );
+  useEffect(() => { setNightThemeDraft(null); }, [activeLookSet]);
+  // 自动切换：只在 App 在前台时对表（每半分钟、回到前台、手机深浅色变了）。
+  // iOS 把 App 切到后台时会在浅色 / 深色之间各拍一张快照，网页会收到一次「变深色了」又变回来；
+  // 后台收到的不理，前台收到的也等它稳定一会儿再对，免得回来时闪一下夜间。
+  // 真切了才提示一句（手动点的、到点 / 跟手机自动切的）。
+  useEffect(() => {
+    const onChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ night: boolean; set: string; source: string }>).detail;
+      if (detail?.source !== "manual" && detail?.source !== "auto") return;
+      setNotice(detail.set === DAY_SET_ID ? "☀️ 日间模式" : detail.set === NIGHT_SET_ID ? "🌙 夜间模式" : `已切到「${lookSetName(detail.set)}」`);
+    };
+    window.addEventListener(NIGHT_MODE_CHANGED_EVENT, onChanged);
+    const tickIfVisible = () => { if (document.visibilityState === "visible") tickNightAuto(); };
+    let settleTimer: number | null = null;
+    const tickWhenSettled = () => {
+      if (settleTimer != null) window.clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(() => { settleTimer = null; tickIfVisible(); }, 800);
+    };
+    void hydrateKvDb().then(() => { announceNightHydrated(); tickIfVisible(); });
+    const stop = bgSetInterval(tickIfVisible, 30_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") tickWhenSettled();
+      else if (settleTimer != null) { window.clearTimeout(settleTimer); settleTimer = null; }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    const media = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    media?.addEventListener?.("change", tickWhenSettled);
+    return () => {
+      window.removeEventListener(NIGHT_MODE_CHANGED_EVENT, onChanged);
+      stop();
+      if (settleTimer != null) window.clearTimeout(settleTimer);
+      document.removeEventListener("visibilitychange", onVisible);
+      media?.removeEventListener?.("change", tickWhenSettled);
+    };
+  }, []);
+  // 在最外层标一下用的哪套：夜间时提示条之类跟着变暗；自己写 CSS 也能用 :root[data-night-mode="true"]、
+  // :root[data-look-set="搭配 id"]
+  useEffect(() => {
+    document.documentElement.dataset.nightMode = activeLookSet === NIGHT_SET_ID ? "true" : "false";
+    document.documentElement.dataset.lookSet = activeLookSet;
+  }, [activeLookSet]);
   useEffect(() => {
     activeAppRef.current = activeApp;
   }, [activeApp]);
@@ -3505,6 +3561,29 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     setDraftTheme(persisted);
   }
 
+  /** 外观 App / 桌面定制里的改动：夜间模式开着时，改到主题色、壁纸这些组的只改夜间那份 */
+  function handleThemeDraftChange(next: ThemeProfile): void {
+    if (!nightActive) {
+      setDraftTheme(next);
+      return;
+    }
+    const { nightPatch, dayPatch } = splitNightThemeChange(draftTheme, next);
+    if (Object.keys(dayPatch).length) setDraftTheme(prev => ({ ...prev, ...dayPatch }));
+    if (Object.keys(nightPatch).length) setNightThemeDraft(prev => ({ ...(prev ?? {}), ...nightPatch }));
+  }
+
+  async function handleThemeApply(next: ThemeProfile): Promise<void> {
+    if (!nightActive) {
+      await applyTheme(next);
+      return;
+    }
+    // 和已经存下的夜间外观比：改了的组存成夜间单独一份，其余（壁纸库、状态栏开关……）照常存白天
+    const { dayPatch, groups } = splitNightThemeChange(overlayNightTheme(dayDraftTheme), next);
+    saveNightThemeGroups(next, groups);
+    setNightThemeDraft(null);
+    if (Object.keys(dayPatch).length) await applyTheme({ ...dayDraftTheme, ...dayPatch });
+  }
+
   /**
    * Suspend real backdrop-filter blur on glass widgets for a short window while
    * the desktop is busy adding/dragging. The live blur is the dominant GPU cost
@@ -4048,8 +4127,8 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
       return (
         <PhoneThemeApp
           draft={draftTheme}
-          onDraftChange={setDraftTheme}
-          onApply={applyTheme}
+          onDraftChange={handleThemeDraftChange}
+          onApply={handleThemeApply}
           onClose={() => setActiveApp(null)}
           onNotice={setNotice}
           widgets={widgets}
@@ -4489,7 +4568,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
               ) : null}
 
               {/* Music custom CSS — injected at shell level so it persists across apps */}
-              {musicCustomCss && <style dangerouslySetInnerHTML={{ __html: musicCustomCss }} />}
+              {resolvedMusicCss && <style dangerouslySetInnerHTML={{ __html: resolvedMusicCss }} />}
 
               {/* Music overlays are isolated so playback progress does not rerender the desktop shell. */}
               <MusicShellOverlays
@@ -4980,8 +5059,8 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
               {showDesktopCustomizer && (
                 <DesktopCustomizer
                   draft={draftTheme}
-                  onDraftChange={setDraftTheme}
-                  onApply={applyTheme}
+                  onDraftChange={handleThemeDraftChange}
+                  onApply={handleThemeApply}
                   onClose={() => setShowDesktopCustomizer(false)}
                 />
               )}

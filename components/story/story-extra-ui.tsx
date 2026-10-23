@@ -2,17 +2,31 @@
 
 // 剧情侧栏（选角色）和番外用到的几块界面，版式照用户选定的方案 C。
 
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronLeft, ChevronRight, Eraser, Folder, Plus, Save, Trash2, X } from "lucide-react";
 import { Avatar } from "@/components/ui/primitives";
 import type { Character } from "@/lib/character-types";
 import { loadApiConfigs, loadPresets, loadRegexes, loadWorldBooks } from "@/lib/settings-storage";
-import { inheritedCharacterAppApiLabel, loadCharacterAppApiId, saveCharacterAppApiId } from "@/lib/app-api-binding";
+import {
+  inheritedCharacterAppSlot,
+  loadCharacterAppSlot,
+  saveCharacterAppSlotField,
+  type CharacterAppSlotField,
+} from "@/lib/app-api-binding";
 import { loadWorldBookFolders, loadWorldBookRootOrder } from "@/lib/worldbook-folders";
 import { loadApiConfigFolders, loadApiConfigRootOrder } from "@/lib/api-config-folders";
 import { buildPickerEntries } from "@/lib/item-folders";
-import { appendStoryCommand } from "@/lib/story-commands";
+import {
+  DEFAULT_STORY_CONTINUE_PROMPT,
+  appendStoryCommand,
+  deleteStoryContinuePromptPreset,
+  loadStoryContinuePrompt,
+  loadStoryContinuePromptPresets,
+  saveStoryContinuePrompt,
+  saveStoryContinuePromptPreset,
+  type StoryContinuePromptPreset,
+} from "@/lib/story-commands";
 import type {
   StoryExtraBindings,
   StoryExtraConfig,
@@ -490,6 +504,7 @@ export function StoryBindingPicker({
   onClose,
   title,
   followLabel = "跟随剧情",
+  emptyFollows = false,
 }: {
   kind: StoryBindingKind;
   bindings: StoryExtraBindings;
@@ -499,6 +514,8 @@ export function StoryBindingPicker({
   title?: string;
   /** 不单独绑、跟着上一级走的那一行 */
   followLabel?: string;
+  /** 剧情正篇（设置里那一格）：多选一个都不勾就是继承上一级，不是「不用」 */
+  emptyFollows?: boolean;
 }) {
   const options = useMemo(() => bindingOptions(kind), [kind]);
   const multi = kind === "worldBooks" || kind === "regexes";
@@ -507,7 +524,7 @@ export function StoryBindingPicker({
   // 世界书、API 有文件夹时分层：外面是置顶的、文件夹和未分类的，点文件夹进去选；不同文件夹里的世界书可以同时勾
   const folders = useMemo(() => (kind === "worldBooks" ? loadWorldBookFolders() : kind === "api" ? loadApiConfigFolders() : []), [kind]);
   const [openFolderId, setOpenFolderId] = useState<string | null>(null);
-  // 最外层跟设置页一样：置顶的在最上面（在文件夹里的也会出现），然后文件夹和其余的按拖出来的顺序混排
+  // 最外层跟设置页一样：置顶的在最上面（文件夹里置顶的只在文件夹里排前面），然后文件夹和其余的按拖出来的顺序混排
   const rootEntries = useMemo(() => {
     if (folders.length === 0) return null;
     return buildPickerEntries(options, folders, kind === "api" ? loadApiConfigRootOrder() : loadWorldBookRootOrder());
@@ -530,7 +547,8 @@ export function StoryBindingPicker({
             return;
           }
           const current = selected ?? [];
-          setIds(on ? current.filter((id) => id !== option.id) : [...current, option.id]);
+          const next = on ? current.filter((id) => id !== option.id) : [...current, option.id];
+          setIds(emptyFollows && next.length === 0 ? undefined : next);
         }}
       >
         <span>{option.name}</span>
@@ -582,7 +600,9 @@ export function StoryBindingPicker({
           {options.length === 0 ? <div className="story-sheet-empty">还没有可选的{label}</div> : null}
           {openFolder ? inFolder(openFolder.id).map(optionRow) : rootEntries ? null : options.map(optionRow)}
           {multi ? (
-            <div className="story-drawer-note">勾了几个就只用这几个；一个都不勾就是不用{label}。</div>
+            <div className="story-drawer-note">
+              {emptyFollows ? "勾了几个就只用这几个；一个都不勾就继承上一级。" : `勾了几个就只用这几个；一个都不勾就是不用${label}。`}
+            </div>
           ) : null}
         </div>
       </div>
@@ -590,20 +610,52 @@ export function StoryBindingPicker({
   );
 }
 
-// ── 剧情正篇自己的 API：就是设置 → 绑定 → 这个角色 → 剧情 里的那一项，两边改的是同一份 ──
+// ── 剧情正篇的绑定：就是设置 → 绑定 → 这个角色 → 剧情 那一格（API、预设、世界书、正则），两边改的是同一份 ──
 
-/** 这个角色剧情单独绑的 API（没单独绑就是 undefined） */
-export function loadStoryApiOverride(characterId: string): string | undefined {
-  return loadCharacterAppApiId(characterId, "story");
+const MAIN_SLOT_FIELD: Record<StoryBindingKind, CharacterAppSlotField> = {
+  api: "apiConfigId",
+  preset: "presetId",
+  worldBooks: "worldBookIds",
+  regexes: "regexIds",
+};
+
+function slotIds(kind: StoryBindingKind, slot: { apiConfigId?: string; presetId?: string; worldBookIds?: string[]; regexIds?: string[] }): string[] {
+  const value = slot[MAIN_SLOT_FIELD[kind]];
+  return Array.isArray(value) ? value : value ? [value] : [];
 }
 
-export function saveStoryApiOverride(characterId: string, apiConfigId: string | undefined): void {
-  saveCharacterAppApiId(characterId, "story", apiConfigId);
+function optionNames(kind: StoryBindingKind, ids: string[]): string[] {
+  const options = bindingOptions(kind);
+  return ids.map((id) => options.find((option) => option.id === id)?.name).filter((name): name is string => Boolean(name));
 }
 
-/** 不单独绑时实际用的那个（全局 → 角色默认 → 剧情应用默认），显示成「继承：xx」 */
-export function storyApiFollowLabel(characterId: string): string {
-  return inheritedCharacterAppApiLabel(characterId, "story");
+/** 这个角色剧情单独绑的几项；没单独绑的（或绑的已经删了）是 undefined */
+export function loadStoryMainBindings(characterId: string): StoryExtraBindings {
+  const slot = loadCharacterAppSlot(characterId, "story");
+  const alive = (kind: StoryBindingKind) => {
+    const ids = slotIds(kind, slot);
+    const options = bindingOptions(kind);
+    const kept = ids.filter((id) => options.some((option) => option.id === id));
+    return kept.length > 0 ? kept : undefined;
+  };
+  return {
+    apiConfigId: alive("api")?.[0],
+    presetId: alive("preset")?.[0],
+    worldBookIds: alive("worldBooks"),
+    regexIds: alive("regexes"),
+  };
+}
+
+export function saveStoryMainBinding(characterId: string, kind: StoryBindingKind, bindings: StoryExtraBindings): void {
+  const ids = selectedBindingIds(kind, bindings);
+  saveCharacterAppSlotField(characterId, "story", MAIN_SLOT_FIELD[kind], kind === "api" || kind === "preset" ? ids?.[0] : ids);
+}
+
+/** 不单独绑时实际用的（全局 → 角色默认 → 剧情应用默认），显示成「继承：xx」 */
+export function storyMainFollowLabel(characterId: string, kind: StoryBindingKind): string {
+  const names = optionNames(kind, slotIds(kind, inheritedCharacterAppSlot(characterId, "story")));
+  if (names.length > 0) return `继承：${names.join("、")}`;
+  return kind === "api" || kind === "preset" ? "继承默认" : "继承：无";
 }
 
 export function StoryMainBindingsSection({
@@ -614,24 +666,35 @@ export function StoryMainBindingsSection({
   characterId: string;
   /** 绑定改过就变，让这里重新读 */
   revision: number;
-  onOpen: () => void;
+  onOpen: (kind: StoryBindingKind) => void;
 }) {
-  const value = useMemo(() => {
-    const own = loadStoryApiOverride(characterId);
-    const name = own ? bindingOptions("api").find((option) => option.id === own)?.name : undefined;
-    return name ? { text: name, follow: false } : { text: storyApiFollowLabel(characterId), follow: true };
+  const values = useMemo(() => {
+    const own = loadStoryMainBindings(characterId);
+    return BINDING_KINDS.map((kind) => {
+      const names = optionNames(kind, selectedBindingIds(kind, own) ?? []);
+      return names.length > 0
+        ? { kind, text: names.join("、"), follow: false }
+        : { kind, text: storyMainFollowLabel(characterId, kind), follow: true };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [characterId, revision]);
   return (
     <div className="story-drawer-section">
       <div className="story-drawer-eyebrow">剧情绑定</div>
-      <button type="button" className="story-bind-row" onClick={onOpen}>
-        <span>{BINDING_LABELS.api}</span>
-        <span data-follow={value.follow ? "true" : undefined}>{value.text}</span>
-        <span aria-hidden="true">›</span>
-      </button>
+      {values.map((value) => (
+        <button key={value.kind} type="button" className="story-bind-row" onClick={() => onOpen(value.kind)}>
+          <span>{BINDING_LABELS[value.kind]}</span>
+          <span data-follow={value.follow ? "true" : undefined}>{value.text}</span>
+          <span aria-hidden="true">›</span>
+        </button>
+      ))}
     </div>
   );
+}
+
+/** 「剧情API」「剧情预设」…… 侧栏选项面板的标题 */
+export function storyMainBindingTitle(kind: StoryBindingKind): string {
+  return `剧情${BINDING_LABELS[kind]}`;
 }
 
 // ── 番外方案：模板（含梗概和开关）+ 绑定成套保存、切换 ──
@@ -867,11 +930,135 @@ export function StoryInstructionCard({ content }: { content: string }) {
   );
 }
 
-/** 侧栏里管系统指令：输入栏显不显示「指令」按钮，快捷指令的增删 */
-function fitCommandDraftHeight(el: HTMLTextAreaElement) {
+function fitDraftHeight(el: HTMLTextAreaElement, maxHeight: number) {
   el.style.height = "auto";
-  el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
 }
+
+/** 一开始一行高，写长了自己换行、框跟着长高；侧栏宽度变了（转屏等）也重算 */
+function useAutoGrowTextarea(ref: RefObject<HTMLTextAreaElement | null>, value: string, maxHeight: number) {
+  useLayoutEffect(() => {
+    if (ref.current) fitDraftHeight(ref.current, maxHeight);
+  }, [ref, value, maxHeight]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fitDraftHeight(el, maxHeight);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref, maxHeight]);
+}
+
+/** 续写提示词：写了自动存，可以存几档切换；按钮在框下面 */
+function StoryContinuePromptEditor() {
+  const [text, setText] = useState(() => loadStoryContinuePrompt());
+  const [presets, setPresets] = useState<StoryContinuePromptPreset[]>(() => loadStoryContinuePromptPresets());
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useAutoGrowTextarea(inputRef, text, 240);
+  // 下拉框只在现在这段和某一档一字不差时显示它；改过就回到占位
+  const selectedId = presets.find((preset) => preset.text === text)?.id ?? "";
+  const change = (next: string) => {
+    setText(next);
+    saveStoryContinuePrompt(next);
+    setConfirmingDelete(false);
+  };
+  return (
+    <div className="story-command-manage">
+      <div className="story-continue-head">
+        <span className="story-command-manage-label">续写提示词</span>
+        {text !== DEFAULT_STORY_CONTINUE_PROMPT ? (
+          <button type="button" onClick={() => change(DEFAULT_STORY_CONTINUE_PROMPT)}>恢复默认</button>
+        ) : null}
+      </div>
+      <textarea
+        ref={inputRef}
+        className="story-continue-input"
+        rows={1}
+        value={text}
+        placeholder="长按回复点「续写」时，接在最后发给模型"
+        onChange={(event) => change(event.target.value)}
+      />
+      <div className="story-preset-row">
+        <select
+          className="story-preset-select"
+          value={selectedId}
+          onChange={(event) => {
+            const preset = presets.find((item) => item.id === event.target.value);
+            if (preset) change(preset.text);
+          }}
+        >
+          <option value="">{presets.length > 0 ? "选一档保存过的提示词" : "还没有保存过提示词"}</option>
+          {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+        </select>
+        {selectedId ? (
+          <button
+            type="button"
+            className={`story-preset-btn${confirmingDelete ? " is-danger" : ""}`}
+            aria-label={confirmingDelete ? "确认删除这档提示词" : "删除这档提示词"}
+            onClick={() => {
+              if (!confirmingDelete) { setConfirmingDelete(true); return; }
+              deleteStoryContinuePromptPreset(selectedId);
+              setConfirmingDelete(false);
+              setPresets(loadStoryContinuePromptPresets());
+            }}
+          >
+            <Trash2 size={15} />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="story-preset-btn"
+          aria-label="把现在这段存成一档"
+          disabled={!text.trim()}
+          onClick={() => {
+            setName(presets.find((item) => item.id === selectedId)?.name ?? "");
+            setNaming(true);
+            setConfirmingDelete(false);
+          }}
+        >
+          <Save size={15} />
+        </button>
+      </div>
+      {naming ? (
+        <div className="story-preset-row">
+          <input
+            className="story-preset-input"
+            value={name}
+            maxLength={30}
+            placeholder="给这段提示词起个名字"
+            autoFocus
+            onChange={(event) => setName(event.target.value)}
+          />
+          <button
+            type="button"
+            className="story-preset-btn"
+            aria-label="确认保存"
+            onClick={() => {
+              saveStoryContinuePromptPreset(name || "未命名", text);
+              setPresets(loadStoryContinuePromptPresets());
+              setNaming(false);
+            }}
+          >
+            <Check size={15} />
+          </button>
+          <button type="button" className="story-preset-btn" aria-label="取消" onClick={() => setNaming(false)}>
+            <X size={15} />
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** 侧栏里管系统指令：输入栏显不显示「指令」按钮，快捷指令的增删，续写提示词 */
 
 export function StoryCommandSettingsSection({
   buttonVisible,
@@ -892,22 +1079,8 @@ export function StoryCommandSettingsSection({
 }) {
   const [draft, setDraft] = useState("");
   const draftRef = useRef<HTMLTextAreaElement>(null);
-  // 写长了自己换行、框跟着长高（保存 / 发送贴着框底）；侧栏宽度变了（转屏等）也重算
-  useLayoutEffect(() => {
-    if (draftRef.current) fitCommandDraftHeight(draftRef.current);
-  }, [draft]);
-  useEffect(() => {
-    const el = draftRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    let width = el.clientWidth;
-    const observer = new ResizeObserver(() => {
-      if (el.clientWidth === width) return;
-      width = el.clientWidth;
-      fitCommandDraftHeight(el);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+  // 保存 / 发送贴着框底
+  useAutoGrowTextarea(draftRef, draft, 160);
   const add = () => {
     const text = draft.trim();
     if (!text) return;
@@ -978,6 +1151,7 @@ export function StoryCommandSettingsSection({
           <button type="button" className="story-command-send" disabled={!draft.trim() || sending} onClick={send}>发送</button>
         </div>
       </div>
+      <StoryContinuePromptEditor />
     </div>
   );
 }

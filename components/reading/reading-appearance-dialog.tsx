@@ -19,6 +19,8 @@ import {
 } from "@/lib/reading-appearance";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { READING_CSS_SCHEME_TARGET, loadReadingCustomCss } from "@/lib/reading-custom-css";
+import { NightSideTabs, useNightDraft } from "@/components/ui/night-side-tabs";
+import { nightSlotKeys } from "@/lib/night-mode";
 import { ReadingFontTier } from "./reading-font-tier";
 import { ReadingFontDiagnostics } from "./reading-font-diagnostics";
 
@@ -63,6 +65,10 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
     const [saving, setSaving] = useState(false);
     const [previewUrl, setPreviewUrl] = useState<string | null>(backgroundUrl);
     const [customCssDraft, setCustomCssDraft] = useState(() => loadReadingCustomCss());
+    // 「白天 | 夜间」：编辑的是哪一份
+    const nightCss = useNightDraft(nightSlotKeys.reading);
+    const cssEditing = nightCss.side === "night" ? nightCss.draft : customCssDraft;
+    const setCssEditing = nightCss.side === "night" ? nightCss.setDraft : setCustomCssDraft;
     const fileRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
@@ -120,6 +126,7 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                 clearUserAnnotationFont,
                 customCss: customCssDraft,
             });
+            nightCss.commit();
             onClose();
         } catch (err) {
             alert(err instanceof Error ? err.message : "阅读外观保存失败");
@@ -415,10 +422,11 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                     <p className="reading-settings-inline-note">
                         <span>只作用在阅读 app 内部。常用类名：.reading-line（正文）、.reading-annotation（批注卡片）、.reading-list-item（书架条目）。</span>
                     </p>
+                    <NightSideTabs state={nightCss} dayValue={customCssDraft} />
                     <textarea
                         className="reading-custom-css-input"
-                        value={customCssDraft}
-                        onChange={(e) => setCustomCssDraft(e.target.value)}
+                        value={cssEditing}
+                        onChange={(e) => setCssEditing(e.target.value)}
                         placeholder={".reading-annotation { border-radius: 10px; }"}
                         spellCheck={false}
                         autoCapitalize="off"
@@ -428,8 +436,8 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                     <div className="reading-settings-actions">
                         <CSSSchemeBar
                             target={READING_CSS_SCHEME_TARGET}
-                            currentCSS={customCssDraft}
-                            onLoad={setCustomCssDraft}
+                            currentCSS={cssEditing}
+                            onLoad={setCssEditing}
                             btnStyle={{
                                 width: 34,
                                 height: 34,
@@ -442,8 +450,8 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                         <button
                             type="button"
                             className="ui-btn ui-btn-ghost"
-                            onClick={() => setCustomCssDraft("")}
-                            disabled={saving || !customCssDraft}
+                            onClick={() => setCssEditing("")}
+                            disabled={saving || !cssEditing}
                         >
                             <Trash2 size={14} />
                             <span>清空</span>

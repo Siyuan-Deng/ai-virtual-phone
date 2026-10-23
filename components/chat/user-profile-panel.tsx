@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useMemo, type CSSProperties } from "react";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
+import { NightSideTabs, useNightDraft } from "@/components/ui/night-side-tabs";
+import { nightSlotKeys, setNightBinding } from "@/lib/night-mode";
 import {
     loadFollowUpConfig,
     saveFollowUpConfig,
@@ -490,15 +492,25 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
    ══════════════════════════════════════════ */
 function ChatCSSEditor({ onBack }: { onBack: () => void }) {
     const [css, setCss] = useState(() => kvGet("chat-app-custom-css") || "");
+    // 「日间模式 | 某套搭配」：编辑的是哪一份
+    const night = useNightDraft(nightSlotKeys.chatApp);
+    const editing = night.side === "night" ? night.draft : css;
+    const setEditing = night.side === "night" ? night.setDraft : setCss;
 
     const handleApply = () => {
         const trimmed = css.trim();
         if (trimmed) kvSet("chat-app-custom-css", trimmed);
         else kvRemove("chat-app-custom-css");
+        night.commit();
         window.dispatchEvent(new CustomEvent("chat-app-css-updated"));
     };
 
     const handleClear = () => {
+        if (night.side === "night") {
+            night.setDraft("");
+            setNightBinding(nightSlotKeys.chatApp, null, night.target);
+            return;
+        }
         setCss("");
         kvRemove("chat-app-custom-css");
         window.dispatchEvent(new CustomEvent("chat-app-css-updated"));
@@ -510,16 +522,17 @@ function ChatCSSEditor({ onBack }: { onBack: () => void }) {
                 <div className="ts-12 text-[var(--c-text)] opacity-70">
                     在此输入 CSS 自定义聊天页面样式（联系人列表、朋友圈、聊天室默认样式等）。单独聊天室的 CSS 优先级更高。
                 </div>
+                <NightSideTabs state={night} dayValue={css} />
                 <textarea
-                    value={css}
-                    onChange={(e) => setCss(e.target.value)}
+                    value={editing}
+                    onChange={(e) => setEditing(e.target.value)}
                     placeholder="/* 输入 CSS 自定义聊天页面样式... */"
                     className="ui-textarea font-mono ts-13 leading-relaxed flex-1"
                     style={{ minHeight: 280, resize: "none", scrollbarWidth: "none" }}
                 />
                 <div className="flex gap-2 items-center">
-                    <CSSSchemeBar target="chat_app" currentCSS={css} onLoad={setCss} />
-                    <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => setCss(CHAT_APP_CSS_EXAMPLE)}>示例</button>
+                    <CSSSchemeBar target="chat_app" currentCSS={editing} onLoad={setEditing} />
+                    <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => setEditing(CHAT_APP_CSS_EXAMPLE)}>示例</button>
                     <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={handleClear}>清除</button>
                     <button type="button" className="ui-btn ui-btn-soft-action flex-1" onClick={handleApply}>应用</button>
                 </div>

@@ -10,6 +10,7 @@
 //   - 图像处理套件 (image_pack)       — 10 个子工具
 //   - 导航工具 (navigate)             — 1 个独立工具（直接暴露）
 
+import { activeLookSet, isNightActive, lookSetName, nightSlotKeys, nightTextFor, setNightBinding } from "./night-mode";
 import type { LlmToolDefinition } from "./llm-provider-adapter";
 import type { ToolCall, ToolResult } from "./tool-executor";
 import type { MascotPageContext } from "./mascot-context";
@@ -961,7 +962,7 @@ export const MASCOT_TOOL_PACKAGES: MascotToolPackage[] = [
         subTools: [
             { name: "列出世界卷宗", description: "列出所有世界卷宗，含成员名单、关系线（带 relationId）与世界观描述。操作前建议先看。", parameterSchema: LIST_CHARACTER_WORLDS_SCHEMA },
             { name: "创建世界卷宗", description: "新建一个世界卷宗（如：现代都市 / 仙侠界），初始为空，之后用「移动角色到世界」把角色放进去。", parameterSchema: CREATE_CHARACTER_WORLD_SCHEMA },
-            { name: "重命名世界卷宗", description: "修改某个世界卷宗的名字（默认世界不可改名）。", parameterSchema: RENAME_CHARACTER_WORLD_SCHEMA },
+            { name: "重命名世界卷宗", description: "修改某个世界卷宗的名字（默认世界也能改名）。", parameterSchema: RENAME_CHARACTER_WORLD_SCHEMA },
             { name: "更新世界描述", description: "写入或修改某个世界卷宗的世界观描述，会注入该世界所有角色的上下文。", parameterSchema: UPDATE_CHARACTER_WORLD_DESC_SCHEMA },
             { name: "删除世界卷宗", description: "删除某个世界卷宗（默认世界不可删除），其成员自动并回默认世界。", parameterSchema: DELETE_CHARACTER_WORLD_SCHEMA },
             { name: "移动角色到世界", description: "把某个角色移入目标世界卷宗；角色会自动从原世界移出。", parameterSchema: MOVE_CHARACTER_TO_WORLD_SCHEMA },
@@ -1628,7 +1629,25 @@ async function resolveStorySession(sessionName: string | undefined, ctx: MascotT
     return { error: "请用 sessionName 指定要操作哪个剧情会话", choices };
 }
 
+/** 用着日间以外的搭配时，CSS 工具读写的是这一格那套搭配的那份（lib/night-mode） */
+function nightCssKey(location: string, sessionId?: string): string | null {
+    if (location === "chat_app") return nightSlotKeys.chatApp;
+    if (location === "mascot_chat") return nightSlotKeys.mascot;
+    if (location === "music") return nightSlotKeys.music;
+    if (location === "calendar") return nightSlotKeys.calendar;
+    if (location === "chat_session" && sessionId) return nightSlotKeys.chatSession(sessionId);
+    if (location === "story" && sessionId) return nightSlotKeys.story(sessionId);
+    return null;
+}
+
 async function readCssAt(location: string, ctx: MascotToolContext, sessionName?: string): Promise<{ css: string; sessionId?: string; displayName?: string; note?: string; choices?: string[] }> {
+    const result = await readDayCssAt(location, ctx, sessionName);
+    const key = isNightActive() && !result.choices ? nightCssKey(location, result.sessionId) : null;
+    if (!key) return result;
+    return { ...result, css: nightTextFor(key, result.css, activeLookSet()), note: [result.note, `现在用的是「${lookSetName(activeLookSet())}」搭配，读到的是这套那份（没单独配过就和日间一样）`].filter(Boolean).join("；") };
+}
+
+async function readDayCssAt(location: string, ctx: MascotToolContext, sessionName?: string): Promise<{ css: string; sessionId?: string; displayName?: string; note?: string; choices?: string[] }> {
     const { kvGet } = await import("./kv-db");
     if (location === "chat_app") return { css: kvGet("chat-app-custom-css") || "" };
     if (location === "mascot_chat") {
@@ -1719,9 +1738,23 @@ async function handleReadCss(args: Record<string, unknown>, ctx: MascotToolConte
     return { name: "读取CSS", success: true, data: parts.join("\n") };
 }
 
-async function writeCssAt(location: string, css: string, ctx: MascotToolContext, sessionName?: string): Promise<{ displayName?: string }> {
+async function writeCssAt(location: string, css: string, ctx: MascotToolContext, sessionName?: string): Promise<{ displayName?: string; lookSet?: string }> {
     const { kvSet, kvRemove } = await import("./kv-db");
     const trimmed = css.trim();
+    // 用着日间以外的搭配：写进这一格那套搭配的那份，日间的不动
+    if (isNightActive()) {
+        const target = location === "chat_session" || location === "story"
+            ? await (location === "chat_session" ? resolveChatSession(sessionName, ctx) : resolveStorySession(sessionName, ctx))
+            : null;
+        if (target && "error" in target) {
+            throw new Error(`${target.error}${target.choices ? `。可选会话：${target.choices.map((c) => `「${c}」`).join("、")}` : ""}`);
+        }
+        const key = nightCssKey(location, target?.sessionId);
+        if (key) {
+            setNightBinding(key, trimmed ? { kind: "own", value: trimmed } : null, activeLookSet());
+            return { displayName: target?.displayName, lookSet: lookSetName(activeLookSet()) };
+        }
+    }
     if (location === "chat_app") {
         if (trimmed) kvSet("chat-app-custom-css", trimmed); else kvRemove("chat-app-custom-css");
         if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("chat-app-css-updated"));
@@ -1867,7 +1900,7 @@ async function handleOverwriteCss(args: Record<string, unknown>, ctx: MascotTool
     const sessionName = args.sessionName as string | undefined;
     if (!location || !CSS_LOCATION_LABELS[location]) return { name: "覆写CSS", success: false, error: `未知位置：${location}` };
     const result = await writeCssAt(location, css, ctx, sessionName);
-    return { name: "覆写CSS", success: true, data: `已覆写 ${location}${result.displayName ? `（${result.displayName}）` : ""} 的 CSS，共 ${css.length} 字符` };
+    return { name: "覆写CSS", success: true, data: `已覆写 ${location}${result.displayName ? `（${result.displayName}）` : ""} 的${result.lookSet ? `「${result.lookSet}」搭配` : ""} CSS，共 ${css.length} 字符` };
 }
 
 async function handleClearCss(args: Record<string, unknown>, ctx: MascotToolContext): Promise<ToolResult> {
@@ -1875,7 +1908,7 @@ async function handleClearCss(args: Record<string, unknown>, ctx: MascotToolCont
     const sessionName = args.sessionName as string | undefined;
     if (!location || !CSS_LOCATION_LABELS[location]) return { name: "清除CSS", success: false, error: `未知位置：${location}` };
     const result = await writeCssAt(location, "", ctx, sessionName);
-    return { name: "清除CSS", success: true, data: `已清除 ${location}${result.displayName ? `（${result.displayName}）` : ""} 的 CSS` };
+    return { name: "清除CSS", success: true, data: `已清除 ${location}${result.displayName ? `（${result.displayName}）` : ""} 的${result.lookSet ? `「${result.lookSet}」搭配` : ""} CSS${result.lookSet ? "（这套回到跟随日间）" : ""}` };
 }
 
 // ── Character Handlers ──────────────────────────
@@ -2094,7 +2127,7 @@ async function handleListCharacterWorlds(): Promise<ToolResult> {
     const nameById = new Map(chars.map((c) => [c.id, c.name || c.id]));
     const lines: string[] = [];
     for (const group of groups) {
-        lines.push(`· ${group.name} [id: ${group.id}]${group.id === DEFAULT_CHARACTER_WORLD_ID ? "（默认世界，不可改名/删除）" : ""}`);
+        lines.push(`· ${group.name} [id: ${group.id}]${group.id === DEFAULT_CHARACTER_WORLD_ID ? "（默认世界，不可删除）" : ""}`);
         if (group.description.trim()) lines.push(`  描述：${group.description.trim().replace(/\s+/g, " ").slice(0, 80)}`);
         const memberNames = group.memberIds.map((id) => nameById.get(id) || id);
         lines.push(`  成员（${memberNames.length}）：${memberNames.join("、") || "（空）"}`);
@@ -2122,7 +2155,6 @@ async function handleRenameCharacterWorld(args: Record<string, unknown>): Promis
     if (!newName) return { name: "重命名世界卷宗", success: false, error: "newName 不能为空" };
     const world = await resolveCharacterWorldIdByName(name);
     if (!world) return { name: "重命名世界卷宗", success: false, error: `找不到世界卷宗：${name}。用「列出世界卷宗」确认名称。` };
-    if (world.isDefault) return { name: "重命名世界卷宗", success: false, error: "默认世界不可改名" };
     renameCharacterWorldGroup(world.id, newName);
     return { name: "重命名世界卷宗", success: true, data: `世界卷宗「${world.name}」已改名为「${newName}」` };
 }

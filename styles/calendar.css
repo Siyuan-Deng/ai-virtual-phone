@@ -1758,6 +1758,26 @@
   cursor: pointer;
 }
 
+/* 清单里的要点（•）：占勾选框那一格，不能勾 */
+.calendar-bullet-mark,
+.calendar-app-shell .caltool-bullet-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--c-calendar-ink);
+}
+
+/* 「＋ 添加待办」「＋ 添加要点」并排 */
+.calendar-add-rows,
+.calendar-app-shell .caltool-add-rows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+}
+
 .calendar-add-row {
   align-self: flex-start;
   border: 0;
@@ -2040,6 +2060,10 @@
   padding: 9px 10px;
   border-radius: 11px;
   background: var(--c-calendar-surface);
+}
+
+.calendar-app-shell .caltool-view-todo.is-bullet {
+  align-items: center;
 }
 
 .calendar-app-shell .caltool-view-todo input {

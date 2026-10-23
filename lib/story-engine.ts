@@ -18,6 +18,7 @@ import { prepareShortTermContext } from "./short-term-assembler";
 import { buildCalendarScheduleMarker, getCurrentCalendarScheduleForPrompt } from "./calendar-storage";
 import { getWeekStartIso } from "./calendar-utils";
 import { parseStoryResponse } from "./story-parser";
+import { nightSlotKeys, resolveNightRegexes } from "./night-mode";
 import { STORY_PARSER_VERSION } from "./story-parser";
 import { loadStoryMessages, replaceStoryMessages, type StoryExtraBindings, type StoryMessage } from "./story-storage";
 import type { ChatMessage } from "./chat-storage";
@@ -107,11 +108,14 @@ function storyAppTags(extra?: boolean): string[] {
   return extra ? ["story", "story_extra"] : ["story"];
 }
 
-/** overrides：番外单独的绑定。哪项没填（或绑的东西已经删了）就跟随剧情 */
-function resolveStoryConfigs(characterId: string, overrides?: StoryExtraBindings): {
+/** overrides：番外单独的绑定。哪项没填（或绑的东西已经删了）就跟随剧情。
+ *  sessionId：哪个剧情窗口（正篇 / 番外），夜间模式里它另绑了一套正则就拿来渲染 */
+function resolveStoryConfigs(characterId: string, overrides?: StoryExtraBindings, sessionId?: string): {
   apiConfig: ApiConfig;
   preset: PresetConfig | null;
   regexes: RegexConfig[];
+  /** 渲染用的正则：夜间模式里这个窗口另绑了一套就用它（提示词照日间的 regexes） */
+  renderRegexes: RegexConfig[];
   worldBooks: WorldBookConfig[];
   regexSignature: string;
   summaryTag: string;
@@ -158,18 +162,22 @@ function resolveStoryConfigs(characterId: string, overrides?: StoryExtraBindings
     .filter(Boolean) as WorldBookConfig[];
   const summaryTag = preset?.story_summary_tag?.trim() || "summary";
 
+  const renderRegexes = resolveNightRegexes(sessionId ? nightSlotKeys.storyRegex(sessionId) : undefined, regexes, allRegexes);
+
   return {
     apiConfig,
     preset,
     regexes,
+    renderRegexes,
     worldBooks,
-    regexSignature: [...regexes.map((regex) => `${regex.id}:${regex.updatedAt}`), `summary:${summaryTag}`].join("|"),
+    // 签名跟着渲染用的正则走：日间 / 夜间换了正则，消息要重新渲染
+    regexSignature: [...renderRegexes.map((regex) => `${regex.id}:${regex.updatedAt}`), `summary:${summaryTag}`].join("|"),
     summaryTag,
   };
 }
 
-export function getStoryRenderSignature(characterId: string, overrides?: StoryExtraBindings): { regexSignature: string; parserVersion: number; regexes: RegexConfig[] } {
-  const { regexSignature, regexes } = resolveStoryConfigs(characterId, overrides);
+export function getStoryRenderSignature(characterId: string, overrides?: StoryExtraBindings, sessionId?: string): { regexSignature: string; parserVersion: number; regexes: RegexConfig[] } {
+  const { regexSignature, regexes } = resolveStoryConfigs(characterId, overrides, sessionId);
   return {
     regexSignature,
     parserVersion: STORY_PARSER_VERSION,
@@ -187,7 +195,8 @@ export async function generateStoryCompletion(
     throw new ChatEngineError(`Character not found: ${characterId}`);
   }
 
-  const { apiConfig, preset, regexes, worldBooks, regexSignature, summaryTag } = resolveStoryConfigs(characterId, options?.bindings);
+  const sessionId = history[history.length - 1]?.sessionId;
+  const { apiConfig, preset, regexes, renderRegexes, worldBooks, regexSignature, summaryTag } = resolveStoryConfigs(characterId, options?.bindings, sessionId);
   const effectiveFoldTags = options?.sessionFoldTags?.trim() || DEFAULT_STORY_FOLD_TAGS;
   const effectiveContextExcludedTags = options?.sessionContextExcludedTags?.trim() || DEFAULT_STORY_CONTEXT_EXCLUDED_TAGS;
   const llmMessages = await buildStoryPromptMessages(characterId, history, preset, regexes, worldBooks, effectiveContextExcludedTags);
@@ -200,7 +209,71 @@ export async function generateStoryCompletion(
     characterName: character.name,
   }, { skipOutputRegex: true, includeReasoning: true, appId: "story", appTags: storyAppTags(options?.extra), characterId, signal: options?.signal });
 
-  const parsed = parseStoryResponse(rawOutput, regexes, {
+  const parsed = parseStoryResponse(rawOutput, renderRegexes, {
+    summaryTag,
+    foldTags: effectiveFoldTags,
+    macroEngine,
+    activeTags: ["story"],
+  });
+  return {
+    rawText: parsed.rawText,
+    renderedText: parsed.renderedText,
+    storySummary: parsed.summaryText,
+    regexSignature,
+    parserVersion: STORY_PARSER_VERSION,
+    promptMessages: llmMessages,
+    model: apiConfig.defaultModel,
+    presetName: preset?.name || "默认预设",
+  };
+}
+
+/** 新写的这段接到写了一半的那条后面：
+ *  - 思维链（<think> 块）只留在整条最前面那一份，新写的这段前面的去掉，不然会插在正文中间
+ *  - 写了一半的那段里 <content> 还没闭合、模型又从 <content> 开头写，就去掉重复的开头标签
+ *  - 不另加空白：断在句子中间就直接接上；新写的自己带了换行的照留 */
+function joinStoryContinuation(partial: string, addition: string): string {
+  let next = addition.replace(/^\s*<(think|thinking)>[\s\S]*?<\/\1>\s*/i, "");
+  if (/<content>/i.test(partial) && !/<\/content>/i.test(partial)) next = next.replace(/^\s*<content>\s*/i, "");
+  return partial + next;
+}
+
+/** 续写：最后那条回复写到一半断了。提示词照普通剧情拼（上下文里带着写了一半的这条），
+ *  最后再加一条续写提示词（当系统指令发）；返回的是接好之后的整条，重新解析过 */
+export async function generateStoryContinuation(
+  characterId: string,
+  history: StoryMessage[],
+  partial: StoryMessage,
+  continuePrompt: string,
+  options?: { sessionFoldTags?: string; sessionContextExcludedTags?: string; signal?: AbortSignal; bindings?: StoryExtraBindings; extra?: boolean },
+): Promise<StoryGenerationResult> {
+  const character = loadCharacters().find((item) => item.id === characterId);
+  if (!character) {
+    throw new ChatEngineError(`Character not found: ${characterId}`);
+  }
+
+  const { apiConfig, preset, regexes, renderRegexes, worldBooks, regexSignature, summaryTag } = resolveStoryConfigs(characterId, options?.bindings, partial.sessionId);
+  const effectiveFoldTags = options?.sessionFoldTags?.trim() || DEFAULT_STORY_FOLD_TAGS;
+  const effectiveContextExcludedTags = options?.sessionContextExcludedTags?.trim() || DEFAULT_STORY_CONTEXT_EXCLUDED_TAGS;
+  // 续写提示词排在写了一半的那条后面：历史以 assistant 收尾，不会被挪到输入前面
+  const instruction: StoryMessage = {
+    id: `continue_${Date.now().toString(36)}`,
+    sessionId: partial.sessionId,
+    role: "system",
+    instruction: true,
+    rawContent: continuePrompt,
+    renderedContent: continuePrompt,
+    createdAt: new Date().toISOString(),
+  };
+  const llmMessages = await buildStoryPromptMessages(characterId, [...history, instruction], preset, regexes, worldBooks, effectiveContextExcludedTags);
+
+  const userIdentity = resolveUserIdentity(characterId, "story");
+  const macroEngine = new MacroEngine(character.name, userIdentity?.name ?? "用户");
+
+  const rawOutput = await sendLLMRequestPreferStream(apiConfig, preset, llmMessages, regexes, {
+    characterName: character.name,
+  }, { skipOutputRegex: true, includeReasoning: true, appId: "story", appTags: storyAppTags(options?.extra), characterId, signal: options?.signal });
+
+  const parsed = parseStoryResponse(joinStoryContinuation(partial.rawContent, rawOutput), renderRegexes, {
     summaryTag,
     foldTags: effectiveFoldTags,
     macroEngine,
@@ -293,8 +366,8 @@ export function rebuildStorySessionRenderCache(
   sessionId: string,
   options?: { sessionFoldTags?: string; bindings?: StoryExtraBindings },
 ): StoryMessage[] {
-  const { regexSignature, parserVersion } = getStoryRenderSignature(characterId, options?.bindings);
-  const { regexes, summaryTag } = resolveStoryConfigs(characterId, options?.bindings);
+  const { regexSignature, parserVersion } = getStoryRenderSignature(characterId, options?.bindings, sessionId);
+  const { renderRegexes, summaryTag } = resolveStoryConfigs(characterId, options?.bindings, sessionId);
   const effectiveFoldTags = options?.sessionFoldTags?.trim() || DEFAULT_STORY_FOLD_TAGS;
 
   const character = loadCharacters().find((c) => c.id === characterId);
@@ -310,7 +383,7 @@ export function rebuildStorySessionRenderCache(
         parserVersion,
       };
     }
-    const parsed = parseStoryResponse(message.rawContent, regexes, {
+    const parsed = parseStoryResponse(message.rawContent, renderRegexes, {
       summaryTag,
       foldTags: effectiveFoldTags,
       macroEngine,

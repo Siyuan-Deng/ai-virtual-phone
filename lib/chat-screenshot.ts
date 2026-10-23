@@ -57,21 +57,42 @@ function snapshotFrame(frame: HTMLIFrameElement): Promise<string | null> {
 
 let frameSeq = 0;
 
-/** 把交出来的 HTML 摆回 iframe 原来的位置：样式关在自己的框里，iframe 里那套默认字体、body 外边距照旧 */
+/** 沙盒里的东西要搬进主页面：会自己跑起来的（脚本、内嵌框、事件属性、javascript: 链接）一律拿掉，截图只要它长什么样。
+ *  <style> 已经收走、套好作用域另放了，原处的也拿掉，免得不带作用域漏到外面 */
+function makeInert(doc: Document): void {
+    doc.querySelectorAll("script, style, iframe, frame, object, embed, base, meta, link").forEach(node => node.remove());
+    for (const el of Array.from(doc.querySelectorAll("*"))) {
+        for (const attr of Array.from(el.attributes)) {
+            const name = attr.name.toLowerCase();
+            if (name.startsWith("on")) el.removeAttribute(attr.name);
+            else if (/^(href|src|xlink:href|action|formaction)$/.test(name) && /^\s*javascript:/i.test(attr.value)) el.removeAttribute(attr.name);
+        }
+    }
+}
+
+/** 照着 iframe 里的 html / body 搭一层：class、id、行内样式这些原样带上，再挂上台子自己的类名 */
+function mirrorElement(source: Element, className: string): HTMLElement {
+    const el = document.createElement("div");
+    for (const attr of Array.from(source.attributes)) el.setAttribute(attr.name, attr.value);
+    el.className = [className, source.getAttribute("class")].filter(Boolean).join(" ");
+    return el;
+}
+
+/** 把交出来的 HTML 摆回 iframe 原来的位置：样式关在自己的框里，iframe 里那套默认字体、body 外边距照旧。
+ *  html 和 body 各搭一层：状态栏里点开翻译这类开关常把 class 挂在 body 上，`.show-trans .xxx` 要 body 在外面一层才对得上 */
 function frameReplacement(html: string, width: number, height: number): HTMLElement {
     const doc = new DOMParser().parseFromString(html, "text/html");
-    doc.querySelectorAll("script").forEach(node => node.remove());
-    const scope = `chat-capture-frame-${++frameSeq}`;
     const css = Array.from(doc.querySelectorAll("style")).map(node => node.textContent || "").join("\n");
+    makeInert(doc);
+    const scope = `chat-capture-frame-${++frameSeq}`;
     const box = document.createElement("div");
     box.style.cssText = `all: initial; display: block; width: ${width}px; height: ${height}px; overflow: hidden;`;
     const style = document.createElement("style");
-    style.textContent = `.${scope}{display:block;margin:8px;}\n${scopeSessionCSS(css, `.${scope}`)}`;
-    const root = document.createElement("div");
-    root.className = [scope, doc.body.className].filter(Boolean).join(" ");
-    const inline = doc.body.getAttribute("style");
-    if (inline) root.setAttribute("style", inline);
-    root.innerHTML = doc.body.innerHTML;
+    style.textContent = `.${scope}{display:block;}\n.${scope}-body{display:block;margin:8px;}\n${scopeSessionCSS(css, `.${scope}`, `.${scope}-body`)}`;
+    const root = mirrorElement(doc.documentElement, scope);
+    const body = mirrorElement(doc.body, `${scope}-body`);
+    body.append(...Array.from(doc.body.childNodes, node => document.importNode(node, true)));
+    root.appendChild(body);
     box.append(style, root);
     return box;
 }

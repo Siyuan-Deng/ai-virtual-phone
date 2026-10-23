@@ -52,7 +52,7 @@ import { bgSetInterval } from "./bg-timer";
 import { sendBrowserNotification } from "./browser-notification";
 import { buildTwoLevelMomentThreads } from "./moments-comment-threading";
 import { DEFAULT_MOMENTS_BILINGUAL_PROMPT, resolveBilingualPrompt } from "./bilingual-prompt-defaults";
-import { generateImageFromConfiguredApi } from "./image-generation-service";
+import { generateImageFromConfiguredApi, isImageGenerationConfigured } from "./image-generation-service";
 import { isAbortError, throwIfAborted } from "./abort-utils";
 import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "./chat-asset-storage";
 import {
@@ -1203,8 +1203,8 @@ export function attachMomentPhotoInBackground(
             ? { photoUrl, photoGenerationStatus: "generated", photoGenerationError: undefined }
             : { photoGenerationStatus: "failed", photoGenerationError: reason });
         dispatchMomentsUpdated();
-        // 失败时只在当下弹一次提示（卡片上不再挂红字），中断不算失败
-        if (!photoUrl && !aborted) dispatchMomentPhotoGenerationFailed(reason);
+        // 失败时只在当下弹一次提示（卡片上不再挂红字），中断不算失败；生图没配置也不弹
+        if (!photoUrl && !aborted && isImageGenerationConfigured()) dispatchMomentPhotoGenerationFailed(reason);
     })();
 }
 

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Check, ChevronLeft, ChevronRight, Plus, Trash2, Wand2, X } from "lucide-react";
 import { Avatar } from "./ui/primitives";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
+import { NightSideSwitch, NightSideTabs, useNightDraft } from "@/components/ui/night-side-tabs";
+import { getNightBinding, nightSlotKeys, setNightBinding, useNightText } from "@/lib/night-mode";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { CALENDAR_CSS_EXAMPLE } from "@/lib/css-examples";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
@@ -11,7 +13,7 @@ import { Input } from "./ui/form";
 import type { CalendarOwnerType, CalendarScheduleItem, CalendarWeekPlan } from "@/lib/calendar-types";
 import {
   CALENDAR_DAYS_PER_PAGE_OPTIONS,
-  CALENDAR_THEME_IDS,
+  CALENDAR_THEMES,
   deleteCalendarScheduleItem,
   loadCalendarConfig,
   loadOwnerCalendarPlans,
@@ -83,15 +85,6 @@ type OwnerOption = {
   avatar?: string | null;
 };
 
-const CALENDAR_THEMES: Array<{ id: (typeof CALENDAR_THEME_IDS)[number]; name: string }> = [
-  { id: "light", name: "默认" },
-  { id: "dark", name: "深色" },
-  { id: "cream", name: "奶油" },
-  { id: "mint", name: "薄荷" },
-  { id: "mist", name: "雾紫" },
-  { id: "sakura", name: "樱粉" },
-];
-
 function buildOwnerOptions(): OwnerOption[] {
   const options: OwnerOption[] = [];
   const identity = resolveUserIdentity(undefined, "calendar") ?? resolveUserIdentity() ?? null;
@@ -156,10 +149,36 @@ export function PhoneCalendarApp({
   const [appliedCalendarCss, setAppliedCalendarCss] = useState(() =>
     typeof window !== "undefined" ? kvGet("calendar-custom-css") || "" : ""
   );
+  // 主题面板顶上的「日间模式 | 某套搭配」同时管主题和 CSS；主题点了先放草稿，「应用」才存。
+  // 右边换了一套搭配，那套的主题重新读
+  const nightCss = useNightDraft(nightSlotKeys.calendar);
+  const calendarTheme = useNightText(nightSlotKeys.calendarTheme, config.theme);
+  const [themeDraft, setThemeDraft] = useState<{ day: string; night: string } | null>(null);
+  useEffect(() => {
+    if (!showThemePanel) { setThemeDraft(null); return; }
+    const binding = getNightBinding(nightSlotKeys.calendarTheme, nightCss.target);
+    setThemeDraft(prev => ({ day: prev?.day ?? config.theme, night: binding?.kind === "own" ? binding.value : "" }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showThemePanel, nightCss.target]);
+  // 面板开着时日历按正在改的那一侧预览（夜间没选就是跟随日间）
+  const shownTheme = themeDraft
+    ? (nightCss.side === "night" ? themeDraft.night || themeDraft.day : themeDraft.day)
+    : calendarTheme;
+  const editingCss = nightCss.side === "night" ? nightCss.draft : calendarCustomCss;
+  const setEditingCss = nightCss.side === "night" ? nightCss.setDraft : setCalendarCustomCss;
   const handleApplyCalendarCss = () => {
     const trimmed = calendarCustomCss.trim();
     if (trimmed) kvSet("calendar-custom-css", trimmed);
     else kvRemove("calendar-custom-css");
+    nightCss.commit();
+    if (themeDraft) {
+      if (themeDraft.day !== config.theme) {
+        const nextConfig = { ...config, theme: themeDraft.day as typeof config.theme };
+        setConfig(nextConfig);
+        saveCalendarConfig(nextConfig);
+      }
+      setNightBinding(nightSlotKeys.calendarTheme, themeDraft.night ? { kind: "own", value: themeDraft.night } : null, nightCss.target);
+    }
     setAppliedCalendarCss(trimmed);
     window.dispatchEvent(new CustomEvent("calendar-css-updated", { detail: trimmed }));
   };
@@ -670,8 +689,8 @@ export function PhoneCalendarApp({
   };
 
   return (
-    <div className="calendar-app-shell" data-calendar-theme={config.theme}>
-      {appliedCalendarCss && <SessionCustomCSS css={appliedCalendarCss} scope=".calendar-app-shell" />}
+    <div className="calendar-app-shell" data-calendar-theme={shownTheme}>
+      <SessionCustomCSS css={appliedCalendarCss || ""} scope=".calendar-app-shell" nightKey={nightSlotKeys.calendar} />
       <div className="calendar-app">
         {view === "month" ? (
           <CalendarMonthPage
@@ -814,30 +833,42 @@ export function PhoneCalendarApp({
                 <X size={16} />
               </button>
             </div>
+            <NightSideSwitch side={nightCss.side} onChange={nightCss.setSide} target={nightCss.target} onTarget={nightCss.setTarget} />
             <div className="calendar-theme-grid">
-              {CALENDAR_THEMES.map(theme => (
+              {nightCss.side === "night" ? (
                 <button
-                  key={theme.id}
                   type="button"
                   className="calendar-theme-option"
-                  data-active={config.theme === theme.id ? "true" : undefined}
-                  onClick={() => {
-                    const nextConfig = { ...config, theme: theme.id };
-                    setConfig(nextConfig);
-                    saveCalendarConfig(nextConfig);
-                  }}
+                  data-active={themeDraft && !themeDraft.night ? "true" : undefined}
+                  onClick={() => setThemeDraft(prev => prev && { ...prev, night: "" })}
                 >
-                  <span className="calendar-theme-swatch" data-theme-id={theme.id} aria-hidden="true" />
-                  <span>{theme.name}</span>
+                  <span className="calendar-theme-swatch calendar-theme-swatch-follow" aria-hidden="true" />
+                  <span>跟随日间</span>
                 </button>
-              ))}
+              ) : null}
+              {CALENDAR_THEMES.map(theme => {
+                const selected = nightCss.side === "night" ? themeDraft?.night : themeDraft?.day;
+                return (
+                  <button
+                    key={theme.id}
+                    type="button"
+                    className="calendar-theme-option"
+                    data-active={selected === theme.id ? "true" : undefined}
+                    onClick={() => setThemeDraft(prev => prev && (nightCss.side === "night" ? { ...prev, night: theme.id } : { ...prev, day: theme.id }))}
+                  >
+                    <span className="calendar-theme-swatch" data-theme-id={theme.id} aria-hidden="true" />
+                    <span>{theme.name}</span>
+                  </button>
+                );
+              })}
             </div>
 
             <div className="calendar-theme-css-label">自定义 CSS</div>
+            <NightSideTabs state={nightCss} dayValue={calendarCustomCss} hideSwitch />
             <textarea
               className="calendar-css-textarea"
-              value={calendarCustomCss}
-              onChange={e => setCalendarCustomCss(e.target.value)}
+              value={editingCss}
+              onChange={e => setEditingCss(e.target.value)}
               placeholder="/* 输入 CSS 覆盖日历样式... */"
               spellCheck={false}
               autoCapitalize="off"
@@ -846,8 +877,8 @@ export function PhoneCalendarApp({
             <div className="calendar-theme-css-actions">
               <CSSSchemeBar
                 target="calendar"
-                currentCSS={calendarCustomCss}
-                onLoad={setCalendarCustomCss}
+                currentCSS={editingCss}
+                onLoad={setEditingCss}
                 btnStyle={{
                   width: 30,
                   height: 30,
@@ -865,8 +896,8 @@ export function PhoneCalendarApp({
                   accent: "var(--c-calendar-today)",
                 }}
               />
-              <button type="button" className="calendar-block-btn" data-variant="ghost" onClick={() => setCalendarCustomCss(CALENDAR_CSS_EXAMPLE)}>示例</button>
-              <button type="button" className="calendar-block-btn" data-variant="ghost" onClick={() => setCalendarCustomCss("")}>清空</button>
+              <button type="button" className="calendar-block-btn" data-variant="ghost" onClick={() => setEditingCss(CALENDAR_CSS_EXAMPLE)}>示例</button>
+              <button type="button" className="calendar-block-btn" data-variant="ghost" onClick={() => setEditingCss("")}>清空</button>
               <button type="button" className="calendar-block-btn" data-variant="primary" onClick={handleApplyCalendarCss}>应用</button>
             </div>
           </div>

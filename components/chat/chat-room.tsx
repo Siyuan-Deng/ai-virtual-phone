@@ -57,6 +57,7 @@ import type { UserIdentity } from "@/components/settings/user-identity";
 import { AlertCircle, Blocks, Bookmark, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, ImageDown, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
 import { setDebugChatState } from "@/lib/debug-store";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
+import { nightSlotKeys, resolveNightRegexes, resolveNightStatusRender, useNightRevision, useNightText } from "@/lib/night-mode";
 import { setChatActive } from "@/lib/music-action-queue";
 import { getMusicControlBridge } from "@/lib/music-control-bridge";
 import { findPlayableMatch, getNeteaseLyrics, getNeteaseSongDetail } from "@/lib/music-service";
@@ -75,6 +76,7 @@ import {
     generateAndApplyChatGeneratedImage,
     isPendingChatGeneratedImageMessage,
 } from "@/lib/generated-image-retry";
+import { isImageGenerationNotConfiguredError } from "@/lib/image-generation-service";
 import { scrollElementWithinContainer } from "@/lib/dom-scroll";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
 import { ChatScreenEffectOverlay, type ActiveScreenEffect } from "./chat-screen-effect";
@@ -1282,28 +1284,33 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [messages]);
 
+    // 夜间模式里这个聊天单独配了一张背景，就换成它
+    const backgroundImage = useNightText(nightSlotKeys.chatBg(session.id), session.backgroundImage || "");
     useEffect(() => {
-        if (!session.backgroundImage) {
+        if (!backgroundImage) {
             setBgImageResolved(null);
             setBgLoading(false);
             return;
         }
-        if (session.backgroundImage.startsWith("data:") || session.backgroundImage.startsWith("http")) {
-            setBgImageResolved(session.backgroundImage);
+        if (backgroundImage.startsWith("data:") || backgroundImage.startsWith("http")) {
+            setBgImageResolved(backgroundImage);
             setBgLoading(false);
             return;
         }
         // It's an ID — load from IndexedDB
         setBgLoading(true);
+        let cancelled = false;
         import("@/lib/chat-asset-storage").then(({ getChatImageFromIndexedDB }) => {
-            getChatImageFromIndexedDB(session.backgroundImage!).then(dataUrl => {
+            getChatImageFromIndexedDB(backgroundImage).then(dataUrl => {
+                if (cancelled) return;
                 if (dataUrl) {
                     setBgImageResolved(dataUrl);
                 }
                 setBgLoading(false);
             });
         });
-    }, [session.backgroundImage]);
+        return () => { cancelled = true; };
+    }, [backgroundImage]);
 
     // Message Actions state
     const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
@@ -1641,6 +1648,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             .map(id => allRegexes.find(regex => regex.id === id))
             .filter((regex): regex is RegexConfig => Boolean(regex));
     }, [regexRevision, session.contactId, session.isGroup]);
+    // 显示用的正则：夜间模式里这个聊天另绑了一套就用它（只换显示，编辑时跑的正则照日间）
+    const nightRevision = useNightRevision();
+    const displayRegexes = useMemo(
+        () => resolveNightRegexes(nightSlotKeys.chatRegex(session.id), activeRegexes, loadRegexes()),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [activeRegexes, nightRevision, session.id],
+    );
 
     // 流式预览的标签净化配置：与引擎同源（当前会话绑定的预设）。预设开启标签式思维链时，
     // 生成过程中的预览也要按同一套标签剥掉思考过程/摘要，否则最终消息里被引擎剥掉的内容
@@ -1683,12 +1697,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         placement: 1 | 2 | 5 | 6,
         isOffline = false,
     ) => {
-        if (!text || activeRegexes.length === 0) return text;
-        return applyDisplayRegex(text, activeRegexes, placement, {
+        if (!text || displayRegexes.length === 0) return text;
+        return applyDisplayRegex(text, displayRegexes, placement, {
             macroEngine: displayRegexMacroEngine,
             activeTags: getRegexActiveTags(isOffline),
         });
-    }, [activeRegexes, displayRegexMacroEngine, getRegexActiveTags]);
+    }, [displayRegexes, displayRegexMacroEngine, getRegexActiveTags]);
 
     const getMessageDisplayContent = useCallback((message: RenderChatMessage): string => (
         message.displayProjected
@@ -2809,7 +2823,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         if (!isPendingChatGeneratedImageMessage(message)) return Promise.resolve(null);
         return generateAndApplyChatGeneratedImage(message, characterId || session.contactId, { signal: guard?.signal })
             .catch(error => {
-                if (!isAbortLikeError(error)) {
+                // 生图没配置：气泡照样标成没生成，但不弹窗
+                if (!isAbortLikeError(error) && !isImageGenerationNotConfiguredError(error)) {
                     console.warn("[ImageGeneration] Failed to generate chat image:", error);
                     const reason = error instanceof Error ? error.message : String(error);
                     setImageGenerationFailure(prev => prev ?? reason);
@@ -5603,9 +5618,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     return (
         <div ref={wrapperRef} className={`session-${session.id} chat-room-wrapper page-shell inset-0 flex flex-col z-20`} style={chatRoomBackgroundStyle} {...(bgLoading ? { "data-loading": "" } : {})} {...(bgImageResolved ? { "data-has-bg-image": "" } : {})} {...(showSettings ? { "data-settings-open": "" } : {})}>
             {/* Custom CSS Injection for this session — scoped to prevent leaking */}
-            {liveCSS && (
-                <SessionCustomCSS css={liveCSS} scope={`.session-${session.id}`} />
-            )}
+            <SessionCustomCSS css={liveCSS || ""} scope={`.session-${session.id}`} nightKey={nightSlotKeys.chatSession(session.id)} />
 
             {/* 全屏特效层（表情雨/礼花），不拦截任何触摸操作 */}
             <ChatScreenEffectOverlay active={activeScreenEffect} onDone={() => setActiveScreenEffect(null)} />
@@ -5992,7 +6005,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     const hiddenEmpty = isHiddenChatFlowMessage(renderMsg, bubbleDisplayContent);
                     const hasFoldedPanel = !!(renderMsg.statusPanel || renderMsg.innerMonologue);
                     // 内心卡片只展示本轮实际输出的状态值；旧数据没有 freshStateValues 时回退到合并快照
-                    const cardStateValues = msg.freshStateValues ?? msg.stateValues;
+                    // 原生状态栏没在用（自定义生效 / 关闭）时，提示词里根本不要状态值；模型照习惯写出来的
+                    // [好感度:X][焦虑值:X] 已经从正文里摘掉了，这里也不再显示。
+                    // 自定义没配完整会退回原生，那时照常显示
+                    const cardStateValues = statusRegionCfg.mode !== "off" && !customStatusActive
+                        ? (msg.freshStateValues ?? msg.stateValues)
+                        : undefined;
                     const isSilentThought = !visibleContent && !renderMsg.mediaType && hasFoldedPanel && msg.role !== "user";
                     const isStandaloneHtmlPreview = !renderMsg.mediaType && isStandaloneHtmlPreviewContent(bubbleDisplayContent);
                     const isMediaBubble = (renderMsg.mediaType && CHAT_MEDIA_BUBBLE_TYPES.has(renderMsg.mediaType)) || isStandaloneHtmlPreview;
@@ -6289,7 +6307,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                     )}
                                     {renderMsg.statusPanel && (
                                         msg.statusRegionMode === "custom" && statusRegionCfg.renderHtml.trim() ? (
-                                            <CustomStatusFrame html={statusRegionCfg.renderHtml} raw={renderMsg.statusPanel} />
+                                            <CustomStatusFrame html={resolveNightStatusRender(session.id, statusRegionCfg.renderHtml)} raw={renderMsg.statusPanel} />
                                         ) : (
                                             <BilingualTextBlock text={msg.displayProjected ? renderMsg.statusPanel : renderDisplayText(renderMsg.statusPanel, 6, false)} mode="markdown" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} />
                                         )

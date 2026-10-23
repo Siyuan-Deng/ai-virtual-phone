@@ -1526,6 +1526,9 @@
 
 .wt-btn {
   padding: 6px 14px;
+  /* 确认删除那句长了也别把按钮挤成竖排 */
+  flex-shrink: 0;
+  white-space: nowrap;
   border: 1px solid #d0d0d0;
   border-radius: 3px;
   background: #ffffff;

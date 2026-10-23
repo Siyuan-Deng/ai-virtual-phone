@@ -1928,7 +1928,8 @@
           align-items: flex-end;
           gap: 6px;
         }
-        .story-command-add textarea {
+        .story-command-add textarea,
+        .story-continue-input {
           flex: 1;
           min-width: 0;
           height: 34px;
@@ -1949,7 +1950,8 @@
           font-size: calc(13px*var(--app-text-scale,1));
           line-height: 20px;
         }
-        .story-command-add textarea::placeholder {
+        .story-command-add textarea::placeholder,
+        .story-continue-input::placeholder {
           color: color-mix(in srgb, var(--c-story-placeholder, #94a3b8) 70%, transparent);
         }
         .story-command-add button {
@@ -1972,6 +1974,40 @@
           color: var(--c-story-on-heading, var(--c-story-drawer-top, #ffffff));
         }
         .story-command-add button:disabled {
+          opacity: 0.4;
+        }
+        /* 续写提示词：框和上面一样一行起、写多了长高；切换 / 存档放在框下面 */
+        .story-continue-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+        }
+        .story-continue-head button {
+          padding: 0;
+          border: none;
+          background: none;
+          color: var(--c-story-sub, #94a3b8);
+          font: inherit;
+          font-size: calc(12px*var(--app-text-scale,1));
+        }
+        .story-command-manage .story-continue-input {
+          flex: none;
+          width: 100%;
+          max-height: 240px;
+        }
+        .story-command-manage .story-preset-row + .story-preset-row {
+          margin-top: 0;
+        }
+        .story-command-manage .story-preset-select,
+        .story-command-manage .story-preset-input,
+        .story-command-manage .story-preset-btn {
+          height: 34px;
+        }
+        .story-command-manage .story-preset-btn {
+          width: 34px;
+        }
+        .story-command-manage .story-preset-btn:disabled {
           opacity: 0.4;
         }
 

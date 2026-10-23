@@ -1605,6 +1605,15 @@
   accent-color: #2b241c;
 }
 
+/* 要点那一格画个小圆点（手写字体里的 • 会偏上），占的宽度和勾选框差不多 */
+.diary-compose-bullet-mark {
+  width: 5px;
+  height: 5px;
+  margin: 0 4px;
+  border-radius: 50%;
+  background: rgba(47, 42, 35, 0.72);
+}
+
 .diary-compose-todo-item button {
   border: 0;
   background: transparent;
@@ -1929,6 +1938,17 @@
   line-height: 1;
   /* The ✓ glyph's ink sits high in its em box — nudge down to optically center. */
   transform: translateY(3px);
+}
+
+/* 要点：方框换成一个实心小圆点 */
+.diary-entry-bullets li > span {
+  width: 6px;
+  height: 6px;
+  /* 圆心和待办方框的中心对齐 */
+  margin: 10px 0 0 4px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(47, 42, 35, 0.72);
 }
 
 .diary-entry-todo p {

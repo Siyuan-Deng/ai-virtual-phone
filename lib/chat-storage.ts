@@ -1154,6 +1154,13 @@ export function createToolExecutionId(): string {
     return `toolrun_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/** 角色改了用户日历后插的那条灰色通知。它和回复同一批、多半存成 assistant，但不是角色说的话：
+ *  原样进提示词，模型就会把「X修改了你的日历：…」学成自己的台词，写成普通气泡（有时还不带动作块，改不成） */
+export function isCalendarChangeNotice(msg: object): boolean {
+    const value = msg as { calendarChangeNotice?: unknown; origin?: unknown };
+    return value.calendarChangeNotice === true || value.origin === "calendar_character_action";
+}
+
 export function pushChatMessage(msg: Omit<ChatMessage, "id" | "createdAt" | "status"> & {
     status?: ChatMessageStatus;
     createdAt?: string;
@@ -1254,6 +1261,8 @@ function formatStateValuesForRaw(stateValues?: StateValue[]): string {
 
 function messageToEditableRawPart(message: ChatMessage): string {
     if (message.mediaType === "tool_notice" || message.mediaType === "tool_result") return "";
+    // 角色改日历的那条灰色通知不是回复正文：拼进原文的话，一编辑保存就变成角色发的普通气泡
+    if (isCalendarChangeNotice(message)) return "";
     if (message.mediaType === "poke") {
         const sender = message.mediaData?.pokeSender?.trim();
         const target = message.mediaData?.pokeTarget?.trim();
@@ -1306,6 +1315,8 @@ export function editableRawForResponseBatch(sessionId: string, responseBatchId: 
     );
     const missingMedia = batch.some(message => {
         if (!message.mediaType || message.mediaType === "image" || message.mediaType === "poke") return false;
+        // 日历通知本来就不在 AI 原文里，不算「丢了」
+        if (isCalendarChangeNotice(message)) return false;
         if (message.mediaType === "tool_notice" || message.mediaType === "tool_result" || message.mediaType === "tool_call") return false;
         const formatted = formatRichMediaForHistory(message, "", "").trim();
         const label = String(message.mediaData?.label ?? "").trim();
@@ -2018,8 +2029,17 @@ export function replaceResponseBatchWithParts(
     const insertIdx = _messagesCache.findIndex(m => m.id === firstMessage.id);
     if (insertIdx === -1) return [];
 
-    const deletedIds = batchMessages.map(m => m.id);
-    _messagesCache = _messagesCache.filter(m => !deletedIds.includes(m.id));
+    // 角色改日历的那条通知也挂在这一批里。它不是回复正文，编辑重建时原样留着：
+    // 记下它前面原来有几条气泡，重建后插回同样的位置（编辑后条数少了就放到这一批最后）
+    const keptNotices = batchMessages
+        .map((message, index) => ({
+            message,
+            before: batchMessages.slice(0, index).filter(m => !isCalendarChangeNotice(m)).length,
+        }))
+        .filter(item => isCalendarChangeNotice(item.message));
+    const batchIds = new Set(batchMessages.map(m => m.id));
+    const deletedIds = batchMessages.filter(m => !isCalendarChangeNotice(m)).map(m => m.id);
+    _messagesCache = _messagesCache.filter(m => !batchIds.has(m.id));
     dbDeleteMessagesByIds(deletedIds);
 
     const baseTime = new Date(firstMessage.createdAt).getTime();
@@ -2051,6 +2071,17 @@ export function replaceResponseBatchWithParts(
         senderCharacterId: firstMessage.senderCharacterId,
         senderName: firstMessage.senderName,
     }));
+    // 通知按原位置插回去，整批重新排一遍先后
+    const ordered: ChatMessage[] = [...visibleMessages];
+    for (const { message, before } of [...keptNotices].reverse()) {
+        ordered.splice(Math.min(before, visibleMessages.length), 0, message);
+    }
+    const sequenced = ordered.map((message, index) => ({
+        ...message,
+        createdAt: new Date(baseTime + index).toISOString(),
+        order: baseOrder + index * 0.001,
+        ...(isCalendarChangeNotice(message) ? { rawResponseText } : {}),
+    }));
     const toolCallContent = options?.toolCallContent?.trim();
     const toolCallMessage: ChatMessage | undefined = toolCallContent
         ? {
@@ -2060,8 +2091,8 @@ export function replaceResponseBatchWithParts(
             content: toolCallContent,
             mediaType: "tool_call",
             status: firstMessage.status,
-            createdAt: new Date(baseTime + parts.length).toISOString(),
-            order: baseOrder + parts.length * 0.001,
+            createdAt: new Date(baseTime + sequenced.length).toISOString(),
+            order: baseOrder + sequenced.length * 0.001,
             responseBatchId,
             responseRoundId: firstMessage.responseRoundId,
             editableResponseText: firstMessage.editableResponseText,
@@ -2071,7 +2102,7 @@ export function replaceResponseBatchWithParts(
             senderName: firstMessage.senderName,
         }
         : undefined;
-    const newMessages = toolCallMessage ? [...visibleMessages, toolCallMessage] : visibleMessages;
+    const newMessages = toolCallMessage ? [...sequenced, toolCallMessage] : sequenced;
 
     _messagesCache.splice(insertIdx, 0, ...newMessages);
     dbPutMessages(newMessages);
@@ -2092,7 +2123,8 @@ export function replaceResponseBatchWithParts(
         saveChatSessions(sessions);
     }
 
-    dispatchResponseBatchReplaced(sessionId, newMessages, rawResponseText);
+    // 云同步只认回复正文；日历通知不跟着回写，和以前一样
+    dispatchResponseBatchReplaced(sessionId, newMessages.filter(m => !isCalendarChangeNotice(m)), rawResponseText);
     return newMessages;
 }
 

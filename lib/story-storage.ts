@@ -478,6 +478,18 @@ export function editStoryMessage(messageId: string, newRawContent: string): void
     storyDb.messages.put(_messagesCache[idx]).catch(() => undefined);
 }
 
+/** 续写完：同一条消息换成接好之后的整条（已经解析过） */
+export function updateStoryMessageContent(
+    messageId: string,
+    updates: Pick<StoryMessage, "rawContent" | "renderedContent" | "storySummary" | "regexSignature" | "parserVersion">,
+): StoryMessage | null {
+    const idx = _messagesCache.findIndex(m => m.id === messageId);
+    if (idx === -1) return null;
+    _messagesCache[idx] = { ..._messagesCache[idx], ...updates };
+    storyDb.messages.put(_messagesCache[idx]).catch(() => undefined);
+    return _messagesCache[idx];
+}
+
 /** 清空一个会话的全部消息（番外「清空番外」用） */
 export function clearStoryMessages(sessionId: string): void {
   _messagesCache = _messagesCache.filter((message) => message.sessionId !== sessionId);

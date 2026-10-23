@@ -31,6 +31,7 @@ import { holidaysForDate } from "./calendar-holidays";
 import {
     loadCalendarExtras,
     activeCalendarMemos,
+    isCheckableCalendarTodo,
     normalizeCalendarTodos,
     saveCalendarExtras,
     setCalendarTodoListener,
@@ -169,8 +170,8 @@ type CalendarIdLabels = { event: Map<string, string>; series: Map<string, string
 
 function buildCalendarIdLabels(items: CalendarScheduleItem[], extras: CalendarExtras): CalendarIdLabels {
     const todoIds = [
-        ...Object.values(extras.eventDetails).flatMap((details) => normalizeCalendarTodos(details.todos).map((todo) => todo.id)),
-        ...extras.memos.flatMap((memo) => normalizeCalendarTodos(memo.checklist).map((todo) => todo.id)),
+        ...Object.values(extras.eventDetails).flatMap((details) => normalizeCalendarTodos(details.todos).filter(isCheckableCalendarTodo).map((todo) => todo.id)),
+        ...extras.memos.flatMap((memo) => normalizeCalendarTodos(memo.checklist).filter(isCheckableCalendarTodo).map((todo) => todo.id)),
     ];
     return {
         event: calendarIdLabels(items.map((item) => item.id)),
@@ -194,8 +195,11 @@ function eventStateLabel(entry: VisibleEntry, now: Date, nearMinutes: number, al
     return "";
 }
 
+/** 要点（•）只是列表项：不带 todoId，也没有完成状态 */
 function formatTodosForContext(todos: CalendarTodo[], labels: CalendarIdLabels | null): string {
-    return todos.map((todo) => `${labels ? `[todoId=${idLabel(labels.todo, todo.id)}]` : ""}${todo.done ? "[已完成]" : "[未完成]"}${oneLine(todo.text)}`).join("；");
+    return todos.map((todo) => (isCheckableCalendarTodo(todo)
+        ? `${labels ? `[todoId=${idLabel(labels.todo, todo.id)}]` : ""}${todo.done ? "[已完成]" : "[未完成]"}${oneLine(todo.text)}`
+        : `•${oneLine(todo.text)}`)).join("；");
 }
 
 function eventTitleWithLocation(item: CalendarScheduleItem): string {
@@ -224,7 +228,7 @@ function formatEventForContext(
     if (series && !changedOccurrence) lines.push(`  重复：${recurrenceRuleLabel(series)}，${series.forever ? "无截止日期" : `至 ${series.untilDate}`}`);
     if (details?.note) lines.push(`  备注：${fullText(details.note).replace(/\n+/g, " / ")}`);
     const todos = normalizeCalendarTodos(details?.todos);
-    if (todos.length) lines.push(`  待办：${formatTodosForContext(todos, labels)}`);
+    if (todos.length) lines.push(`  ${todos.some(isCheckableCalendarTodo) ? "待办" : "要点"}：${formatTodosForContext(todos, labels)}`);
     return lines;
 }
 
@@ -300,7 +304,7 @@ function formatRoutineLines(
             const todayDetails = extras.eventDetails[todayEntry.item.id];
             const state = eventStateLabel(todayEntry, now, config.nearMinutes, todayDetails?.allDay === true);
             const todos = normalizeCalendarTodos(todayDetails?.todos);
-            const parts = [state, todos.length ? `待办：${formatTodosForContext(todos, labels)}` : ""].filter(Boolean);
+            const parts = [state, todos.length ? `${todos.some(isCheckableCalendarTodo) ? "待办" : "要点"}：${formatTodosForContext(todos, labels)}` : ""].filter(Boolean);
             // 今天这一次的 eventId 也写上：勾今天的待办、改今天这一次都直接用它
             const todayId = labels ? `[eventId=${idLabel(labels.event, todayEntry.item.id)}]` : "";
             if (parts.length) todayPart = `｜今天${todayId}${parts.join("，")}`;
@@ -378,6 +382,7 @@ export function buildUserCalendarContext(now = new Date(), options: { includeWri
         if (memo.body) memoLines.push(`  正文：${fullText(memo.body).replace(/\n+/g, " / ")}`);
         if (checklist.length) {
             memoLines.push(`  清单：${checklist.map((todo) => {
+                if (!isCheckableCalendarTodo(todo)) return `•${oneLine(todo.text)}`;
                 const deadline = todo.dueDate ? `（截止 ${todo.dueDate}${todo.dueTime ? ` ${todo.dueTime}` : " 当天"}）` : "";
                 return `${labels ? `[todoId=${idLabel(labels.todo, todo.id)}]` : ""}${todo.done ? "[已完成]" : "[未完成]"}${oneLine(todo.text)}${deadline}`;
             }).join("；")}`);
@@ -739,7 +744,7 @@ function collectDueReminderItems(now: Date, nearMinutes: number, extras: Calenda
     const items: DueItem[] = [];
     for (const item of userItems()) {
         const details = extras.eventDetails[item.id];
-        const todos = normalizeCalendarTodos(details?.todos);
+        const todos = normalizeCalendarTodos(details?.todos).filter(isCheckableCalendarTodo);
         if (details?.allDay === true && todos.length > 0) {
             // 全天待办以当天 24:00 为截止，只有没勾的才提醒
             const target = parseLocalDateTime(addDaysIso(item.date, 1), "00:00");
@@ -1111,14 +1116,38 @@ function nudgeCalendarChangeNotice(message: ChatMessage | undefined): void {
     else pending.arm(1100);
 }
 
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** 模型照着以前的通知自己写的「X修改了你的日历：…（未执行：…）」：真通知只由执行过的动作块产生，
+ *  这种一律摘掉，不然改没改成都会冒一条像通知的普通气泡。只认这个角色名打头的整行，别的话不碰 */
+function stripImitatedCalendarNotices(text: string, payload: LlmResponsePayload): string {
+    if (!text || !text.includes("修改了你的日历") || payload?.purpose !== "chat" || !payload.sessionId) return text;
+    const session = loadChatSessions().find((item) => item.id === payload.sessionId);
+    const name = session && !session.isGroup
+        ? loadCharacters().find((item) => String(item.id) === String(session.contactId))?.name?.trim()
+        : "";
+    if (!name) return text;
+    const notice = `${escapeRegExp(name)}修改了你的日历[：:]`;
+    const stripped = text
+        .replace(new RegExp(`<message(?:\\s[^>]*)?>\\s*${notice}[\\s\\S]*?<\\/message>`, "gi"), "")
+        .replace(new RegExp(`^[^\\S\\n]*${notice}[^\\n]*(?:\\n[^\\S\\n]*未执行[：:][^\\n]*)?\\n?`, "gm"), "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    // 整条回复只有这一句的话留着原样，免得变成一条空回复
+    return stripped || text;
+}
+
 function applyCharacterCalendarActions(payload: LlmResponsePayload): LlmResponsePayload {
     const parsed = extractCalendarActionBlocks(payload?.text);
+    const cleaned = stripImitatedCalendarNotices(parsed.cleaned, payload);
     if (parsed.actions.length === 0) {
         takeCalendarWriteRequest(payload);
-        return parsed.cleaned !== String(payload?.text || "").trim() ? { ...payload, text: parsed.cleaned } : payload;
+        return cleaned !== String(payload?.text || "").trim() ? { ...payload, text: cleaned } : payload;
     }
     const request = takeCalendarWriteRequest(payload);
-    const next = { ...payload, text: parsed.cleaned || "已经帮你处理好了。" };
+    const next = { ...payload, text: cleaned || "已经帮你处理好了。" };
     if (!request || !canCharacterModifyCalendar(request.characterId)) {
         console.info("[Calendar] 忽略了没有角色修改权限的日历动作");
         return next;

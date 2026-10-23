@@ -513,6 +513,7 @@ function CharListView({
   const currentGroup = worldGroups.find(g => g.id === currentWorldId)
     ?? worldGroups.find(g => g.id === DEFAULT_CHARACTER_WORLD_ID)
     ?? worldGroups[0];
+  const defaultWorldName = worldGroups.find(g => g.id === DEFAULT_CHARACTER_WORLD_ID)?.name || "默认世界";
   const memberSet = new Set(currentGroup?.memberIds ?? []);
   const worldCharacters = characters.filter(c => memberSet.has(c.id));
   const worldBgItems = (bgItems || []).filter(item => (item.worldId ?? DEFAULT_CHARACTER_WORLD_ID) === currentWorldId);
@@ -1438,13 +1439,14 @@ function CharListView({
       {showWorldEditor && currentGroup && (
         <WorldCaseSheet
           group={currentGroup}
+          defaultWorldName={defaultWorldName}
           onRename={name => renameCharacterWorldGroup(currentGroup.id, name)}
           onUpdateDescription={description => updateCharacterWorldDescription(currentGroup.id, description)}
           onDelete={() => {
             deleteCharacterWorldGroup(currentGroup.id);
             setShowWorldEditor(false);
             selectWorld(DEFAULT_CHARACTER_WORLD_ID);
-            onNotice("卷宗已删除，角色并回默认世界");
+            onNotice(`卷宗已删除，角色并回「${defaultWorldName}」`);
           }}
           onClose={() => setShowWorldEditor(false)}
         />

@@ -393,6 +393,7 @@ function saveTodoTarget(target: TodoTarget): void {
 function setTodoState(args: Args): string {
     const target = todoTarget(args);
     const todo = findTodo(target.todos, args.todoId);
+    if (todo.bullet) throw new Error("这一条是要点，不是待办，不能勾");
     todo.done = args.done === true;
     saveTodoTarget(target);
     return `${todo.done ? "勾选完成" : "取消完成"}待办“${todo.text}”`;

@@ -7,7 +7,7 @@
 import type { CSSProperties } from "react";
 import type { CalendarColorKey, CalendarScheduleItem } from "@/lib/calendar-types";
 import type { CalendarConfig } from "@/lib/calendar-storage";
-import { activeCalendarMemos, normalizeCalendarTodos, type CalendarExtras, type CalendarTodo } from "@/lib/calendar-extras";
+import { activeCalendarMemos, isCheckableCalendarTodo, normalizeCalendarTodos, type CalendarExtras, type CalendarTodo } from "@/lib/calendar-extras";
 import { DEFAULT_CHINA_HOLIDAY_COLOR, DEFAULT_ONTARIO_HOLIDAY_COLOR, holidaysForDate } from "@/lib/calendar-holidays";
 import { pickScheduleColorKey } from "@/lib/calendar-utils";
 
@@ -94,7 +94,8 @@ export function buildBannerGroups(
         seen.add(item.id);
         const details = extras.eventDetails[item.id];
         const color = item.colorKey || pickScheduleColorKey(item.startTime);
-        const itemTodos = normalizeCalendarTodos(details?.todos);
+        // 要点（•）不出横幅，只有能勾的待办才出
+        const itemTodos = normalizeCalendarTodos(details?.todos).filter(isCheckableCalendarTodo);
         // 全天日程有待办时，待办横幅已经带上了日程信息，不再重复出一条全天横幅
         if (details?.allDay === true && itemTodos.length === 0) {
             allDay.push({
@@ -126,7 +127,7 @@ export function buildBannerGroups(
 
     let memoOrder = 0;
     for (const memo of activeCalendarMemos(extras.memos)) {
-        for (const todo of normalizeCalendarTodos(memo.checklist)) {
+        for (const todo of normalizeCalendarTodos(memo.checklist).filter(isCheckableCalendarTodo)) {
             if (todo.dueDate !== date) continue;
             todos.push({
                 kind: "todo", source: "memo", key: `memo:${memo.id}:${todo.id}`,

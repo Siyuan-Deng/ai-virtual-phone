@@ -24,10 +24,12 @@ export function extractCssImports(raw: string): { imports: string[]; css: string
 /**
  * Scope raw CSS so every rule selector is prefixed with a scope selector.
  * - `body` / `html` / `:root` selectors are replaced with the scope selector.
+ *   Pass `bodySelector` when `body` sits one level below the scope (e.g. a re-hosted
+ *   iframe document): `body` then maps there and `html` / `:root` stay on the scope.
  * - `@keyframes` / `@font-face` blocks are passed through unchanged.
  * - Media queries are handled recursively.
  */
-export function scopeSessionCSS(raw: string, scopeSelector: string): string {
+export function scopeSessionCSS(raw: string, scopeSelector: string, bodySelector: string = scopeSelector): string {
   if (!raw.trim()) return "";
 
   const result: string[] = [];
@@ -95,7 +97,7 @@ export function scopeSessionCSS(raw: string, scopeSelector: string): string {
           const prelude = raw.slice(i, braceStart + 1);
           const body = raw.slice(braceStart + 1, blockEnd);
           result.push(prelude);
-          result.push(scopeSessionCSS(body, scopeSelector));
+          result.push(scopeSessionCSS(body, scopeSelector, bodySelector));
           result.push("}");
           i = blockEnd + 1;
           continue;
@@ -118,7 +120,7 @@ export function scopeSessionCSS(raw: string, scopeSelector: string): string {
     // Scope each selector in comma-separated list
     const scopedSelector = selectorText
       .split(",")
-      .map((sel) => scopeSingleSelector(sel.trim(), scopeSelector))
+      .map((sel) => scopeSingleSelector(sel.trim(), scopeSelector, bodySelector))
       .join(", ");
 
     result.push(scopedSelector + " " + body);
@@ -128,19 +130,22 @@ export function scopeSessionCSS(raw: string, scopeSelector: string): string {
   return result.join("");
 }
 
-function scopeSingleSelector(sel: string, scope: string): string {
+function scopeSingleSelector(sel: string, scope: string, body: string = scope): string {
   if (!sel) return sel;
   const lower = sel.toLowerCase();
+  const targetOf = (word: string) => (word.toLowerCase() === "body" ? body : scope);
   // Replace body/html/:root with the scope selector
   if (lower === "body" || lower === "html" || lower === ":root") {
-    return scope;
+    return targetOf(lower);
   }
   // Selectors starting with body/html/:root — replace the element part
-  if (/^(body|html|:root)\s/i.test(sel)) {
-    return scope + " " + sel.replace(/^(body|html|:root)\s*/i, "");
+  const spaced = sel.match(/^(body|html|:root)\s+/i);
+  if (spaced) {
+    return targetOf(spaced[1]) + " " + sel.slice(spaced[0].length);
   }
-  if (/^(body|html|:root)\./i.test(sel)) {
-    return scope + sel.replace(/^(body|html|:root)/i, "");
+  const dotted = sel.match(/^(body|html|:root)\./i);
+  if (dotted) {
+    return targetOf(dotted[1]) + sel.slice(dotted[1].length);
   }
   // 选择器就是 scope 本身（如用户写 .chat-app { --var: ... }）：直接返回 scope，
   // 否则会被错误地变成 ".chat-app .chat-app"，导致变量没法挂到 scope 元素上
