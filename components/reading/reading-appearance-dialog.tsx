@@ -19,8 +19,9 @@ import {
 } from "@/lib/reading-appearance";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { READING_CSS_SCHEME_TARGET, loadReadingCustomCss } from "@/lib/reading-custom-css";
-import { NightSideTabs, useNightDraft } from "@/components/ui/night-side-tabs";
-import { nightSlotKeys } from "@/lib/night-mode";
+import { NightSideSwitch, NightSideTabs, useNightDraft } from "@/components/ui/night-side-tabs";
+import { lookSetName, nightSlotKeys } from "@/lib/night-mode";
+import { loadReadingLook, loadReadingLookBackground, type ReadingLook } from "@/lib/reading-look";
 import { ReadingFontTier } from "./reading-font-tier";
 import { ReadingFontDiagnostics } from "./reading-font-diagnostics";
 
@@ -35,6 +36,8 @@ export type ReadingAppearanceSaveOptions = {
     clearUserAnnotationFont: boolean;
     /** 阅读 app 的自定义 CSS（和外观存在一起保存，空串表示清空） */
     customCss: string;
+    /** 顶上切到某套搭配时改的那套文字颜色和背景；没改过不传 */
+    readingLook?: { setId: string; look: ReadingLook; backgroundFile: File | null };
 };
 
 /** 已经加载好的三档自定义字体 family（形如 "XxxFont_123"），用来让预览行显示真实字体 */
@@ -65,11 +68,49 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
     const [saving, setSaving] = useState(false);
     const [previewUrl, setPreviewUrl] = useState<string | null>(backgroundUrl);
     const [customCssDraft, setCustomCssDraft] = useState(() => loadReadingCustomCss());
-    // 「白天 | 夜间」：编辑的是哪一份
+    // 顶上「日间模式 | 某套 ▾」：文字颜色、全屏背景、自定义 CSS 编辑的是哪一份
     const nightCss = useNightDraft(nightSlotKeys.reading);
-    const cssEditing = nightCss.side === "night" ? nightCss.draft : customCssDraft;
-    const setCssEditing = nightCss.side === "night" ? nightCss.setDraft : setCustomCssDraft;
+    const onNight = nightCss.side === "night";
+    const setName = lookSetName(nightCss.target);
+    const cssEditing = onNight ? nightCss.draft : customCssDraft;
+    const setCssEditing = onNight ? nightCss.setDraft : setCustomCssDraft;
     const fileRef = useRef<HTMLInputElement>(null);
+
+    // 那套搭配的文字颜色和背景（右边换了一套就重新读）
+    const [lookState, setLookState] = useState(() => ({ setId: nightCss.target, look: loadReadingLook(nightCss.target) ?? {}, file: null as File | null, touched: false }));
+    let lookDraft = lookState;
+    if (lookState.setId !== nightCss.target) {
+        lookDraft = { setId: nightCss.target, look: loadReadingLook(nightCss.target) ?? {}, file: null, touched: false };
+        setLookState(lookDraft);
+    }
+    /** 改那套的几项；值是 undefined 的那项回到跟随日间。file：那套换的新背景图 */
+    const editLook = (patch: Partial<ReadingLook>, file?: File | null) => setLookState((prev) => ({
+        ...prev,
+        look: { ...prev.look, ...patch },
+        file: file === undefined ? prev.file : file,
+        touched: true,
+    }));
+    const [lookPreviewUrl, setLookPreviewUrl] = useState<string | null>(null);
+    useEffect(() => {
+        setLookPreviewUrl(null);
+        let url: string | null = null;
+        let cancelled = false;
+        if (lookDraft.file) {
+            url = URL.createObjectURL(lookDraft.file);
+            setLookPreviewUrl(url);
+        } else {
+            void loadReadingLookBackground(lookDraft.look).then((blob) => {
+                if (cancelled || !blob) return;
+                url = URL.createObjectURL(blob);
+                setLookPreviewUrl(url);
+            });
+        }
+        return () => {
+            cancelled = true;
+            if (url) URL.revokeObjectURL(url);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [lookDraft.file, lookDraft.look.background, lookDraft.look.backgroundAsset]);
 
     useEffect(() => {
         setDraft(appearance);
@@ -91,13 +132,24 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
         return () => URL.revokeObjectURL(url);
     }, [backgroundFile]);
 
-    const hasPreview = useMemo(() => Boolean(previewUrl) && !clearBackground, [previewUrl, clearBackground]);
+    const dayPreviewUrl = previewUrl && !clearBackground ? previewUrl : null;
+    // 切到别的搭配时：那套单独一张 / 不要背景 / 跟随日间那张，亮度没单独调就跟日间
+    const lookBackground = lookDraft.file ? "own" : lookDraft.look.background;
+    const shownPreviewUrl = !onNight ? dayPreviewUrl : lookBackground === "own" ? lookPreviewUrl : lookBackground === "none" ? null : dayPreviewUrl;
+    const shownBrightness = onNight ? (lookDraft.look.backgroundBrightness ?? draft.backgroundBrightness) : draft.backgroundBrightness;
+    const hasPreview = Boolean(shownPreviewUrl);
     // 预览块用和正文一样的叠色方式，滑动条拖到哪里，这里就是那个效果
     const backgroundPreviewLayers = useMemo(() => {
-        if (!previewUrl) return undefined;
-        const overlay = readingBackgroundOverlay(draft.backgroundBrightness);
-        return overlay ? `${overlay}, url("${previewUrl}")` : `url("${previewUrl}")`;
-    }, [draft.backgroundBrightness, previewUrl]);
+        if (!shownPreviewUrl) return undefined;
+        const overlay = readingBackgroundOverlay(shownBrightness);
+        return overlay ? `${overlay}, url("${shownPreviewUrl}")` : `url("${shownPreviewUrl}")`;
+    }, [shownBrightness, shownPreviewUrl]);
+    const lookBackgroundSet = lookBackground !== undefined || lookDraft.look.backgroundBrightness !== undefined;
+    const backgroundHint = lookBackground === "own"
+        ? `这是${setName}单独一张。`
+        : lookBackground === "none"
+            ? `${setName}不用背景图。`
+            : `${setName}现在跟随日间${lookDraft.look.backgroundBrightness !== undefined ? "的图，亮度单独调过" : ""}。换一张就是${setName}单独一张。`;
 
     // 预览的回退链和 CSS 里那条完全一致：我的批注 → TA的批注 → 正文 → App 字体。
     const bodyCss = useMemo(
@@ -125,6 +177,7 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                 userAnnotationFontFile,
                 clearUserAnnotationFont,
                 customCss: customCssDraft,
+                readingLook: lookDraft.touched ? { setId: lookDraft.setId, look: lookDraft.look, backgroundFile: lookDraft.file } : undefined,
             });
             nightCss.commit();
             onClose();
@@ -143,7 +196,11 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
             onConfirm={() => { if (!saving) void handleSave(); }}
             onCancel={() => { if (!saving) onClose(); }}
         >
-            <div className="reading-settings-grid">
+            <div className="reading-settings-grid" data-look-night={onNight ? "true" : undefined}>
+                <div className="night-side reading-look-side">
+                    <NightSideSwitch side={nightCss.side} onChange={nightCss.setSide} target={nightCss.target} onTarget={nightCss.setTarget} />
+                    <div className="night-side-hint">文字颜色、全屏背景、自定义 CSS 按搭配分开存；其他几项所有搭配共用。</div>
+                </div>
                 <ReadingFontTier
                     heading="正文样式"
                     value={draft.fontFamily}
@@ -185,9 +242,17 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                         onChange={(e) => setDraft((prev) => ({ ...prev, lineHeight: Number(e.target.value) }))}
                         displayValue={draft.lineHeight.toFixed(1)}
                     />
-                    <div className="reading-settings-color-row">
-                        <span className="reading-settings-label-inline">文字颜色</span>
-                        <ColorInput value={draft.textColor} onChange={(textColor) => setDraft((prev) => ({ ...prev, textColor }))} />
+                    <div className="reading-settings-color-row reading-look-per-set-row">
+                        <span className="reading-settings-label-inline">
+                            文字颜色
+                            {onNight ? (lookDraft.look.textColor
+                                ? <button type="button" className="night-side-copy" onClick={() => editLook({ textColor: undefined })}>改回跟随日间</button>
+                                : <span className="reading-look-follow">跟随日间</span>) : null}
+                        </span>
+                        <ColorInput
+                            value={onNight ? (lookDraft.look.textColor || draft.textColor) : draft.textColor}
+                            onChange={(textColor) => (onNight ? editLook({ textColor }) : setDraft((prev) => ({ ...prev, textColor })))}
+                        />
                     </div>
                 </ReadingFontTier>
 
@@ -362,6 +427,20 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                 </ReadingSettingsSection>
 
                 <ReadingSettingsSection icon={<Palette size={15} />} title="全屏背景">
+                    {onNight ? (
+                        <div className="night-side-hint reading-look-per-set">
+                            {backgroundHint}
+                            {lookBackgroundSet ? (
+                                <button
+                                    type="button"
+                                    className="night-side-copy"
+                                    onClick={() => editLook({ background: undefined, backgroundAsset: undefined, backgroundBrightness: undefined }, null)}
+                                >
+                                    改回跟随日间
+                                </button>
+                            ) : null}
+                        </div>
+                    ) : null}
                     <div
                         className="reading-bg-preview"
                         style={hasPreview ? { backgroundImage: backgroundPreviewLayers } : undefined}
@@ -374,9 +453,13 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                             min={READING_BG_BRIGHTNESS_MIN}
                             max={READING_BG_BRIGHTNESS_MAX}
                             step={0.05}
-                            value={draft.backgroundBrightness ?? 1}
-                            onChange={(e) => setDraft((prev) => ({ ...prev, backgroundBrightness: Number(e.target.value) }))}
-                            displayValue={`${Math.round((draft.backgroundBrightness ?? 1) * 100)}%`}
+                            value={shownBrightness ?? 1}
+                            onChange={(e) => {
+                                const backgroundBrightness = Number(e.target.value);
+                                if (onNight) editLook({ backgroundBrightness });
+                                else setDraft((prev) => ({ ...prev, backgroundBrightness }));
+                            }}
+                            displayValue={`${Math.round((shownBrightness ?? 1) * 100)}%`}
                         />
                     )}
                     <div className="reading-settings-actions">
@@ -393,11 +476,15 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                             type="button"
                             className="ui-btn ui-btn-ghost"
                             onClick={() => {
+                                if (onNight) {
+                                    editLook({ background: "none", backgroundAsset: undefined }, null);
+                                    return;
+                                }
                                 setBackgroundFile(null);
                                 setClearBackground(true);
                                 setPreviewUrl(null);
                             }}
-                            disabled={saving || (!hasPreview && !backgroundFile)}
+                            disabled={saving || !hasPreview}
                         >
                             <Trash2 size={14} />
                             <span>清除</span>
@@ -412,6 +499,10 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                             const file = e.target.files?.[0] || null;
                             e.target.value = "";
                             if (!file) return;
+                            if (onNight) {
+                                editLook({ background: "own" }, file);
+                                return;
+                            }
                             setBackgroundFile(file);
                             setClearBackground(false);
                         }}
@@ -422,7 +513,9 @@ export function ReadingAppearanceDialog({ appearance, backgroundUrl, loadedFonts
                     <p className="reading-settings-inline-note">
                         <span>只作用在阅读 app 内部。常用类名：.reading-line（正文）、.reading-annotation（批注卡片）、.reading-list-item（书架条目）。</span>
                     </p>
-                    <NightSideTabs state={nightCss} dayValue={customCssDraft} />
+                    <div className="reading-look-per-set">
+                        <NightSideTabs state={nightCss} dayValue={customCssDraft} hideSwitch />
+                    </div>
                     <textarea
                         className="reading-custom-css-input"
                         value={cssEditing}

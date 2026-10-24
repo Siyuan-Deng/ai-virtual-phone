@@ -452,8 +452,8 @@ export async function loadReadingAsset(key: string): Promise<Blob | null> {
 }
 
 /** 按前缀批量删：删书时要把这本书的插图一起清掉，
- *  否则图片会永远留在资源库里，用户也看不见、删不掉。 */
-export async function deleteReadingAssetsByPrefix(prefix: string): Promise<void> {
+ *  否则图片会永远留在资源库里，用户也看不见、删不掉。keep：这些留着 */
+export async function deleteReadingAssetsByPrefix(prefix: string, keep?: (key: string) => boolean): Promise<void> {
     await withBackgroundDb((db) => new Promise<void>((resolve, reject) => {
         const tx = db.transaction(BG_STORE_NAME, "readwrite");
         const store = tx.objectStore(BG_STORE_NAME);
@@ -461,7 +461,7 @@ export async function deleteReadingAssetsByPrefix(prefix: string): Promise<void>
         request.onsuccess = () => {
             const cursor = request.result;
             if (!cursor) return;
-            if (typeof cursor.key === "string" && cursor.key.startsWith(prefix)) store.delete(cursor.key);
+            if (typeof cursor.key === "string" && cursor.key.startsWith(prefix) && !keep?.(cursor.key)) store.delete(cursor.key);
             cursor.continue();
         };
         tx.oncomplete = () => resolve();

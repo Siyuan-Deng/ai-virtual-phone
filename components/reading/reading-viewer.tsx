@@ -19,6 +19,7 @@ import {
     saveBookmark,
     deleteBookmark,
     DEFAULT_READING_INTERACTION_CONFIG,
+    ensureReadingDbAlive,
 } from "@/lib/reading-storage";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { loadReadingMarks, saveReadingMark, deleteReadingMark, readingMarkGroup, readingMarkGroupId } from "@/lib/reading-marks";
@@ -378,6 +379,9 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     const [pdfPrefetchStartInput, setPdfPrefetchStartInput] = useState("");
     const [pdfPrefetchEndInput, setPdfPrefetchEndInput] = useState("");
     const [chaptersLoaded, setChaptersLoaded] = useState(false);
+    /** 打开书时读书库出错（重连后还是不行）：不再一直转圈，给一个「再试一次」 */
+    const [loadFailed, setLoadFailed] = useState(false);
+    const [loadAttempt, setLoadAttempt] = useState(0);
     const touchStartRef = useRef({ x: 0, y: 0 });
     const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
     const [readingMessageMenu, setReadingMessageMenu] = useState<{ messageId: string; x: number; y: number } | null>(null);
@@ -1002,7 +1006,11 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         shiftCooldownRef.current = false;
         scrollPositionedKeyRef.current = "";
         setChaptersLoaded(false);
+        setLoadFailed(false);
         (async () => {
+          try {
+            // 后台待久了书库连接可能坏了：先探一下，坏了就重连
+            await ensureReadingDbAlive();
             let chs = await loadChapters(book.id);
             if (!isPdf && chs.length === 0) {
                 const rawFile = await loadRawFileBlob(book.id);
@@ -1064,9 +1072,13 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             if (!progress && !isPdf) setTxtPage(0);
             setBookmarks(await loadBookmarks(book.id).catch(() => []));
             setChaptersLoaded(true);
+          } catch (error) {
+            console.error("[Reading] 打开书失败：", error);
+            setLoadFailed(true);
+          }
         })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [book.id]);
+    }, [book.id, loadAttempt]);
 
     useEffect(() => {
         if (chapters.length === 0) return;
@@ -2994,7 +3006,15 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                     </>
                 )}
 
-                {showTxtLoading && (
+                {loadFailed ? (
+                    <div className="reading-loading-view reading-loading-view--overlay" data-no-nav="true">
+                        <div className="reading-loading-copy">
+                            <span className="reading-loading-title">这本书没打开</span>
+                            <span className="reading-loading-subtitle">读书库的时候出错了，可能是 App 在后台待太久</span>
+                        </div>
+                        <button type="button" className="ui-btn ui-btn-primary" onClick={() => setLoadAttempt((n) => n + 1)}>再试一次</button>
+                    </div>
+                ) : showTxtLoading && (
                     <ReadingLoadingView title="正在打开书页" subtitle="正在读取并排版当前章节" overlay />
                 )}
 

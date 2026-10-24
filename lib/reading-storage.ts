@@ -50,6 +50,47 @@ class ReadingDB extends Dexie {
 
 const db = new ReadingDB();
 
+// ── 连接坏了就重连 ──
+// iOS 把 App 放后台久了，IndexedDB 的连接可能悄悄坏掉：之后的读写要么报错，要么一直不回来，
+// 只有杀掉 App 重进才好（打开书卡在「正在打开书页」就是这样）。打开书之前先用一次很小的读探一下，
+// 挂了就关掉重连；读章节、进度、书签报错时也重连再读一次。
+
+const DB_PROBE_TIMEOUT_MS = 4000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("IndexedDB 没有回应")), ms);
+        promise.then(
+            (value) => { clearTimeout(timer); resolve(value); },
+            (error) => { clearTimeout(timer); reject(error); },
+        );
+    });
+}
+
+async function reconnect(reason: unknown): Promise<void> {
+    console.warn("[Reading] IndexedDB 连接坏了，重连：", reason);
+    db.close();
+    await db.open();
+}
+
+/** 打开书之前调：连接还活着就什么都不做，挂了就重连 */
+export async function ensureReadingDbAlive(): Promise<void> {
+    try {
+        await withTimeout(db.progress.limit(1).toArray(), DB_PROBE_TIMEOUT_MS);
+    } catch (error) {
+        await reconnect(error);
+    }
+}
+
+async function readRetryingOnce<T>(read: () => Promise<T>): Promise<T> {
+    try {
+        return await read();
+    } catch (error) {
+        await reconnect(error);
+        return await read();
+    }
+}
+
 // ── In-memory cache ──
 
 let _booksCache: Book[] | null = null;
@@ -179,7 +220,7 @@ export async function saveChapters(bookId: string, chapters: BookChapter[]): Pro
 
 export async function loadChapters(bookId: string): Promise<BookChapter[]> {
     if (_chaptersCache.has(bookId)) return _chaptersCache.get(bookId)!;
-    const chapters = await db.chapters.where("bookId").equals(bookId).sortBy("index");
+    const chapters = await readRetryingOnce(() => db.chapters.where("bookId").equals(bookId).sortBy("index"));
     _chaptersCache.set(bookId, chapters);
     return chapters;
 }
@@ -188,7 +229,7 @@ export async function loadChapters(bookId: string): Promise<BookChapter[]> {
 
 export async function loadProgress(bookId: string): Promise<ReadingProgress | null> {
     if (_progressCache.has(bookId)) return _progressCache.get(bookId)!;
-    const p = await db.progress.get(bookId);
+    const p = await readRetryingOnce(() => db.progress.get(bookId));
     if (p) _progressCache.set(bookId, p);
     return p || null;
 }
@@ -391,7 +432,7 @@ export async function loadRawFileBlob(bookId: string): Promise<Blob | null> {
 // ── 书签 ──────────────────────────────────────────────
 
 export async function loadBookmarks(bookId: string): Promise<ReadingBookmark[]> {
-    const list = await db.bookmarks.where("bookId").equals(bookId).toArray();
+    const list = await readRetryingOnce(() => db.bookmarks.where("bookId").equals(bookId).toArray());
     // 按书里的先后排，不是按加的时间：列表要跟着书走才找得到
     return list.sort((a, b) => a.chapterIndex - b.chapterIndex || a.fraction - b.fraction);
 }

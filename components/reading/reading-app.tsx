@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { hydrateKvDb } from "@/lib/kv-db";
 import { loadReadingCustomCss, saveReadingCustomCss } from "@/lib/reading-custom-css";
-import { nightSlotKeys, useNightText } from "@/lib/night-mode";
+import { DAY_SET_ID, nightSlotKeys, useActiveLookSet, useNightRevision, useNightText } from "@/lib/night-mode";
+import { loadReadingLook, loadReadingLookBackground, saveReadingLook } from "@/lib/reading-look";
 import { hydrateReadingStorage } from "@/lib/reading-storage";
 import { ReadingShelf } from "./reading-shelf";
 import { ReadingViewer } from "./reading-viewer";
@@ -83,6 +84,27 @@ export default function ReadingApp({ onClose }: Props) {
     const [customCss, setCustomCss] = useState("");
     const resolvedCustomCss = useNightText(nightSlotKeys.reading, customCss);
     const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
+    // 用着日间以外的搭配：文字颜色、背景、亮度换成那套配的，没配的项跟随日间
+    const activeLookSet = useActiveLookSet();
+    useNightRevision();
+    const look = activeLookSet !== DAY_SET_ID ? loadReadingLook(activeLookSet) : null;
+    const lookAsset = look?.background === "own" ? look.backgroundAsset : undefined;
+    const [lookBackgroundUrl, setLookBackgroundUrl] = useState<string | null>(null);
+    useEffect(() => {
+        setLookBackgroundUrl(null);
+        if (!lookAsset) return;
+        let url: string | null = null;
+        let cancelled = false;
+        void loadReadingLookBackground({ background: "own", backgroundAsset: lookAsset }).then((blob) => {
+            if (cancelled || !blob) return;
+            url = URL.createObjectURL(blob);
+            setLookBackgroundUrl(url);
+        });
+        return () => {
+            cancelled = true;
+            if (url) URL.revokeObjectURL(url);
+        };
+    }, [lookAsset]);
     const [customFontFamily, setCustomFontFamily] = useState<string | undefined>(undefined);
     const [annotationFontFamily, setAnnotationFontFamily] = useState<string | undefined>(undefined);
     const [userAnnotationFontFamily, setUserAnnotationFontFamily] = useState<string | undefined>(undefined);
@@ -186,6 +208,10 @@ export default function ReadingApp({ onClose }: Props) {
         setAppearance(normalized);
         // 自定义 CSS 和外观一起保存。放在最前面：下面几个分支会 early return
         setCustomCss(saveReadingCustomCss(options.customCss));
+        // 某套搭配的文字颜色和背景（弹窗顶上切到那套时改的）
+        if (options.readingLook) {
+            await saveReadingLook(options.readingLook.setId, options.readingLook.look, options.readingLook.backgroundFile);
+        }
 
         // 放在下面几个 early return 之前：原有分支里清背景/清字体都会直接 return，
         // 挂在后面的话「同时改背景和批注字体」就会被吞掉。
@@ -230,9 +256,11 @@ export default function ReadingApp({ onClose }: Props) {
 
     // 亮度是盖在背景图上的一层纯色，和图一起塞进同一个变量，
     // 这样所有用到 --reading-bg-image 的地方（书架、阅读页、翻页动画）都自动跟着变。
-    const backgroundOverlay = readingBackgroundOverlay(appearance.backgroundBrightness);
-    const backgroundLayers = backgroundUrl
-        ? (backgroundOverlay ? `${backgroundOverlay}, url("${backgroundUrl}")` : `url("${backgroundUrl}")`)
+    const shownBrightness = look?.backgroundBrightness ?? appearance.backgroundBrightness;
+    const shownBackgroundUrl = look?.background === "own" ? lookBackgroundUrl : look?.background === "none" ? null : backgroundUrl;
+    const backgroundOverlay = readingBackgroundOverlay(shownBrightness);
+    const backgroundLayers = shownBackgroundUrl
+        ? (backgroundOverlay ? `${backgroundOverlay}, url("${shownBackgroundUrl}")` : `url("${shownBackgroundUrl}")`)
         : "none";
     const resolvedAnnotationFont = resolveReadingAnnotationFontFamily(appearance.annotationFontFamily, annotationFontFamily);
     const resolvedUserAnnotationFont = resolveReadingAnnotationFontFamily(appearance.userAnnotationFontFamily, userAnnotationFontFamily);
@@ -316,7 +344,7 @@ export default function ReadingApp({ onClose }: Props) {
             ? { ["--reading-user-annotation-font-family" as "--reading-user-annotation-font-family"]: resolvedUserAnnotationFont }
             : {}),
         ["--reading-font-size" as "--reading-font-size"]: `${appearance.fontSize}px`,
-        ["--reading-text-color" as "--reading-text-color"]: appearance.textColor,
+        ["--reading-text-color" as "--reading-text-color"]: look?.textColor || appearance.textColor,
         ["--reading-line-height" as "--reading-line-height"]: String(appearance.lineHeight),
         ["--reading-bg-image" as "--reading-bg-image"]: backgroundLayers,
     } as CSSProperties;
