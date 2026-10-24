@@ -481,6 +481,8 @@ export const nightSlotKeys = {
     calendarTheme: "calendar.theme",
     music: "music.css",
     reading: "reading.css",
+    /** 阅读的文字颜色、全屏背景、背景亮度：这套改过的那几项，JSON（lib/reading-look） */
+    readingLook: "reading.look",
     mascot: "mascot.css",
     chatSession: (sessionId: string) => `chatSession.css:${sessionId}`,
     chatStatus: (sessionId: string) => `chatSession.status:${sessionId}`,

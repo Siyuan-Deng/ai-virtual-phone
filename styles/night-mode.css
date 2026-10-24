@@ -582,6 +582,21 @@
   margin: 0 0 8px;
 }
 
+/* 阅读外观：顶上切到别的搭配时，所有搭配共用的那几项变淡 */
+.reading-settings-grid[data-look-night="true"] > .reading-settings-fold:not(:has(.reading-look-per-set, .reading-look-per-set-row)),
+.reading-settings-grid[data-look-night="true"] .reading-fold-body:has(> .reading-look-per-set-row) > :not(.reading-look-per-set-row) {
+  opacity: 0.45;
+}
+
+.reading-look-side {
+  margin-bottom: 0;
+}
+
+.reading-look-follow {
+  margin-left: 6px;
+  opacity: 0.55;
+}
+
 /* 日历主题：夜间那侧的「跟随日间」 */
 .calendar-theme-swatch-follow {
   background: repeating-linear-gradient(45deg, #f2f3f6 0 4px, #e3e5ea 4px 8px);
