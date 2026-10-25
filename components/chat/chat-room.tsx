@@ -670,6 +670,9 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     onSendSticker,
 }, ref) {
     const [inputText, setInputText] = useState("");
+    // 输入框是 uncontrolled 的：真实值以 DOM 为准，这里只是给表情包联想等功能
+    // 提供一份「下一帧同步」的副本，不参与受控渲染。
+    const inputTextRef = useRef("");
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     // 表情包搜索联想：ESC/失焦置 true 隐藏，输入变化重新开启
     const [suggestClosed, setSuggestClosed] = useState(false);
@@ -688,9 +691,13 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     };
 
     const appendText = useCallback((text: string, options?: { focus?: boolean }) => {
-        setInputText(prev => prev + text);
+        const ta = textareaRef.current;
+        // 直接写 DOM：uncontrolled 输入框的 state 只是副本，靠 state 追加会丢字
+        const next = (ta ? ta.value : inputTextRef.current) + text;
+        if (ta) ta.value = next;
+        inputTextRef.current = next;
+        setInputText(next);
         requestAnimationFrame(() => {
-            const ta = textareaRef.current;
             if (!ta) return;
             ta.style.height = "auto";
             ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
@@ -701,10 +708,13 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     useImperativeHandle(ref, () => ({
         appendText,
         clear: () => {
+            const ta = textareaRef.current;
+            if (ta) ta.value = "";
+            inputTextRef.current = "";
             setInputText("");
             resetTextareaHeight();
         },
-    }), [appendText]);
+    }), [appendText, resetTextareaHeight]);
 
     const handleSubmit = () => {
         if (inputLocked) return;
@@ -712,9 +722,13 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
             onStopGeneration();
             return;
         }
-        const trimmed = inputText.trim();
+        // 从 DOM 读：输入框是 uncontrolled 的，ref 与 state 都可能滞后一帧
+        const ta = textareaRef.current;
+        const trimmed = (ta ? ta.value : inputTextRef.current).trim();
         if (!trimmed) return;
         if (!onSendText(trimmed)) return;
+        if (ta) ta.value = "";
+        inputTextRef.current = "";
         setInputText("");
         resetTextareaHeight();
         onClosePanels();
@@ -725,7 +739,9 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
         () => (isGroup ? (stickerCharacterIds || []) : characterId ? [characterId] : []),
         [isGroup, stickerCharacterIds, characterId],
     );
-    const suggestEnabled = !inputLocked && !panelOpen && !suggestClosed && inputText.trim().length > 0;
+    // 至少两个字符才触发表情包联想：单个字符时几乎必然没有有意义的匹配，
+    // 却要遍历全部内置贴纸并解析自定义贴纸包，白白拖慢第一个字的响应。
+    const suggestEnabled = !inputLocked && !panelOpen && !suggestClosed && inputText.trim().length >= 2;
     const plusMenuItems = [
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>, label: "照片墙", onClick: () => onOpenRichModal("photo") },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="7" y1="8" x2="17" y2="8" /><line x1="7" y1="12" x2="14" y2="12" /><line x1="7" y1="16" x2="11" y2="16" /></svg>, label: "文字图片", onClick: () => onOpenRichModal("text_photo") },
@@ -781,6 +797,8 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                     characterIds={suggestCharacterIds}
                     onSend={(name, url) => {
                         onSendSticker(name, url);
+                        if (textareaRef.current) textareaRef.current.value = "";
+                        inputTextRef.current = "";
                         setInputText("");
                         resetTextareaHeight();
                     }}
@@ -790,12 +808,21 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
             <textarea
                 ref={textareaRef}
                 rows={1}
-                value={inputText}
+                defaultValue=""
                 onChange={e => {
-                    setInputText(e.target.value);
+                    const target = e.target;
+                    const next = target.value;
+                    // 先落 ref（同步、零成本），state 推到下一帧：
+                    // 输入框若是受控组件，每敲一个键都会让整个聊天室重渲染一次，
+                    // 消息越多 diff 越贵，手感就是「按下去先卡一下才出字」。
+                    // 高度计算同样推到下一帧，不在按键的同一帧里做同步布局。
+                    inputTextRef.current = next;
                     setSuggestClosed(false);
-                    e.target.style.height = "auto";
-                    e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
+                    requestAnimationFrame(() => {
+                        setInputText(next);
+                        target.style.height = "auto";
+                        target.style.height = Math.min(target.scrollHeight, 120) + "px";
+                    });
                 }}
                 onFocus={(e) => {
                     if (panelOpen) {
@@ -1113,6 +1140,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const offlineStreamAccumRef = useRef("");
     // 群聊/单聊流式预览解析的 rAF 合并帧（限频：一帧最多解析一次全文）
     const streamParseFrameRef = useRef(0);
+    // 线上流式预览的节流句柄（与 rAF 分开：改成 setTimeout 节流后不再需要 rAF 帧）
+    const streamParseTimerRef = useRef(0);
     // 线下模式流式预览解析的 rAF 合并帧（独立于线上，避免互相干扰）
     const offlineStreamFrameRef = useRef(0);
     const [activeOfflineTarget, setActiveOfflineTarget] = useState<OfflineActionTarget | null>(null);
@@ -2138,9 +2167,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     useEffect(() => {
         return () => {
             if (streamParseFrameRef.current) cancelAnimationFrame(streamParseFrameRef.current);
+            if (streamParseTimerRef.current) clearTimeout(streamParseTimerRef.current);
             if (offlineStreamFrameRef.current) cancelAnimationFrame(offlineStreamFrameRef.current);
             if (streamFollowRef.current) cancelAnimationFrame(streamFollowRef.current);
             streamParseFrameRef.current = 0;
+            streamParseTimerRef.current = 0;
             offlineStreamFrameRef.current = 0;
             streamFollowRef.current = 0;
         };
@@ -3308,10 +3339,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         onStreamDelta: (delta) => {
                             if (!isCurrentGeneration()) return;
                             streamAccumRef.current += delta;
-                            // 群聊全文解析较重：合并到 rAF 下一帧执行，避免一帧多段增量重复解析
-                            if (streamParseFrameRef.current) return;
-                            streamParseFrameRef.current = window.requestAnimationFrame(() => {
-                                streamParseFrameRef.current = 0;
+                            // 群聊要按角色前缀切分全文再净化，比单聊更重，光靠 rAF 合并
+                            // 仍然可能每帧跑一次。再叠一层节流，把频率压到肉眼够用的程度。
+                            if (streamParseTimerRef.current) return;
+                            streamParseTimerRef.current = window.setTimeout(() => {
+                                streamParseTimerRef.current = 0;
                                 if (!isCurrentGeneration()) return;
                                 const nameToId = new Map(groupCharacters.map(item => [item.name, item.id]));
                                 const rawParts = parseGroupChatResponse(streamAccumRef.current, nameToId);
@@ -3323,12 +3355,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                         texts: splitStreamPreviewSegments(cleanStreamText(item.responseText, { stripXmlTags: streamPreviewTagConfig.online, stripLiterals: streamPreviewTagConfig.stripTexts })),
                                     }));
                                 setStreamPreview({ parts });
-                            });
+                            }, 200);
                         },
                         onTextPart: () => {
-                            if (streamParseFrameRef.current) {
-                                cancelAnimationFrame(streamParseFrameRef.current);
-                                streamParseFrameRef.current = 0;
+                            if (streamParseTimerRef.current) {
+                                clearTimeout(streamParseTimerRef.current);
+                                streamParseTimerRef.current = 0;
                             }
                             streamAccumRef.current = "";
                             setStreamPreview(null);
@@ -3358,18 +3390,19 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         onStreamDelta: (delta) => {
                             if (!isCurrentGeneration()) return;
                             streamAccumRef.current += delta;
-                            // 预览更新合并到 rAF 下一帧：每帧最多一次全文净化+setState，避免高频增量卡顿
-                            if (streamParseFrameRef.current) return;
-                            streamParseFrameRef.current = window.requestAnimationFrame(() => {
-                                streamParseFrameRef.current = 0;
+                            // 预览更新：节流到 ~150ms 一次。cleanStreamText 每次都要净化全文，
+                            // 纯 rAF 合并仍接近每帧一次，长回复下会持续占住主线程。
+                            if (streamParseTimerRef.current) return;
+                            streamParseTimerRef.current = window.setTimeout(() => {
+                                streamParseTimerRef.current = 0;
                                 if (!isCurrentGeneration()) return;
                                 setStreamPreview({ texts: splitStreamPreviewSegments(cleanStreamText(streamAccumRef.current, { stripXmlTags: streamPreviewTagConfig.online, stripLiterals: streamPreviewTagConfig.stripTexts })) });
-                            });
+                            }, 150);
                         },
                         onTextPart: () => {
-                            if (streamParseFrameRef.current) {
-                                cancelAnimationFrame(streamParseFrameRef.current);
-                                streamParseFrameRef.current = 0;
+                            if (streamParseTimerRef.current) {
+                                clearTimeout(streamParseTimerRef.current);
+                                streamParseTimerRef.current = 0;
                             }
                             streamAccumRef.current = "";
                             setStreamPreview(null);
@@ -5300,6 +5333,34 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         return id;
     }, []);
 
+    // ── 渲染主循环的预计算表 ──
+    // 主循环原本对每条消息都调一次 getMessageDisplayContent（内部是 applyDisplayRegex
+    // 正则替换），并且为了找「上一条可见消息」还要向前逐条遍历、对每个候选再调一次，
+    // 累计 O(n²)。滚动时长按高亮、多选等状态变化会让主循环重跑，于是反复重算。
+    // 这里一次性算好两张表，主循环里只做 O(1) 查表。
+    const displayContentById = useMemo(() => {
+        const map = new Map<string, string>();
+        for (const msg of projectedMessages) {
+            map.set(msg.id, getMessageDisplayContent(msg));
+        }
+        return map;
+    }, [projectedMessages, getMessageDisplayContent]);
+
+    // 每条消息「上一条可见消息」的下标（-1 = 没有）。线性扫一遍得出。
+    const prevVisibleIdxList = useMemo(() => {
+        const result = new Int32Array(projectedMessages.length).fill(-1);
+        let lastVisible = -1;
+        for (let i = 0; i < projectedMessages.length; i += 1) {
+            result[i] = lastVisible;
+            if (voiceCallGroups.memberSet.has(i)) continue;
+            const msg = projectedMessages[i];
+            const content = displayContentById.get(msg.id) ?? "";
+            if (isHiddenChatFlowMessage(msg, content)) continue;
+            lastVisible = i;
+        }
+        return result;
+    }, [projectedMessages, voiceCallGroups.memberSet, displayContentById]);
+
     const visibleSelectableMessageIds = useMemo(() => {
         const ids: string[] = [];
         const seen = new Set<string>();
@@ -5307,13 +5368,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             if (voiceCallGroups.memberSet.has(idx)) return;
             const storedId = getSelectableStoredMessageId(msg);
             if (!storedId || seen.has(storedId)) return;
-            const displayContent = getMessageDisplayContent(msg);
+            const displayContent = displayContentById.get(msg.id) ?? "";
             if (isHiddenChatFlowMessage(msg, displayContent)) return;
             seen.add(storedId);
             ids.push(storedId);
         });
         return ids;
-    }, [getMessageDisplayContent, getSelectableStoredMessageId, projectedMessages, voiceCallGroups.memberSet]);
+    }, [displayContentById, getSelectableStoredMessageId, projectedMessages, voiceCallGroups.memberSet]);
 
     const multiDeleteTargetIds = useMemo(() => {
         if (selectedMessageIds.size === 0) return [];
@@ -5986,16 +6047,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
                     const renderMsg = msg;
                     const isSystemInstruction = isSystemInstructionMessage(renderMsg);
-                    const bubbleDisplayContent = getMessageDisplayContent(renderMsg);
-                    let prevVisibleMsg: RenderChatMessage | null = null;
-                    for (let prevIdx = idx - 1; prevIdx >= 0; prevIdx -= 1) {
-                        if (voiceCallGroups.memberSet.has(prevIdx)) continue;
-                        const candidate = projectedMessages[prevIdx];
-                        const candidateDisplayContent = getMessageDisplayContent(candidate);
-                        if (isHiddenChatFlowMessage(candidate, candidateDisplayContent)) continue;
-                        prevVisibleMsg = candidate;
-                        break;
-                    }
+                    const bubbleDisplayContent = displayContentById.get(msg.id) ?? "";
+                    // 上一条可见消息：查预计算表，不再向前逐条重算显示文本
+                    const prevVisibleIdx = prevVisibleIdxList[idx] ?? -1;
+                    const prevVisibleMsg: RenderChatMessage | null = prevVisibleIdx >= 0
+                        ? projectedMessages[prevVisibleIdx]
+                        : null;
                     const showTime = shouldShowTimestamp(msg.createdAt, prevVisibleMsg?.createdAt ?? null);
                     const isConsecutive = prevVisibleMsg && !showTime && uiRole(prevVisibleMsg) === uiRole(msg) && uiRole(msg) !== "system"
                         && (!session.isGroup || prevVisibleMsg.senderCharacterId === msg.senderCharacterId);

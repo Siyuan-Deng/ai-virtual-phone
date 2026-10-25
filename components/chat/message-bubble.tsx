@@ -2271,6 +2271,41 @@ function XiaohongshuShareBubble({ msg }: { msg: ChatMessage }) {
 // 计费还留下点不动的死气泡（用户实报），点击触发 + 全局去重从根上断掉。
 const _voiceSynthInFlight = new Map<string, Promise<string>>();
 
+// 模块级 dataUrl → blob URL 缓存。语音音频以 data: URL 落地，赋给 audio.src 时
+// 浏览器要在主线程同步解析再解码整段 base64（几十万字符就是一次明显卡顿），
+// 而且此前每按一次都重新解析一遍，所以「按下去卡、反复按反复卡」。
+// 同一个 dataUrl 只转换一次，之后复用 blob URL，赋值基本瞬时。
+const _voiceObjectUrlCache = new Map<string, string>();
+const VOICE_OBJECT_URL_CACHE_LIMIT = 40;
+
+function toPlayableSrc(src: string): string {
+    if (!src.startsWith("data:")) return src;
+    const cached = _voiceObjectUrlCache.get(src);
+    if (cached) return cached;
+    if (_voiceObjectUrlCache.size >= VOICE_OBJECT_URL_CACHE_LIMIT) {
+        const oldestKey = _voiceObjectUrlCache.keys().next().value;
+        if (oldestKey) {
+            const stale = _voiceObjectUrlCache.get(oldestKey);
+            _voiceObjectUrlCache.delete(oldestKey);
+            if (stale) { try { URL.revokeObjectURL(stale); } catch { /* ignore */ } }
+        }
+    }
+    try {
+        const comma = src.indexOf(",");
+        if (comma < 0) return src;
+        const mime = src.slice(5, comma).split(";")[0] || "audio/mpeg";
+        const binary = atob(src.slice(comma + 1));
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+        const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+        _voiceObjectUrlCache.set(src, url);
+        return url;
+    } catch {
+        // 解析失败退回原 src，至少还能播（只是慢一点）
+        return src;
+    }
+}
+
 function synthesizeVoiceForMessage(msgId: string, characterId: string, speechText: string): Promise<string> {
     const existing = _voiceSynthInFlight.get(msgId);
     if (existing) return existing;
@@ -2310,10 +2345,12 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
     const needsResynthesis = msg.role !== "user" && synthesizedFromText !== speechText;
     const duration = msg.mediaData?.voiceDuration || Math.max(2, Math.ceil(speechText.length / 4));
 
-    const playSrc = (src: string) => {
+    const playSrc = (rawSrc: string) => {
         // 必须用 <audio> 元素:iOS 静音拨键会掐掉 Web Audio 的输出(表现为全线
         // 无声),媒体元素不受影响。元素属于宿主页面,锁屏媒体卡片指向站点本身,
         // 点了只会回到 App;播完清 src 让卡片立即撤下。
+        // dataUrl 先转 blob URL，避免每次按下都同步解析整段 base64。
+        const src = toPlayableSrc(rawSrc);
         const audio = new Audio(src);
         audioRef.current = audio;
         setPlaying(true);
@@ -2350,10 +2387,12 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
         setSynthFailed(false);
         synthesizeVoiceForMessage(msg.id, characterId, speechText)
             .then((dataUrl) => {
-                if (onUpdate) onUpdate({ ...msg, mediaUrl: dataUrl, mediaData: { ...msg.mediaData, synthesizedFromText: speechText } });
                 if (!mountedRef.current) return;
                 setSynthesizing(false);
+                // 先出声再落状态：onUpdate 会让整条消息列表重渲染（数组复制 + 全部
+                // 气泡 diff），排在 playSrc 之前等于让用户多等一次列表更新才听到声音。
                 playSrc(dataUrl);
+                onUpdate?.({ ...msg, mediaUrl: dataUrl, mediaData: { ...msg.mediaData, synthesizedFromText: speechText } });
             })
             .catch(() => {
                 if (!mountedRef.current) return;
@@ -2396,7 +2435,7 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
                     />
                 ))}
             </div>
-            <span className="voice-msg-dur">{synthFailed ? "合成失败·点击重试" : `${duration}"`}</span>
+            <span className="voice-msg-dur">{synthesizing ? "合成中…" : synthFailed ? "合成失败·点击重试" : `${duration}"`}</span>
         </div>
     );
 }

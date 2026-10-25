@@ -158,6 +158,24 @@ import { LayoutGrid, LoaderCircle, RefreshCw } from "lucide-react";
 
 const EMOJI_FONTS = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla"';
 
+type IdleDeadlineLike = { didTimeout: boolean; timeRemaining: () => number };
+type WindowWithIdleCallback = Window & {
+  requestIdleCallback?: (cb: (deadline: IdleDeadlineLike) => void, options?: { timeout?: number }) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
+
+/** 推到首帧空闲期执行；不支持 requestIdleCallback 的环境用 setTimeout 兜底。返回取消函数。 */
+function scheduleIdleTask(callback: () => void): () => void {
+  if (typeof window === "undefined") return () => { };
+  const idleWindow = window as WindowWithIdleCallback;
+  if (typeof idleWindow.requestIdleCallback === "function") {
+    const handle = idleWindow.requestIdleCallback(() => callback(), { timeout: 1200 });
+    return () => idleWindow.cancelIdleCallback?.(handle);
+  }
+  const handle = window.setTimeout(callback, 200);
+  return () => window.clearTimeout(handle);
+}
+
 const ICON_LAYOUT_STORAGE_KEY = "ai_phone_icon_layout_v2";
 const ICON_LAYOUT_STORAGE_KEY_V1 = "ai_phone_icon_layout_v1";
 // Sentinel "page" used by the drag engine to mean "the dock". getDesktopPageNumber
@@ -1213,6 +1231,18 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   }, []);
 
   const [themeAssets, setThemeAssets] = useState<Record<string, string>>(() => initialThemeAssets ?? {});
+  // 主题资产去重账本：记录「已经取回或已占位」的 id，避免重复读库。
+  // 首屏那批由 MainApp 预载并作为 initialThemeAssets 传进来，直接记为已取回。
+  const loadedAssetIdsRef = useRef<Set<string>>(
+    new Set(Object.keys(initialThemeAssets ?? {}))
+  );
+  // 实际已经落到 themeAssets 里的 id，cleanup 回滚占位时用它区分「真拿到了」和「只占了坑」
+  const themeAssetsHaveIdRef = useRef<Set<string>>(new Set(Object.keys(initialThemeAssets ?? {})));
+  // 开机首轮补读只推一次空闲期，之后换肤立即生效
+  const firstAssetLoadDoneRef = useRef(false);
+  useEffect(() => {
+    themeAssetsHaveIdRef.current = new Set(Object.keys(themeAssets));
+  }, [themeAssets]);
   const [slotIconWidth, setSlotIconWidth] = useState<number | null>(null);
   const [slotIconHeight, setSlotIconHeight] = useState<number | null>(null);
   const [slotRowStep, setSlotRowStep] = useState<number | null>(null);
@@ -2094,24 +2124,66 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     };
   }, [desktopReady]);
 
+  // 主题资产补读。
+  // 原实现每次 draftTheme 变化都把全部 id 重读一遍，已取回的也重读——叠加
+  // useThemeAssetMap 里逐 id 开关数据库的成本，就是「进桌面第一下卡死」。
+  // 这里加去重账本：只读还没取回的 id。
+  //
+  // StrictMode 的「挂载-卸载-再挂载」要照顾：账本记在成功回调里（没成功就不算
+  // 已取回），并在这里返回的 cleanup 中回滚本轮标记——否则首轮被卸载打断后，
+  // 这批 id 永远不会再被请求，资产就永远缺着。
   useEffect(() => {
-    const ids = collectThemeAssetIds(draftTheme);
-    if (ids.length === 0) {
-      return;
-    }
+    const allIds = collectThemeAssetIds(draftTheme);
+    if (allIds.length === 0) return;
+
+    const missingIds = allIds.filter((id) => !loadedAssetIdsRef.current.has(id));
+    if (missingIds.length === 0) return;
 
     let disposed = false;
-    void getThemeAssetMap(ids).then((map) => {
-      if (disposed) {
-        return;
-      }
-      setThemeAssets((previous) => ({ ...previous, ...map }));
-    });
+    const claimed: string[] = [];
+
+    const load = () => {
+      if (disposed) return;
+      // 先占位，避免同一批 id 在并发路径上被重复请求
+      missingIds.forEach((id) => {
+        if (!loadedAssetIdsRef.current.has(id)) {
+          loadedAssetIdsRef.current.add(id);
+          claimed.push(id);
+        }
+      });
+      if (claimed.length === 0) return;
+      void getThemeAssetMap(claimed).then((map) => {
+        if (disposed) return;
+        // 拿不到的 id 从账本里摘掉，下次换肤时再试
+        claimed.forEach((id) => {
+          if (!(id in map)) loadedAssetIdsRef.current.delete(id);
+        });
+        if (Object.keys(map).length === 0) return;
+        setThemeAssets((previous) => ({ ...previous, ...map }));
+      }).catch(() => {
+        claimed.forEach((id) => loadedAssetIdsRef.current.delete(id));
+      });
+    };
+
+    // 开机首轮推到首帧空闲期（带 timeout 兜底）；用户主动换肤立即生效。
+    let cleanupIdle: (() => void) | null = null;
+    if (!firstAssetLoadDoneRef.current && desktopReady) {
+      firstAssetLoadDoneRef.current = true;
+      cleanupIdle = scheduleIdleTask(load);
+    } else {
+      load();
+    }
 
     return () => {
       disposed = true;
+      cleanupIdle?.();
+      // 回滚本轮占位：没等回调就卸载（StrictMode 首轮）时，这批 id 必须放回去，
+      // 否则重新挂载后它们被当成"已取回"，资产永远缺着。
+      claimed.forEach((id) => {
+        if (!themeAssetsHaveIdRef.current.has(id)) loadedAssetIdsRef.current.delete(id);
+      });
     };
-  }, [draftTheme, themeAssetKey]);
+  }, [draftTheme, themeAssetKey, desktopReady]);
 
 
   useEffect(() => {
