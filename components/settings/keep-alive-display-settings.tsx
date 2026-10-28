@@ -2,11 +2,15 @@
 
 // 设置 → 后台保活那一格点进来：后台保活放静音时，锁屏和灵动岛上显示什么。
 // 上面一张锁屏预览，下面「自己填 / 跟着角色」。改了马上存，保活开着的话锁屏上马上换。
+// 封面可以放好几张：一行里叠成一摞，点「管理」从下面弹出来增删；好几个时多久换一次在「随机更换频率」里选。
 
 import { useEffect, useRef, useState } from "react";
-import { ImagePlus, Pause, SkipBack, SkipForward, X } from "lucide-react";
+import { ChevronRight, ImagePlus, Pause, Plus, SkipBack, SkipForward, X } from "lucide-react";
+import { BottomSheet } from "@/components/ui/modal";
 import {
     EMPTY_KEEP_ALIVE_DISPLAY,
+    KEEP_ALIVE_ROTATIONS,
+    MAX_KEEP_ALIVE_COVERS,
     formatClockInput,
     latestChatCharacter,
     loadKeepAliveDisplay,
@@ -14,7 +18,16 @@ import {
     resolveKeepAliveNowPlaying,
     saveKeepAliveDisplay,
     type KeepAliveDisplay,
+    type KeepAliveRotation,
 } from "@/lib/keep-alive-display";
+
+const ROTATION_LABELS: Record<KeepAliveRotation, string> = {
+    halfHour: "半小时",
+    hour: "每小时",
+    day: "每天",
+    custom: "自定义",
+    never: "不换",
+};
 
 const COVER_SIZE = 512;
 
@@ -68,15 +81,17 @@ function formatClock(seconds: number): string {
 }
 
 /** 能填好几个的一列（标题、副标题）：一行一个，右边 × 删掉，下面「＋ 再加一个」 */
-function TextList({ label, items, firstPlaceholder, onChange }: {
+function TextList({ label, items, firstPlaceholder, manyHint, onChange }: {
     label: string;
     items: string[];
     firstPlaceholder: string;
+    /** 填了好几个时标签后面那句 */
+    manyHint: string;
     onChange: (items: string[]) => void;
 }) {
     return (
         <div className="flex flex-col gap-1.5">
-            <span className="menu-desc !mt-0">{label}{items.length > 1 ? "（填了好几个就每小时随机换一个）" : ""}</span>
+            <span className="menu-desc !mt-0">{label}{items.length > 1 ? manyHint : ""}</span>
             {items.map((value, index) => (
                 <div key={index} className="keepalive-title-row">
                     <input
@@ -116,6 +131,9 @@ export function KeepAliveDisplaySettings() {
         return () => window.clearInterval(timer);
     }, []);
 
+    const [coversOpen, setCoversOpen] = useState(false);
+    const [everyDraft, setEveryDraft] = useState(() => String((display ?? EMPTY_KEEP_ALIVE_DISPLAY).rotationEvery));
+
     const current = display ?? EMPTY_KEEP_ALIVE_DISPLAY;
     const update = (patch: Partial<KeepAliveDisplay>) => {
         const next = { ...current, ...patch };
@@ -123,6 +141,23 @@ export function KeepAliveDisplaySettings() {
         saveKeepAliveDisplay(next);
     };
     const preview = resolveKeepAliveNowPlaying(current);
+    const covers = current.covers;
+    const manyHint = current.rotation === "never" ? "（填了好几个也只用第一个）" : "（填了好几个就随机换）";
+
+    /** 一次挑好几张：裁好了接在后面（裁图要一会儿，接的时候按存着的最新的接） */
+    const addCovers = async (files: File[]) => {
+        const room = MAX_KEEP_ALIVE_COVERS - covers.length;
+        if (room <= 0) return;
+        const results = await Promise.allSettled(files.slice(0, room).map(squareCover));
+        const added = results.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
+        if (added.length) {
+            const base = loadKeepAliveDisplay() ?? EMPTY_KEEP_ALIVE_DISPLAY;
+            const next = { ...base, covers: [...base.covers, ...added].slice(0, MAX_KEEP_ALIVE_COVERS) };
+            setDisplay(next);
+            saveKeepAliveDisplay(next);
+        }
+        if (added.length < results.length) alert(added.length ? "有几张读不出来，没加上" : "这张图读不出来，换一张试试");
+    };
 
     return (
         <div className="flex flex-col gap-5 pb-6">
@@ -175,31 +210,51 @@ export function KeepAliveDisplaySettings() {
                 {current.mode === "custom" ? (
                     <>
                         <div className="keepalive-cover-row">
-                            <button type="button" className="keepalive-cover" onClick={() => fileRef.current?.click()} aria-label="换封面">
-                                {current.cover ? <img src={current.cover} alt="" /> : <ImagePlus size={20} aria-hidden="true" />}
-                            </button>
+                            {covers.length > 1 ? (
+                                <button type="button" className="keepalive-cover-pile" onClick={() => setCoversOpen(true)} aria-label="管理封面">
+                                    {covers.slice(0, 3).map((src, index) => (
+                                        <img key={index} src={src} alt="" data-depth={index} />
+                                    )).reverse()}
+                                    <span className="keepalive-cover-count">{covers.length}</span>
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    className="keepalive-cover"
+                                    onClick={() => (covers.length ? setCoversOpen(true) : fileRef.current?.click())}
+                                    aria-label={covers.length ? "管理封面" : "加封面"}
+                                >
+                                    {covers.length ? <img src={covers[0]} alt="" /> : <ImagePlus size={20} aria-hidden="true" />}
+                                </button>
+                            )}
                             <span className="flex flex-col gap-1 min-w-0">
                                 <span className="menu-label">封面</span>
-                                <span className="menu-desc !mt-0">方图，锁屏和灵动岛都用它</span>
+                                <span className="menu-desc !mt-0">
+                                    {covers.length > 1
+                                        ? `${covers.length} 张，${current.rotation === "never" ? "一直用第一张" : "随机换"}`
+                                        : "方图，锁屏和灵动岛都用它"}
+                                </span>
                             </span>
-                            {current.cover ? (
-                                <button type="button" className="keepalive-link" onClick={() => update({ cover: "" })}>去掉</button>
+                            {covers.length ? (
+                                <button type="button" className="keepalive-link keepalive-manage" onClick={() => setCoversOpen(true)}>
+                                    管理<ChevronRight size={14} aria-hidden="true" />
+                                </button>
                             ) : null}
                             <input
                                 ref={fileRef}
                                 type="file"
                                 accept="image/*"
+                                multiple
                                 hidden
                                 onChange={(event) => {
-                                    const file = event.target.files?.[0];
+                                    const files = Array.from(event.target.files ?? []);
                                     event.target.value = "";
-                                    if (!file) return;
-                                    void squareCover(file).then((cover) => update({ cover })).catch(() => alert("这张图读不出来，换一张试试"));
+                                    if (files.length) void addCovers(files);
                                 }}
                             />
                         </div>
                         <div className="ui-row-divider !mx-0" />
-                        <TextList label="标题" items={current.titles} firstPlaceholder="不填就用网页标题" onChange={(titles) => update({ titles })} />
+                        <TextList label="标题" items={current.titles} firstPlaceholder="不填就用网页标题" manyHint={manyHint} onChange={(titles) => update({ titles })} />
                     </>
                 ) : (
                     <div className="keepalive-cover-row">
@@ -211,7 +266,58 @@ export function KeepAliveDisplaySettings() {
                     </div>
                 )}
                 <div className="ui-row-divider !mx-0" />
-                <TextList label="副标题" items={current.subtitles} firstPlaceholder="比如：在线" onChange={(subtitles) => update({ subtitles })} />
+                <TextList label="副标题" items={current.subtitles} firstPlaceholder="比如：在线" manyHint={manyHint} onChange={(subtitles) => update({ subtitles })} />
+            </div>
+
+            <div className="g-card">
+                <span className="menu-label">随机更换频率</span>
+                <div className="night-card-seg" role="radiogroup" aria-label="随机更换频率">
+                    {KEEP_ALIVE_ROTATIONS.map((rotation) => (
+                        <button
+                            key={rotation}
+                            type="button"
+                            role="radio"
+                            aria-checked={current.rotation === rotation}
+                            data-on={current.rotation === rotation ? "true" : undefined}
+                            onClick={() => update({ rotation })}
+                        >
+                            {ROTATION_LABELS[rotation]}
+                        </button>
+                    ))}
+                </div>
+                {current.rotation === "custom" ? (
+                    <div className="keepalive-rotation-custom">
+                        <span>每</span>
+                        <input
+                            className="ui-input keepalive-rotation-every"
+                            value={everyDraft}
+                            inputMode="numeric"
+                            aria-label="每几分钟或几小时换一次"
+                            onChange={(event) => {
+                                const text = event.target.value.replace(/\D/g, "").slice(0, 3);
+                                setEveryDraft(text);
+                                const every = Number(text);
+                                if (every >= 1) update({ rotationEvery: every });
+                            }}
+                            onBlur={() => setEveryDraft(String(current.rotationEvery))}
+                        />
+                        <div className="night-card-seg keepalive-rotation-unit" role="radiogroup" aria-label="单位">
+                            {(["minute", "hour"] as const).map((unit) => (
+                                <button
+                                    key={unit}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={current.rotationUnit === unit}
+                                    data-on={current.rotationUnit === unit ? "true" : undefined}
+                                    onClick={() => update({ rotationUnit: unit })}
+                                >
+                                    {unit === "minute" ? "分钟" : "小时"}
+                                </button>
+                            ))}
+                        </div>
+                        <span>换一次</span>
+                    </div>
+                ) : null}
             </div>
 
             <div className="g-card">
@@ -240,6 +346,33 @@ export function KeepAliveDisplaySettings() {
                 <button type="button" className="keepalive-link self-center" onClick={() => { setDisplay(null); saveKeepAliveDisplay(null); }}>
                     恢复系统默认
                 </button>
+            ) : null}
+
+            {coversOpen ? (
+                <BottomSheet title="封面" onClose={() => setCoversOpen(false)} onDone={() => setCoversOpen(false)}>
+                    <div className="keepalive-cover-grid">
+                        {covers.map((src, index) => (
+                            <span key={index} className="keepalive-cover-tile">
+                                <img src={src} alt="" />
+                                <button
+                                    type="button"
+                                    aria-label={`删掉第 ${index + 1} 张封面`}
+                                    onClick={() => update({ covers: covers.filter((_, i) => i !== index) })}
+                                >
+                                    <X size={11} strokeWidth={2.6} aria-hidden="true" />
+                                </button>
+                            </span>
+                        ))}
+                        {covers.length < MAX_KEEP_ALIVE_COVERS ? (
+                            <button type="button" className="keepalive-cover-tile keepalive-cover-add" onClick={() => fileRef.current?.click()} aria-label="加封面">
+                                <Plus size={20} aria-hidden="true" />
+                            </button>
+                        ) : null}
+                    </div>
+                    <p className="keepalive-cover-caption">
+                        {covers.length < MAX_KEEP_ALIVE_COVERS ? "点 ＋ 一次可以挑好几张" : `最多 ${MAX_KEEP_ALIVE_COVERS} 张`}
+                    </p>
+                </BottomSheet>
             ) : null}
         </div>
     );

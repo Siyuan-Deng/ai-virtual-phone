@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { loadWeixinBots, loadKeepAlive, type WeixinBotConfig } from "./weixin-storage";
 import { runBotLoop } from "./weixin-bridge";
-import { KEEP_ALIVE_DISPLAY_CHANGED_EVENT, latestChatCharacter, loadKeepAliveDisplay, msUntilNextHour, resolveKeepAliveNowPlaying } from "./keep-alive-display";
+import { KEEP_ALIVE_DISPLAY_CHANGED_EVENT, latestChatCharacter, loadKeepAliveDisplay, msUntilNextRotation, resolveKeepAliveNowPlaying } from "./keep-alive-display";
 import { reapplyNowPlayingPosition, setKeepAliveNowPlaying } from "./now-playing";
 import { CHAT_MESSAGE_PUSHED_EVENT } from "./chat-storage";
 
@@ -97,29 +97,38 @@ function onChatMessageForLockScreen() {
     refreshLockScreen();
 }
 
-/** 标题填了好几个时每小时换一个：到整点重新算一次 */
-let _hourlyTimer: ReturnType<typeof setTimeout> | null = null;
+/** 标题、副标题、封面放了好几个时，按「随机更换频率」到点重新算一次；选了不换就不用定时 */
+let _rotationTimer: ReturnType<typeof setTimeout> | null = null;
 
-function scheduleHourlyLockScreen() {
-    if (_hourlyTimer) clearTimeout(_hourlyTimer);
-    _hourlyTimer = setTimeout(() => {
+function scheduleRotation() {
+    if (_rotationTimer) clearTimeout(_rotationTimer);
+    _rotationTimer = null;
+    const wait = msUntilNextRotation();
+    if (wait === null) return;
+    _rotationTimer = setTimeout(() => {
         refreshLockScreen();
-        scheduleHourlyLockScreen();
-    }, msUntilNextHour());
+        scheduleRotation();
+    }, wait);
+}
+
+/** 改了设置：马上换，频率变了定时也跟着重排 */
+function onDisplaySettingsChanged() {
+    refreshLockScreen();
+    scheduleRotation();
 }
 
 function listenLockScreen(on: boolean) {
-    window.removeEventListener(KEEP_ALIVE_DISPLAY_CHANGED_EVENT, refreshLockScreen);
+    window.removeEventListener(KEEP_ALIVE_DISPLAY_CHANGED_EVENT, onDisplaySettingsChanged);
     window.removeEventListener(CHAT_MESSAGE_PUSHED_EVENT, onChatMessageForLockScreen);
     document.removeEventListener("visibilitychange", onVisibilityForLockScreen);
-    if (_hourlyTimer) clearTimeout(_hourlyTimer);
-    _hourlyTimer = null;
+    if (_rotationTimer) clearTimeout(_rotationTimer);
+    _rotationTimer = null;
     _lockScreenCharacter = null;
     if (!on) return;
-    window.addEventListener(KEEP_ALIVE_DISPLAY_CHANGED_EVENT, refreshLockScreen);
+    window.addEventListener(KEEP_ALIVE_DISPLAY_CHANGED_EVENT, onDisplaySettingsChanged);
     window.addEventListener(CHAT_MESSAGE_PUSHED_EVENT, onChatMessageForLockScreen);
     document.addEventListener("visibilitychange", onVisibilityForLockScreen);
-    scheduleHourlyLockScreen();
+    scheduleRotation();
 }
 
 /** 用户触摸时尝试播放（浏览器要求音频必须在用户手势中启动） */

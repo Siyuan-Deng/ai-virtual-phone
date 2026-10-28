@@ -4,7 +4,7 @@
 // 按住约 0.4 秒卡片浮起来跟着手指走，经过别的卡片就和它换位置，松手才保存。
 // 只在同一组里换（置顶的、文件夹、普通卡片各是一组）。按下后手指先动了就当是在滚动列表，不进拖动。
 // 拖的是卡片本身（不复制一份，主题样式不会丢）；别的卡片滑过去让位；
-// 靠近列表上下边缘（上边缘算在顶部标题栏下面）时自动滚动。
+// 靠近列表上下边缘（上边缘算在顶部标题栏下面）时自动滚动；横着排、能左右滑的一排（比如 tab 条）靠近左右两头也会跟着滚。
 // 判断手指压在哪张卡上用的是卡片排好后的位置，不看让位动画画到哪了——不然刚让开的卡还没滑走，手指一抖又换回去。
 
 import {
@@ -40,6 +40,8 @@ type Session = {
     active: boolean;
     timer: number | null;
     scroller: HTMLElement | null;
+    /** 横着滚的那一排（没有就是 null） */
+    xScroller: HTMLElement | null;
     raf: number | null;
     cleanupListeners: () => void;
 };
@@ -52,6 +54,14 @@ function findScroller(el: HTMLElement): HTMLElement | null {
         if (/(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight) return node;
     }
     return (document.scrollingElement as HTMLElement | null) ?? null;
+}
+
+function findXScroller(el: HTMLElement): HTMLElement | null {
+    for (let node = el.parentElement; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (/(auto|scroll)/.test(style.overflowX) && node.scrollWidth > node.clientWidth) return node;
+    }
+    return null;
 }
 
 function blockTouchScroll(event: TouchEvent) {
@@ -75,7 +85,7 @@ function visibleBox(scroller: HTMLElement | null): { top: number; bottom: number
     return { top: box.top + (parseFloat(getComputedStyle(scroller).paddingTop) || 0), bottom: box.bottom };
 }
 
-type LayoutRect = { left: number; right: number; top: number; bottom: number; scrollTop: number };
+type LayoutRect = { left: number; right: number; top: number; bottom: number; scrollTop: number; scrollLeft: number };
 
 export function useLongPressReorder(onCommit: (group: string, orderedIds: string[]) => void) {
     const sessionRef = useRef<Session | null>(null);
@@ -107,12 +117,14 @@ export function useLongPressReorder(onCommit: (group: string, orderedIds: string
         const visible = visibleBox(s.scroller);
         if (s.y < visible.top || s.y > visible.bottom) return;
         const scrollTop = s.scroller?.scrollTop ?? 0;
+        const scrollLeft = s.xScroller?.scrollLeft ?? 0;
         const target = groupElements(s.group).find((el) => {
             if (el === s.el) return false;
             const stored = layoutRef.current.get(el);
             const shift = stored ? scrollTop - stored.scrollTop : 0;
+            const shiftX = stored ? scrollLeft - stored.scrollLeft : 0;
             const rect = stored
-                ? { left: stored.left, right: stored.right, top: stored.top - shift, bottom: stored.bottom - shift }
+                ? { left: stored.left - shiftX, right: stored.right - shiftX, top: stored.top - shift, bottom: stored.bottom - shift }
                 : el.getBoundingClientRect();
             return s.x >= rect.left && s.x <= rect.right && s.y >= rect.top && s.y <= rect.bottom;
         });
@@ -169,6 +181,21 @@ export function useLongPressReorder(onCommit: (group: string, orderedIds: string
                 }
             }
         }
+        const xScroller = s.xScroller;
+        if (xScroller) {
+            const rect = xScroller.getBoundingClientRect();
+            let speed = 0;
+            if (s.x < rect.left + EDGE_PX) speed = -MAX_SCROLL_SPEED * Math.min(1, (rect.left + EDGE_PX - s.x) / EDGE_PX);
+            else if (s.x > rect.right - EDGE_PX) speed = MAX_SCROLL_SPEED * Math.min(1, (s.x - (rect.right - EDGE_PX)) / EDGE_PX);
+            if (speed !== 0) {
+                const before = xScroller.scrollLeft;
+                xScroller.scrollLeft += speed;
+                if (xScroller.scrollLeft !== before) {
+                    placeCard();
+                    hitTest();
+                }
+            }
+        }
         s.raf = requestAnimationFrame(autoScroll);
     }, [hitTest, placeCard]);
 
@@ -181,6 +208,7 @@ export function useLongPressReorder(onCommit: (group: string, orderedIds: string
         s.grabX = s.x - rect.left;
         s.grabY = s.y - rect.top;
         s.scroller = findScroller(s.el);
+        s.xScroller = findXScroller(s.el);
         // 先直接改样式，不等 React：pointer-events 关掉，手指下面才能探到别的卡片
         s.el.style.position = "relative";
         s.el.style.zIndex = "30";
@@ -233,6 +261,7 @@ export function useLongPressReorder(onCommit: (group: string, orderedIds: string
             active: false,
             timer: window.setTimeout(activate, LONG_PRESS_MS),
             scroller: null,
+            xScroller: null,
             raf: null,
             cleanupListeners: () => {
                 window.removeEventListener("pointermove", onMove);
@@ -248,12 +277,13 @@ export function useLongPressReorder(onCommit: (group: string, orderedIds: string
         shiftFromRef.current = null;
         if (from) {
             const scrollTop = sessionRef.current?.scroller?.scrollTop ?? 0;
+            const scrollLeft = sessionRef.current?.xScroller?.scrollLeft ?? 0;
             for (const [el, first] of from) {
                 if (!el.isConnected) continue;
                 el.style.transition = "none";
                 el.style.removeProperty("transform");
                 const last = el.getBoundingClientRect();
-                layoutRef.current.set(el, { left: last.left, right: last.right, top: last.top, bottom: last.bottom, scrollTop });
+                layoutRef.current.set(el, { left: last.left, right: last.right, top: last.top, bottom: last.bottom, scrollTop, scrollLeft });
                 const dx = first.left - last.left;
                 const dy = first.top - last.top;
                 if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {

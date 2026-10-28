@@ -241,3 +241,140 @@
   color: var(--c-danger);
   font-size: calc(11.5px * var(--app-text-scale, 1));
 }
+
+/* 封面放了好几张：叠成一摞（最多露三张），右下角张数 */
+.keepalive-cover-pile {
+  position: relative;
+  flex: 0 0 auto;
+  width: 58px;
+  height: 52px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.keepalive-cover-pile img {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: cover;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+}
+
+.keepalive-cover-pile img[data-depth="1"] {
+  left: 6px;
+  top: 3px;
+  transform: rotate(3deg);
+}
+
+.keepalive-cover-pile img[data-depth="2"] {
+  left: 12px;
+  top: 0;
+  transform: rotate(8deg);
+}
+
+.keepalive-cover-count {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--c-text-title);
+  color: var(--c-panel, #ffffff);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.keepalive-link.keepalive-manage {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 1px;
+}
+
+/* 管理封面的弹窗：四列方格，右上角 × 删，最后一格加 */
+.keepalive-cover-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  padding-top: 6px;
+}
+
+.keepalive-cover-tile {
+  position: relative;
+  aspect-ratio: 1;
+}
+
+.keepalive-cover-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.keepalive-cover-tile button {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(44, 52, 64, 0.82);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.keepalive-cover-tile.keepalive-cover-add {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--c-input);
+  color: var(--c-icon);
+  cursor: pointer;
+}
+
+.keepalive-cover-caption {
+  margin: 12px 0 4px;
+  color: var(--c-text);
+  font-size: calc(11.5px * var(--app-text-scale, 1));
+  text-align: center;
+}
+
+/* 随机更换频率选「自定义」：每 [20] [分钟|小时] 换一次 */
+.keepalive-rotation-custom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-text-title);
+  font-size: calc(13px * var(--app-text-scale, 1));
+}
+
+.keepalive-rotation-custom .keepalive-rotation-every {
+  width: 64px;
+  flex: 0 0 auto;
+  padding: 8px 6px;
+  text-align: center;
+}
+
+.night-card-seg.keepalive-rotation-unit {
+  flex: 0 0 auto;
+}
+
+.night-card-seg.keepalive-rotation-unit button {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+}

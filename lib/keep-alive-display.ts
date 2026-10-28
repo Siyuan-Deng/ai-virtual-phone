@@ -2,7 +2,7 @@
 
 // 后台保活放静音时，锁屏和灵动岛上显示什么（设置 → 后台保活那一格点进去改）。
 // 没改过就什么都不填，照系统默认。
-//   自己填：封面图 + 标题 + 副标题（标题、副标题都可以填好几个，每小时各自随机换一个）
+//   自己填：封面图 + 标题 + 副标题（都可以放好几个，各自随机换；多久换一次自己选：半小时 / 一小时 / 一天 / 自定义 / 不换）
 //   跟着角色：最近聊天那个角色的头像和名字（聊天里改了备注就用备注），副标题自己写；还没聊过天就用自己填的
 // 进度条两边的时间也能填：左边已播放、右边还剩多少；锁屏上就停在这两个数，不往前走
 
@@ -17,26 +17,47 @@ registerKvMigration(KEY);
 /** 改了就广播，保活开着时马上换掉锁屏上的 */
 export const KEEP_ALIVE_DISPLAY_CHANGED_EVENT = "keep-alive-display-changed";
 
+/** 好几个的时候多久随机换一次；never：不换，一直用第一个 */
+export type KeepAliveRotation = "halfHour" | "hour" | "day" | "custom" | "never";
+export const KEEP_ALIVE_ROTATIONS: KeepAliveRotation[] = ["halfHour", "hour", "day", "custom", "never"];
+
 export type KeepAliveDisplay = {
     mode: "custom" | "character";
-    /** 标题可以填好几个，每小时随机换一个 */
+    /** 标题可以填好几个，随机换 */
     titles: string[];
     /** 副标题也一样 */
     subtitles: string[];
-    /** 封面图（压成方图的 data URL），空就是没有 */
-    cover: string;
+    /** 封面图（压成方图的 data URL），可以放好几张随机换；空数组就是没有 */
+    covers: string[];
+    rotation: KeepAliveRotation;
+    /** 自定义时：每几分钟 / 几小时换一次 */
+    rotationEvery: number;
+    rotationUnit: "minute" | "hour";
     /** 进度条左边（已播放）、右边（还剩）的时间，「分:秒」或「时:分:秒」；空就照系统默认 */
     elapsed: string;
     remaining: string;
 };
 
-export const EMPTY_KEEP_ALIVE_DISPLAY: KeepAliveDisplay = { mode: "custom", titles: [""], subtitles: [""], cover: "", elapsed: "", remaining: "" };
+export const MAX_KEEP_ALIVE_COVERS = 12;
+const MAX_ROTATION_EVERY = 999;
+
+export const EMPTY_KEEP_ALIVE_DISPLAY: KeepAliveDisplay = {
+    mode: "custom",
+    titles: [""],
+    subtitles: [""],
+    covers: [],
+    rotation: "hour",
+    rotationEvery: 20,
+    rotationUnit: "minute",
+    elapsed: "",
+    remaining: "",
+};
 
 /** 没改过是 null */
 export function loadKeepAliveDisplay(): KeepAliveDisplay | null {
     if (typeof window === "undefined") return null;
     try {
-        const raw = JSON.parse(kvGet(KEY) || "null") as (Partial<KeepAliveDisplay> & { title?: unknown; subtitle?: unknown }) | null;
+        const raw = JSON.parse(kvGet(KEY) || "null") as (Partial<KeepAliveDisplay> & { title?: unknown; subtitle?: unknown; cover?: unknown }) | null;
         if (!raw || typeof raw !== "object") return null;
         // 早先标题、副标题都只有一个
         const list = (many: unknown, one: unknown) => {
@@ -47,11 +68,20 @@ export function loadKeepAliveDisplay(): KeepAliveDisplay | null {
         };
         // 早先时间框按不出冒号，存下来的是 1314 这样的纯数字：当成 13:14
         const clock = (value: unknown) => typeof value !== "string" ? "" : /[:：]/.test(value) ? value : formatClockInput(value);
+        // 早先封面只有一张（cover）
+        const covers = Array.isArray(raw.covers)
+            ? raw.covers.filter((item): item is string => typeof item === "string" && item !== "")
+            : typeof raw.cover === "string" && raw.cover ? [raw.cover] : [];
+        const every = Math.round(Number(raw.rotationEvery));
         return {
             mode: raw.mode === "character" ? "character" : "custom",
             titles: list(raw.titles, raw.title),
             subtitles: list(raw.subtitles, raw.subtitle),
-            cover: typeof raw.cover === "string" ? raw.cover : "",
+            covers: covers.slice(0, MAX_KEEP_ALIVE_COVERS),
+            // 早先没得选，都是每小时换
+            rotation: KEEP_ALIVE_ROTATIONS.includes(raw.rotation as KeepAliveRotation) ? raw.rotation as KeepAliveRotation : "hour",
+            rotationEvery: every >= 1 ? Math.min(every, MAX_ROTATION_EVERY) : EMPTY_KEEP_ALIVE_DISPLAY.rotationEvery,
+            rotationUnit: raw.rotationUnit === "hour" ? "hour" : "minute",
             elapsed: clock(raw.elapsed),
             remaining: clock(raw.remaining),
         };
@@ -112,19 +142,36 @@ function shuffledOrder(round: number, n: number, salt: number): number[] {
     return order;
 }
 
-/** 这个小时用哪一个。像随机播放的歌单：每 n 个小时一轮，一轮里每个出现一次、顺序打乱；
- *  轮和轮接上的地方也不会连着两个小时同一个。同一个小时里不变 */
-export function pickForThisHour(items: string[], salt = 0, now = Date.now()): string {
-    const filled = items.map((item) => item.trim()).filter(Boolean);
-    if (filled.length <= 1) return filled[0] ?? "";
-    const n = filled.length;
-    const hour = Math.floor(now / 3_600_000);
+const MINUTE = 60_000;
+
+/** 按选的频率，现在是第几段、下一段什么时候开始；不换是 null。每天是按手机上的零点分 */
+function rotationSlot(display: KeepAliveDisplay, now: number): { index: number; nextAt: number } | null {
+    if (display.rotation === "never") return null;
+    if (display.rotation === "day") {
+        const offset = new Date(now).getTimezoneOffset() * MINUTE;
+        const next = new Date(now);
+        next.setHours(24, 0, 0, 0);
+        return { index: Math.floor((now - offset) / (1440 * MINUTE)), nextAt: next.getTime() };
+    }
+    const minutes = display.rotation === "halfHour" ? 30
+        : display.rotation === "hour" ? 60
+        : Math.max(1, display.rotationEvery) * (display.rotationUnit === "hour" ? 60 : 1);
+    const period = minutes * MINUTE;
+    const index = Math.floor(now / period);
+    return { index, nextAt: (index + 1) * period };
+}
+
+/** 这一段用哪一个。像随机播放的歌单：每 n 段一轮，一轮里每个出现一次、顺序打乱；
+ *  轮和轮接上的地方也不会连着两段同一个。同一段里不变；不换就一直用第一个 */
+function pickForSlot<T>(items: T[], slot: number | null, salt: number): T | undefined {
+    const n = items.length;
+    if (n <= 1 || slot === null) return items[0];
     // 只有两个就轮流来，不然下面那步换位会把上一轮最后一个也换掉，接缝处会重复
-    if (n === 2) return filled[(hour + salt) % 2];
-    const round = Math.floor(hour / n);
+    if (n === 2) return items[(slot + salt) % 2];
+    const round = Math.floor(slot / n);
     const order = shuffledOrder(round, n, salt);
     if (order[0] === shuffledOrder(round - 1, n, salt)[n - 1]) [order[0], order[1]] = [order[1], order[0]];
-    return filled[order[hour % n]];
+    return items[order[slot % n]];
 }
 
 /** 「分:秒」「时:分:秒」换成秒；填得不对（比如秒数过了 59）是 null */
@@ -143,16 +190,19 @@ export function formatClockInput(text: string): string {
     return `${digits.slice(0, -4)}:${digits.slice(-4, -2)}:${digits.slice(-2)}`;
 }
 
-/** 下一个整点（换标题的时候）还有多久 */
-export function msUntilNextHour(now = Date.now()): number {
-    return 3_600_000 - (now % 3_600_000) + 1_000;
+/** 离下一次换标题 / 副标题 / 封面还有多久；不换（或者没设过）是 null */
+export function msUntilNextRotation(display = loadKeepAliveDisplay(), now = Date.now()): number | null {
+    const slot = display ? rotationSlot(display, now) : null;
+    return slot ? slot.nextAt - now + 1_000 : null;
 }
 
 /** 按现在的设置，锁屏上该显示什么；没改过是 null（照系统默认） */
-export function resolveKeepAliveNowPlaying(display = loadKeepAliveDisplay()): NowPlaying | null {
+export function resolveKeepAliveNowPlaying(display = loadKeepAliveDisplay(), now = Date.now()): NowPlaying | null {
     if (!display) return null;
+    const slot = rotationSlot(display, now)?.index ?? null;
+    const pick = (items: string[], salt: number) => pickForSlot(items.map((item) => item.trim()).filter(Boolean), slot, salt) ?? "";
     const character = display.mode === "character" ? latestChatCharacter() : null;
-    const artist = pickForThisHour(display.subtitles, 1);
+    const artist = pick(display.subtitles, 1);
     const elapsed = parseClock(display.elapsed);
     const remaining = parseClock(display.remaining);
     const position = elapsed !== null || remaining !== null
@@ -160,9 +210,9 @@ export function resolveKeepAliveNowPlaying(display = loadKeepAliveDisplay()): No
         : undefined;
     if (character) return { title: character.name, artist, artwork: character.avatar || undefined, position };
     return {
-        title: pickForThisHour(display.titles) || (typeof document !== "undefined" ? document.title : ""),
+        title: pick(display.titles, 0) || (typeof document !== "undefined" ? document.title : ""),
         artist,
-        artwork: display.cover || undefined,
+        artwork: pick(display.covers, 2) || undefined,
         position,
     };
 }

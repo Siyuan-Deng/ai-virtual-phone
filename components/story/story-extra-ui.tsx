@@ -6,6 +6,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type R
 import { createPortal } from "react-dom";
 import { Check, ChevronLeft, ChevronRight, ClipboardPaste, Eraser, Folder, Plus, Save, Trash2, X } from "lucide-react";
 import { Avatar } from "@/components/ui/primitives";
+import { useLongPressReorder } from "@/components/settings/use-long-press-reorder";
 import type { Character } from "@/lib/character-types";
 import { loadApiConfigs, loadPresets, loadRegexes, loadWorldBooks } from "@/lib/settings-storage";
 import {
@@ -1059,7 +1060,7 @@ function StoryContinuePromptEditor() {
   );
 }
 
-/** 侧栏里管系统指令：输入栏显不显示「指令」按钮，快捷指令的增删，续写提示词 */
+/** 侧栏里管系统指令：输入栏显不显示「指令」按钮，快捷指令的增删（长按拖动换顺序），续写提示词 */
 
 export function StoryCommandSettingsSection({
   buttonVisible,
@@ -1080,6 +1081,8 @@ export function StoryCommandSettingsSection({
 }) {
   const [draft, setDraft] = useState("");
   const draftRef = useRef<HTMLTextAreaElement>(null);
+  // 快捷指令不会重复，指令本身就当 id 用
+  const reorder = useLongPressReorder((_group, orderedIds) => onCommandsChange(orderedIds));
   // 保存 / 发送贴着框底
   useAutoGrowTextarea(draftRef, draft, 160);
   const add = () => {
@@ -1123,8 +1126,8 @@ export function StoryCommandSettingsSection({
         <span className="story-command-manage-label">快捷指令</span>
         {commands.length > 0 ? (
           <div className="story-command-list">
-            {commands.map((command) => (
-              <div key={command} className="story-command-item">
+            {reorder.order("story-commands", commands.map((command) => ({ id: command }))).map(({ id: command }) => (
+              <div key={command} className="story-command-item" {...reorder.itemProps("story-commands", command, commands)}>
                 <button type="button" className="story-command-item-text" onClick={() => pick(command)}>{command}</button>
                 <button type="button" aria-label="删除这条快捷指令" onClick={() => onCommandsChange(commands.filter((item) => item !== command))}>
                   <X size={13} />
