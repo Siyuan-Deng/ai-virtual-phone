@@ -2035,6 +2035,46 @@
           justify-content: space-between;
           padding: 16px 20px 8px;
         }
+        /* 标题右边：粘贴指令、关闭 */
+        .story-template-head-actions {
+          display: inline-flex;
+          align-items: center;
+          gap: 14px;
+        }
+        .story-template-paste {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          border: none;
+          background: none;
+          padding: 0;
+          font: inherit;
+          font-size: calc(11.5px*var(--app-text-scale,1));
+          letter-spacing: 0.04em;
+          color: var(--c-story-sub, #94a3b8);
+        }
+        /* 识别了粘贴的番外指令：标题下面一条提示，右边撤销 */
+        .story-template-notice {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin: 0 20px 6px;
+          padding: 8px 12px;
+          background: var(--c-story-heading, #1e293b);
+          color: var(--c-story-bg-top, #ffffff);
+          font-size: calc(12px*var(--app-text-scale,1));
+          letter-spacing: 0.04em;
+        }
+        .story-template-notice button {
+          margin-left: auto;
+          border: none;
+          background: none;
+          padding: 0;
+          font: inherit;
+          font-weight: 600;
+          color: inherit;
+          opacity: 0.85;
+        }
         .story-template-title {
           font-size: calc(15px*var(--app-text-scale,1));
           font-weight: 600;
