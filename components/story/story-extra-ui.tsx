@@ -4,7 +4,7 @@
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronLeft, ChevronRight, Eraser, Folder, Plus, Save, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, ClipboardPaste, Eraser, Folder, Plus, Save, Trash2, X } from "lucide-react";
 import { Avatar } from "@/components/ui/primitives";
 import type { Character } from "@/lib/character-types";
 import { loadApiConfigs, loadPresets, loadRegexes, loadWorldBooks } from "@/lib/settings-storage";
@@ -43,6 +43,7 @@ import {
   deleteStoryExtraPreset,
   loadStoryExtraPresets,
   normalizeStoryExtraTemplate,
+  parseStoryExtraInstruction,
   saveStoryExtraPreset,
   type StoryExtraPreset,
 } from "@/lib/story-extra";
@@ -1212,17 +1213,65 @@ export function StoryExtraTemplateSheet({
     setDraft((prev) => ({ ...prev, extra: appendStoryCommand(prev.extra, command) }));
     setQuickMenuOpen(false);
   };
+  // 番外指令卡复制出来的整句：在哪个框里粘贴、或者点「粘贴指令」，都拆开填进各项；顶上一条提示，可以撤销
+  const [notice, setNotice] = useState<{ text: string; undo?: StoryExtraTemplate } | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), notice.undo ? 6000 : 3000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+  const fillFromInstruction = (text: string): boolean => {
+    const parsed = parseStoryExtraInstruction(text);
+    if (!parsed) return false;
+    const before = draftRef.current;
+    setDraft({ ...before, ...parsed });
+    setTextTab(parsed.content.trim() || !parsed.ifLine.trim() ? "content" : "ifLine");
+    setNotice({ text: "已识别番外指令，填好了", undo: before });
+    return true;
+  };
+  const pasteFromClipboard = async () => {
+    let text = "";
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      setNotice({ text: "读不到剪贴板，直接粘贴到任意一个框里也能识别" });
+      return;
+    }
+    if (!fillFromInstruction(text)) setNotice({ text: "剪贴板里不是番外指令" });
+  };
   const personRows = [
     { name: userName, value: draft.userPerson, pick: (value: StoryExtraPerson) => set({ userPerson: value }) },
     { name: charName, value: draft.charPerson, pick: (value: StoryExtraPerson) => set({ charPerson: value }) },
   ];
 
   return (
-    <div className="story-template-sheet" style={{ top }} role="dialog" aria-label="番外模板">
+    <div
+      className="story-template-sheet"
+      style={{ top }}
+      role="dialog"
+      aria-label="番外模板"
+      onPaste={(event) => {
+        // 粘贴的不是番外指令就照常粘贴
+        if (fillFromInstruction(event.clipboardData.getData("text/plain"))) event.preventDefault();
+      }}
+    >
       <div className="story-template-head">
         <span className="story-template-title">番外模板</span>
-        <button type="button" className="story-top-btn" aria-label="关闭" onClick={onClose}><X size={16} /></button>
+        <span className="story-template-head-actions">
+          <button type="button" className="story-template-paste" onClick={() => { void pasteFromClipboard(); }}>
+            <ClipboardPaste size={13} />粘贴指令
+          </button>
+          <button type="button" className="story-top-btn" aria-label="关闭" onClick={onClose}><X size={16} /></button>
+        </span>
       </div>
+      {notice ? (
+        <div className="story-template-notice" role="status">
+          <span>{notice.text}</span>
+          {notice.undo ? (
+            <button type="button" onClick={() => { setDraft(notice.undo!); setNotice(null); }}>撤销</button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="story-template-body">
         <StoryExtraPresetBar
           variant="template"
