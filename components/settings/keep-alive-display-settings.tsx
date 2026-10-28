@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Pause, SkipBack, SkipForward, X } from "lucide-react";
 import {
     EMPTY_KEEP_ALIVE_DISPLAY,
+    formatClockInput,
     latestChatCharacter,
     loadKeepAliveDisplay,
     parseClock,
@@ -224,20 +225,17 @@ export function KeepAliveDisplaySettings() {
                                 value={current[field]}
                                 inputMode="numeric"
                                 placeholder={placeholder}
-                                onChange={(event) => update({ [field]: event.target.value })}
+                                onChange={(event) => update({ [field]: formatClockInput(event.target.value) })}
                             />
                         </label>
                     ))}
                 </div>
                 {(current.elapsed.trim() && parseClock(current.elapsed) === null) || (current.remaining.trim() && parseClock(current.remaining) === null) ? (
-                    <span className="keepalive-time-error">写成「分:秒」，比如 13:14；超过一小时写「时:分:秒」</span>
+                    <span className="keepalive-time-error">最后两位是秒，要在 00 到 59 之间</span>
                 ) : null}
-                <span className="menu-desc !mt-0 leading-relaxed">会像真在放歌一样往前走：左边越来越大、右边越来越小，每个整点重新从填的数开始。不填就照系统默认。</span>
+                <span className="menu-desc !mt-0 leading-relaxed">只按数字就行，冒号会自己补上（1314 就是 13:14）。锁屏上就停在这两个数，进度条停在对应的位置，不会往前走。不填就照系统默认。</span>
             </div>
 
-            <p className="menu-desc mx-2 leading-relaxed">
-                后台保活开着、没在放歌时，锁屏和灵动岛显示这些；放歌时显示歌名、歌手和封面。锁屏卡片角落的来源（Safari 或者主屏幕上 App 的名字）是系统定的，改不了。
-            </p>
             {display ? (
                 <button type="button" className="keepalive-link self-center" onClick={() => { setDisplay(null); saveKeepAliveDisplay(null); }}>
                     恢复系统默认

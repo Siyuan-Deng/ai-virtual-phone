@@ -4,8 +4,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { loadWeixinBots, loadKeepAlive, type WeixinBotConfig } from "./weixin-storage";
 import { runBotLoop } from "./weixin-bridge";
-import { KEEP_ALIVE_DISPLAY_CHANGED_EVENT, msUntilNextHour, resolveKeepAliveNowPlaying } from "./keep-alive-display";
-import { setKeepAliveNowPlaying } from "./now-playing";
+import { KEEP_ALIVE_DISPLAY_CHANGED_EVENT, latestChatCharacter, loadKeepAliveDisplay, msUntilNextHour, resolveKeepAliveNowPlaying } from "./keep-alive-display";
+import { reapplyNowPlayingPosition, setKeepAliveNowPlaying } from "./now-playing";
+import { CHAT_MESSAGE_PUSHED_EVENT } from "./chat-storage";
 
 export type BotRunStatus = {
     status: "running" | "stopped" | "error";
@@ -70,6 +71,9 @@ function ensureAudioCreated() {
     _keepAliveAudio.src = URL.createObjectURL(blob);
     _keepAliveAudio.loop = true;
     _keepAliveAudio.volume = 0.01;
+    // 每循环一次（还有开始播的时候）Safari 会把锁屏进度拨回静音自己的时间，再把填的设回去
+    _keepAliveAudio.addEventListener("seeked", reapplyNowPlayingPosition);
+    _keepAliveAudio.addEventListener("playing", reapplyNowPlayingPosition);
 }
 
 /** 锁屏、灵动岛上显示「后台保活」里设的那套。改了设置、切到后台时重新算一次
@@ -80,6 +84,17 @@ function refreshLockScreen() {
 
 function onVisibilityForLockScreen() {
     if (document.visibilityState === "hidden") refreshLockScreen();
+}
+
+/** 跟着角色：一换角色聊天就马上换，不用等切到后台 */
+let _lockScreenCharacter: { name: string; avatar: string } | null = null;
+
+function onChatMessageForLockScreen() {
+    if (loadKeepAliveDisplay()?.mode !== "character") return;
+    const character = latestChatCharacter();
+    if (character?.name === _lockScreenCharacter?.name && character?.avatar === _lockScreenCharacter?.avatar) return;
+    _lockScreenCharacter = character;
+    refreshLockScreen();
 }
 
 /** 标题填了好几个时每小时换一个：到整点重新算一次 */
@@ -95,11 +110,14 @@ function scheduleHourlyLockScreen() {
 
 function listenLockScreen(on: boolean) {
     window.removeEventListener(KEEP_ALIVE_DISPLAY_CHANGED_EVENT, refreshLockScreen);
+    window.removeEventListener(CHAT_MESSAGE_PUSHED_EVENT, onChatMessageForLockScreen);
     document.removeEventListener("visibilitychange", onVisibilityForLockScreen);
     if (_hourlyTimer) clearTimeout(_hourlyTimer);
     _hourlyTimer = null;
+    _lockScreenCharacter = null;
     if (!on) return;
     window.addEventListener(KEEP_ALIVE_DISPLAY_CHANGED_EVENT, refreshLockScreen);
+    window.addEventListener(CHAT_MESSAGE_PUSHED_EVENT, onChatMessageForLockScreen);
     document.addEventListener("visibilitychange", onVisibilityForLockScreen);
     scheduleHourlyLockScreen();
 }

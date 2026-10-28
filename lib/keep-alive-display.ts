@@ -3,8 +3,8 @@
 // 后台保活放静音时，锁屏和灵动岛上显示什么（设置 → 后台保活那一格点进去改）。
 // 没改过就什么都不填，照系统默认。
 //   自己填：封面图 + 标题 + 副标题（标题、副标题都可以填好几个，每小时各自随机换一个）
-//   跟着角色：最近聊天那个角色的头像和名字，副标题自己写；还没聊过天就用自己填的
-// 进度条两边的时间也能填：左边已播放、右边还剩多少；会像真在放歌一样往前走，每个整点重新从填的数开始
+//   跟着角色：最近聊天那个角色的头像和名字（聊天里改了备注就用备注），副标题自己写；还没聊过天就用自己填的
+// 进度条两边的时间也能填：左边已播放、右边还剩多少；锁屏上就停在这两个数，不往前走
 
 import { kvGet, kvRemove, kvSet, registerKvMigration } from "./kv-db";
 import { loadChatContacts, loadChatSessions } from "./chat-storage";
@@ -45,13 +45,15 @@ export function loadKeepAliveDisplay(): KeepAliveDisplay | null {
                 : typeof one === "string" ? [one] : [];
             return items.length ? items : [""];
         };
+        // 早先时间框按不出冒号，存下来的是 1314 这样的纯数字：当成 13:14
+        const clock = (value: unknown) => typeof value !== "string" ? "" : /[:：]/.test(value) ? value : formatClockInput(value);
         return {
             mode: raw.mode === "character" ? "character" : "custom",
             titles: list(raw.titles, raw.title),
             subtitles: list(raw.subtitles, raw.subtitle),
             cover: typeof raw.cover === "string" ? raw.cover : "",
-            elapsed: typeof raw.elapsed === "string" ? raw.elapsed : "",
-            remaining: typeof raw.remaining === "string" ? raw.remaining : "",
+            elapsed: clock(raw.elapsed),
+            remaining: clock(raw.remaining),
         };
     } catch {
         return null;
@@ -65,19 +67,24 @@ export function saveKeepAliveDisplay(display: KeepAliveDisplay | null): void {
     window.dispatchEvent(new CustomEvent(KEEP_ALIVE_DISPLAY_CHANGED_EVENT));
 }
 
-/** 最近聊天的那个角色（单聊，按会话最后更新时间） */
+function timeOf(iso: string | undefined): number {
+    const time = Date.parse(iso || "");
+    return Number.isFinite(time) ? time : 0;
+}
+
+/** 最近聊天的那个角色（单聊，按会话最后一条消息的时间）；名字和聊天列表里显示的一样，有备注用备注 */
 export function latestChatCharacter(): { name: string; avatar: string } | null {
     const contacts = loadChatContacts();
     const characters = loadCharacters();
     const sessions = loadChatSessions()
         .filter((session) => !session.isGroup)
-        .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+        .sort((a, b) => timeOf(b.updatedAt) - timeOf(a.updatedAt));
     for (const session of sessions) {
         const contact = contacts.find((item) => item.id === session.contactId);
         const character = contact ? characters.find((item) => item.id === contact.characterId) : undefined;
         if (!character) continue;
         const avatar = character.avatar && character.avatar !== "none" ? character.avatar : "";
-        return { name: contact?.nickname || character.name || "", avatar };
+        return { name: session.alias?.trim() || contact?.nickname || character.name || "", avatar };
     }
     return null;
 }
@@ -120,11 +127,20 @@ export function pickForThisHour(items: string[], salt = 0, now = Date.now()): st
     return filled[order[hour % n]];
 }
 
-/** 「分:秒」「时:分:秒」换成秒；填得不对是 null */
+/** 「分:秒」「时:分:秒」换成秒；填得不对（比如秒数过了 59）是 null */
 export function parseClock(text: string): number | null {
     const parts = text.trim().replace(/^-/, "").split(/[:：]/);
     if (!parts[0] || parts.length > 3 || parts.some((part) => !/^\d+$/.test(part))) return null;
+    if (parts.slice(1).some((part) => Number(part) > 59)) return null;
     return parts.reduce((total, part) => total * 60 + Number(part), 0);
+}
+
+/** 时间框里只按数字，冒号自己补上：520 → 5:20，1314 → 13:14，11314 → 1:13:14 */
+export function formatClockInput(text: string): string {
+    const digits = text.replace(/\D/g, "").slice(0, 6);
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 4) return `${digits.slice(0, -2)}:${digits.slice(-2)}`;
+    return `${digits.slice(0, -4)}:${digits.slice(-4, -2)}:${digits.slice(-2)}`;
 }
 
 /** 下一个整点（换标题的时候）还有多久 */

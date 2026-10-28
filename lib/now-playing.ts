@@ -10,9 +10,12 @@ export type NowPlaying = {
     album?: string;
     /** 图片地址（data: / http(s):）；锁屏和灵动岛都用它 */
     artwork?: string;
-    /** 进度条：已播放几秒、一共几秒（左边显示已播放，右边显示还剩）；不给就照播放器自己的 */
+    /** 进度条：已播放几秒、一共几秒（左边显示已播放，右边显示还剩），停在这里不往前走；不给就照播放器自己的 */
     position?: { elapsed: number; total: number };
 };
+
+/** 进度条要停住：速度不能填 0（会报错），填一个小到看不出在走的数 */
+const FROZEN_RATE = 1e-6;
 
 let musicItem: NowPlaying | null = null;
 let keepAliveItem: NowPlaying | null = null;
@@ -37,17 +40,28 @@ function apply(): void {
     } catch {
         // 图片地址不认之类的：不影响播放
     }
-    if (typeof navigator.mediaSession.setPositionState !== "function") return;
+    applyPosition(item);
+}
+
+function applyPosition(item: NowPlaying | null): void {
+    if (typeof navigator === "undefined" || !("mediaSession" in navigator) || typeof navigator.mediaSession.setPositionState !== "function") return;
     try {
         const position = item?.position;
         if (position && position.total > 0) {
-            navigator.mediaSession.setPositionState({ duration: position.total, position: Math.min(position.elapsed, position.total), playbackRate: 1 });
+            navigator.mediaSession.setPositionState({ duration: position.total, position: Math.min(position.elapsed, position.total), playbackRate: FROZEN_RATE });
         } else {
             navigator.mediaSession.setPositionState();
         }
     } catch {
         // 不支持或者数不对：进度条照播放器自己的
     }
+}
+
+/** 后台保活的静音每秒循环一次，Safari 每循环一次就把锁屏进度拨回这段静音自己的时间（0:00）；
+ *  循环完调这个，把填的进度再设回去 */
+export function reapplyNowPlayingPosition(): void {
+    const item = musicItem ?? keepAliveItem;
+    if (item?.position) applyPosition(item);
 }
 
 /** 音乐 App：正在放的歌；停了传 null */
