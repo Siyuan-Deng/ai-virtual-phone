@@ -1,0 +1,380 @@
+/* ══════════════════════════════════════════
+   设置 → 后台保活：锁屏和灵动岛显示什么（上面一张锁屏预览）
+   ══════════════════════════════════════════ */
+
+.keepalive-lock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 14px 18px;
+  border-radius: 26px;
+  background: radial-gradient(120% 80% at 30% 0%, #5a6b8c 0%, #232a3a 55%, #11141c 100%);
+  color: #ffffff;
+}
+
+.keepalive-island {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 132px;
+  height: 32px;
+  padding: 0 10px 0 6px;
+  border-radius: 18px;
+  background: #000000;
+}
+
+.keepalive-wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 12px;
+}
+
+.keepalive-wave i {
+  width: 2px;
+  border-radius: 1px;
+  background: #f2a7c0;
+}
+
+.keepalive-wave i:nth-child(1) { height: 5px; }
+.keepalive-wave i:nth-child(2) { height: 10px; }
+.keepalive-wave i:nth-child(3) { height: 7px; }
+.keepalive-wave i:nth-child(4) { height: 12px; }
+.keepalive-wave i:nth-child(5) { height: 6px; }
+
+.keepalive-date {
+  margin-top: 4px;
+  font-size: calc(13px * var(--app-text-scale, 1));
+  opacity: 0.85;
+}
+
+.keepalive-clock {
+  margin-top: -6px;
+  font-size: 54px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -1px;
+}
+
+.keepalive-np {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.keepalive-np-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.keepalive-np-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.keepalive-np-title {
+  overflow: hidden;
+  font-size: calc(13.5px * var(--app-text-scale, 1));
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.keepalive-np-sub {
+  overflow: hidden;
+  font-size: calc(12px * var(--app-text-scale, 1));
+  opacity: 0.7;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.keepalive-np-bar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.keepalive-np-bar i {
+  display: block;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.keepalive-np-times {
+  display: flex;
+  justify-content: space-between;
+  margin-top: -6px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+
+.keepalive-np-ctl {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 34px;
+}
+
+.keepalive-np-ctl svg:not(:nth-child(2)) {
+  opacity: 0.45;
+}
+
+/* 封面：没设时一块渐变 */
+.keepalive-art {
+  display: block;
+  flex: 0 0 auto;
+  overflow: hidden;
+  background: linear-gradient(135deg, #f6c9d7, #b7c6f3);
+}
+
+.keepalive-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.keepalive-art-island {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+}
+
+.keepalive-art-card {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+}
+
+.keepalive-cover-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.keepalive-cover {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--c-input);
+  color: var(--c-icon);
+  cursor: pointer;
+}
+
+.keepalive-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.keepalive-link {
+  margin-left: auto;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--c-text);
+  font: inherit;
+  font-size: calc(12.5px * var(--app-text-scale, 1));
+  cursor: pointer;
+}
+
+.keepalive-link.self-center {
+  margin-left: 0;
+}
+
+/* 标题可以填好几个：一行一个，右边 × 删掉 */
+.keepalive-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.keepalive-title-row .ui-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.keepalive-title-remove {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-icon);
+  cursor: pointer;
+}
+
+.keepalive-link.keepalive-title-add {
+  align-self: flex-start;
+  margin-left: 0;
+  padding: 2px 0;
+}
+
+/* 进度条两边的时间：左右两格 */
+.keepalive-time-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.keepalive-time-error {
+  color: var(--c-danger);
+  font-size: calc(11.5px * var(--app-text-scale, 1));
+}
+
+/* 封面放了好几张：叠成一摞（最多露三张），右下角张数 */
+.keepalive-cover-pile {
+  position: relative;
+  flex: 0 0 auto;
+  width: 58px;
+  height: 52px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.keepalive-cover-pile img {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: cover;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+}
+
+.keepalive-cover-pile img[data-depth="1"] {
+  left: 6px;
+  top: 3px;
+  transform: rotate(3deg);
+}
+
+.keepalive-cover-pile img[data-depth="2"] {
+  left: 12px;
+  top: 0;
+  transform: rotate(8deg);
+}
+
+.keepalive-cover-count {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--c-text-title);
+  color: var(--c-panel, #ffffff);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.keepalive-link.keepalive-manage {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 1px;
+}
+
+/* 管理封面的弹窗：四列方格，右上角 × 删，最后一格加 */
+.keepalive-cover-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  padding-top: 6px;
+}
+
+.keepalive-cover-tile {
+  position: relative;
+  aspect-ratio: 1;
+}
+
+.keepalive-cover-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.keepalive-cover-tile button {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(44, 52, 64, 0.82);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.keepalive-cover-tile.keepalive-cover-add {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--c-input);
+  color: var(--c-icon);
+  cursor: pointer;
+}
+
+.keepalive-cover-caption {
+  margin: 12px 0 4px;
+  color: var(--c-text);
+  font-size: calc(11.5px * var(--app-text-scale, 1));
+  text-align: center;
+}
+
+/* 随机更换频率选「自定义」：每 [20] [分钟|小时] 换一次 */
+.keepalive-rotation-custom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-text-title);
+  font-size: calc(13px * var(--app-text-scale, 1));
+}
+
+.keepalive-rotation-custom .keepalive-rotation-every {
+  width: 64px;
+  flex: 0 0 auto;
+  padding: 8px 6px;
+  text-align: center;
+}
+
+.night-card-seg.keepalive-rotation-unit {
+  flex: 0 0 auto;
+}
+
+.night-card-seg.keepalive-rotation-unit button {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+}

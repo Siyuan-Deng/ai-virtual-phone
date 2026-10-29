@@ -494,24 +494,17 @@
   font-size: calc(13px * var(--app-text-scale, 1));
 }
 
-.night-set-filter {
-  display: flex;
-}
-
-.night-set-filter button {
-  padding: 4px 12px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--c-panel, #ffffff);
+/* 「角色」那行右边：筛选已配置角色（开着时带勾、变深）和批量设置并排 */
+.night-set-group-head button.night-set-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   color: var(--c-icon);
-  font: inherit;
-  font-size: calc(12px * var(--app-text-scale, 1));
-  cursor: pointer;
 }
 
-.night-set-filter button[data-on="true"] {
-  background: var(--c-text-title);
-  color: var(--c-panel, #ffffff);
+.night-set-group-head button.night-set-filter[data-on="true"] {
+  color: var(--c-icon-active);
+  font-weight: 600;
 }
 
 .night-set-empty {
@@ -851,25 +844,31 @@
   cursor: pointer;
 }
 
-/* 管理搭配：每套一行，左滑删除，右边三条杠拖动换顺序 */
+/* 管理搭配：每套一行，左滑删除，右边三条杠拖动换顺序；整页一个列表，铺满宽度不套卡片 */
+.look-manage {
+  display: flex;
+  flex-direction: column;
+  margin: -4px -16px 0;
+}
+
 .look-manage .ui-swipe-wrap {
   border-radius: 0;
 }
 
 .look-manage .ui-swipe-content {
-  background: var(--c-card);
+  background: var(--c-page-body-bg);
 }
 
 .look-manage-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 16px;
+  padding: 0 20px;
   transition: background-color 0.15s;
 }
 
 .look-manage-row[data-dragging="true"] {
-  background: color-mix(in srgb, var(--c-icon-active) 8%, var(--c-card));
+  background: color-mix(in srgb, var(--c-icon-active) 8%, var(--c-page-body-bg));
 }
 
 .look-manage .ui-swipe-wrap + .ui-swipe-wrap .look-manage-row,
@@ -921,6 +920,8 @@
 
 .look-manage-add {
   gap: 6px;
+  padding-left: 20px;
+  padding-right: 20px;
   color: var(--c-text);
   font-size: calc(12.6px * var(--app-text-scale, 1));
 }

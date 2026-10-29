@@ -63,7 +63,7 @@ import { getMusicControlBridge } from "@/lib/music-control-bridge";
 import { findPlayableMatch, getNeteaseLyrics, getNeteaseSongDetail } from "@/lib/music-service";
 import { approveMemoryWriteRequest, settleMemoryWriteRequest } from "@/lib/tool-executor";
 import type { MemoryWriteRequest, ToolResult } from "@/lib/tool-executor";
-import { formatChatUiTime } from "@/lib/chat-time";
+import { formatChatMetaTime, formatChatUiTime } from "@/lib/chat-time";
 import { parseActionTags } from "@/lib/action-parser";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
 import { creditWalletBalance, payWithWalletBalance } from "@/lib/wallet-storage";
@@ -608,6 +608,8 @@ function normalizeCustomPanelHeight(value: unknown): string | undefined {
 
 const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     characterName: string;
+    /** 顶栏上显示的聊天名（群聊是群名），挂到输入栏的 data-chat-name 上给美化主题用 */
+    chatTitle?: string;
     characterId: string;
     stickerCharacterIds?: string[];
     isGroup: boolean;
@@ -639,6 +641,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
 	onSendSticker: (name: string, url?: string) => void;
 }>(function ChatTextInputBar({
     characterName,
+    chatTitle,
     characterId,
     stickerCharacterIds,
     isGroup,
@@ -727,6 +730,8 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     );
     const suggestEnabled = !inputLocked && !panelOpen && !suggestClosed && inputText.trim().length > 0;
     const plusMenuItems = [
+        // 「表情」：默认藏着（输入栏本来就有表情按钮）；给美化主题用，比如把表情收进「更多」
+        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" /></svg>, label: "表情", themeOnly: true, onClick: onToggleEmojiPanel },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>, label: "照片墙", onClick: () => onOpenRichModal("photo") },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="7" y1="8" x2="17" y2="8" /><line x1="7" y1="12" x2="14" y2="12" /><line x1="7" y1="16" x2="11" y2="16" /></svg>, label: "文字图片", onClick: () => onOpenRichModal("text_photo") },
         { icon: <AlertCircle size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "系统指令", onClick: () => onOpenRichModal("system_instruction") },
@@ -748,7 +753,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     ];
 
     return (
-        <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input">
+        <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input" data-chat-name={chatTitle || characterName}>
             {theaterMode && (
                 <div className="chat-theater-mode-strip" role="status">
                     <span className="chat-theater-mode-icon" aria-hidden="true">
@@ -820,9 +825,10 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                 enterKeyHint={enterToSendEnabled ? "send" : "enter"}
                 className="chat-input-textarea"
                 disabled={inputLocked}
+                // 平时的占位是一个空格：看不见，但能让美化主题用 :placeholder-shown 判断输入框是不是空的
                 placeholder={inputLocked
                     ? (isSpectator ? "围观中，你不在这个群里" : `禁言中，剩余${Math.ceil(muteRemainingMs / 60000)}分钟`)
-                    : (theaterMode ? "写下番外指令..." : undefined)}
+                    : (theaterMode ? "写下番外指令..." : " ")}
             />
 
             <div className="chat-input-actions">
@@ -888,11 +894,21 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                     </button>
                 )}
             </div>
+            {/* 「更多」里两个指令的快捷按钮：默认 display:none，不改变任何人的默认样子；
+                给美化主题用（比如收进主题自己画的加号菜单），不用先点开「更多」 */}
+            <div className="chat-input-quick-actions">
+                <button type="button" disabled={inputLocked} aria-label="系统指令" title="系统指令" onClick={() => onOpenRichModal("system_instruction")}>
+                    <AlertCircle size={22} strokeWidth={1.5} aria-hidden="true" />
+                </button>
+                <button type="button" disabled={inputLocked} aria-label="番外指令模式" title="番外指令模式" onClick={onToggleTheaterMode} {...(theaterMode ? { "data-active": "" } : {})}>
+                    <Clapperboard size={22} strokeWidth={1.5} aria-hidden="true" />
+                </button>
+            </div>
 
             {showPlusMenu && (
                 <div className="chat-plus-menu">
                     {plusMenuItems.map((item, i) => (
-                        <div key={`${item.label}-${i}`} onClick={item.onClick} className="chat-plus-menu-item flex flex-col items-center gap-1.5 cursor-pointer" {...(item.active ? { "data-active": "" } : {})}>
+                        <div key={`${item.label}-${i}`} onClick={item.onClick} className="chat-plus-menu-item flex flex-col items-center gap-1.5 cursor-pointer" data-label={item.label} {...(item.active ? { "data-active": "" } : {})} {...(item.themeOnly ? { "data-theme-only": "" } : {})}>
                             <div className="chat-plus-icon-box">
                                 {item.icon}
                             </div>
@@ -928,6 +944,8 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
 }));
 
 const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
+    /** 顶栏上显示的聊天名，挂到输入栏的 data-chat-name 上给美化主题用 */
+    chatTitle?: string;
     isOfflineGenerating: boolean;
     isSpectator: boolean;
     showEmojiPanel: boolean;
@@ -938,6 +956,7 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
     onSendText: (text: string) => boolean;
     onStopGeneration: () => void;
 }>(function OfflineTextInputBar({
+    chatTitle,
     isOfflineGenerating,
     isSpectator,
     showEmojiPanel,
@@ -1006,7 +1025,7 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
     };
 
     return (
-        <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input">
+        <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input" data-chat-name={chatTitle || ""}>
             <textarea
                 ref={textareaRef}
                 rows={1}
@@ -1034,7 +1053,8 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
                 enterKeyHint={enterToSendEnabled ? "send" : "enter"}
                 className="chat-input-textarea"
                 disabled={isSpectator}
-                placeholder={isSpectator ? "围观中，点右侧按钮推进他们的线下互动" : undefined}
+                // 平时的占位是一个空格：看不见，但能让美化主题用 :placeholder-shown 判断输入框是不是空的
+                placeholder={isSpectator ? "围观中，点右侧按钮推进他们的线下互动" : " "}
             />
             <div className="chat-input-actions">
                 <button
@@ -5654,9 +5674,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             />
 
             {/* Message List */}
+            {/* data-has-bg-image 和外框上的一样，再挂一份在这里：单个聊天的自定义 CSS 选不到外框自己，
+                美化主题要靠它分辨「这个聊天设了背景图没有」 */}
             <div
                 ref={scrollRef}
                 className="page-body chat-room-main-pane flex flex-col gap-4 chat-scroll-anchored"
+                {...(bgImageResolved ? { "data-has-bg-image": "" } : {})}
                 onScroll={(e) => {
                     if (activeMessageId || activeOfflineTarget) closeContextMenu();
                 }}
@@ -6203,6 +6226,21 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                             className={`chat-msg-content-wrap flex flex-col min-w-0 max-w-[70%] ${isStandaloneHtmlPreview ? "chat-msg-content-wrap-html" : ""}`}
                                             {...(isStandaloneHtmlPreview ? { "data-html": "true" } : {})}
                                         >
+                                            {/* 发送者名字 + 时间：默认 display:none，不改变任何人的默认样子；
+                                                给美化主题用（如 Discord 风格每组消息上方的「名字 时间」）。
+                                                单聊也带上，因为单聊里页面上原本没有逐条的名字和时间 */}
+                                            <div className="chat-msg-meta" aria-hidden="true">
+                                                {(() => {
+                                                    const metaName = msg.role === "user"
+                                                        ? (userIdentity?.name || "你")
+                                                        : session.isGroup
+                                                            ? (msg.senderName || (msg.senderCharacterId ? groupCharMap.get(msg.senderCharacterId)?.name : "") || "群成员")
+                                                            : (session.alias || character?.name || "TA");
+                                                    // data-name 让美化主题能用 attr() 拿到名字（比如换成手填的 ID）
+                                                    return <span className="chat-msg-meta-name" data-name={metaName}>{metaName}</span>;
+                                                })()}
+                                                <span className="chat-msg-meta-time">{formatChatMetaTime(msg.createdAt)}</span>
+                                            </div>
                                             {session.isGroup && msg.role !== "user" && (
                                                 <span className="chat-group-sender-name">{msg.senderName || ""}{renderGroupRoleBadge(msg.senderCharacterId)}</span>
                                             )}
@@ -6234,6 +6272,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 msg={renderMsg}
                                                 displayContent={msg.displayProjected ? undefined : bubbleDisplayContent}
                                                 charName={character?.name}
+                                                charDisplayName={session.isGroup ? undefined : session.alias}
                                                 userName={userIdentity?.name || "你"}
                                                 groupSize={session.isGroup ? (session.participantIds?.length || 0) + (session.isSpectator ? 0 : 1) : undefined}
                                                 onShowDetail={setMediaDetailMsg}
@@ -6451,6 +6490,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 <OfflineTextInputBar
                     key={session.id}
                     ref={offlineTextInputRef}
+                    chatTitle={session.isGroup ? (session.groupName || "群聊") : (session.alias || character?.name || "")}
                     isOfflineGenerating={isOfflineGenerating}
                     isSpectator={!!session.isGroup && !!session.isSpectator}
                     showEmojiPanel={showEmojiPanel}
@@ -6465,6 +6505,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             <ChatTextInputBar
                 ref={chatTextInputRef}
                 characterName={character?.name || "对方"}
+                chatTitle={session.isGroup ? (session.groupName || "群聊") : (session.alias || character?.name || "")}
                 characterId={session.contactId}
 	                stickerCharacterIds={session.isGroup ? session.participantIds : undefined}
 	                isGroup={!!session.isGroup}

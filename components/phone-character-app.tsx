@@ -29,6 +29,7 @@ import {
   loadCharacterWorldGroups,
   moveCharacterToWorld,
   renameCharacterWorldGroup,
+  reorderCharacterWorldGroups,
   updateCharacterWorldDescription,
   CHARACTER_WORLDS_UPDATED_EVENT,
   DEFAULT_CHARACTER_WORLD_ID,
@@ -1141,6 +1142,7 @@ function CharListView({
         onSelect={selectWorld}
         onOpenEditor={() => setShowWorldEditor(true)}
         onOpenCreate={() => setShowNewWorld(true)}
+        onReorder={reorderCharacterWorldGroups}
       />
       <div
         ref={canvasElRef}
