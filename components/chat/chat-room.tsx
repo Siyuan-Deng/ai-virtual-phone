@@ -63,7 +63,7 @@ import { getMusicControlBridge } from "@/lib/music-control-bridge";
 import { findPlayableMatch, getNeteaseLyrics, getNeteaseSongDetail } from "@/lib/music-service";
 import { approveMemoryWriteRequest, settleMemoryWriteRequest } from "@/lib/tool-executor";
 import type { MemoryWriteRequest, ToolResult } from "@/lib/tool-executor";
-import { formatChatUiTime } from "@/lib/chat-time";
+import { formatChatMetaTime, formatChatUiTime } from "@/lib/chat-time";
 import { parseActionTags } from "@/lib/action-parser";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
 import { creditWalletBalance, payWithWalletBalance } from "@/lib/wallet-storage";
@@ -6203,6 +6203,19 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                             className={`chat-msg-content-wrap flex flex-col min-w-0 max-w-[70%] ${isStandaloneHtmlPreview ? "chat-msg-content-wrap-html" : ""}`}
                                             {...(isStandaloneHtmlPreview ? { "data-html": "true" } : {})}
                                         >
+                                            {/* 发送者名字 + 时间：默认 display:none，不改变任何人的默认样子；
+                                                给美化主题用（如 Discord 风格每组消息上方的「名字 时间」）。
+                                                单聊也带上，因为单聊里页面上原本没有逐条的名字和时间 */}
+                                            <div className="chat-msg-meta" aria-hidden="true">
+                                                <span className="chat-msg-meta-name">
+                                                    {msg.role === "user"
+                                                        ? (userIdentity?.name || "你")
+                                                        : session.isGroup
+                                                            ? (msg.senderName || (msg.senderCharacterId ? groupCharMap.get(msg.senderCharacterId)?.name : "") || "群成员")
+                                                            : (session.alias || character?.name || "TA")}
+                                                </span>
+                                                <span className="chat-msg-meta-time">{formatChatMetaTime(msg.createdAt)}</span>
+                                            </div>
                                             {session.isGroup && msg.role !== "user" && (
                                                 <span className="chat-group-sender-name">{msg.senderName || ""}{renderGroupRoleBadge(msg.senderCharacterId)}</span>
                                             )}
