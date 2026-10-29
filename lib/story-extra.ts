@@ -90,6 +90,8 @@ export function cleanStoryExtraScenes(value: string): string {
 }
 
 const INSTRUCTION_HEAD = "现在暂停当前剧情，为我生成一个番外小剧场。不需要记忆区，标题自拟。";
+/** 勾了「带上之前的番外」就在开头后面加这句：不然「暂停当前剧情」会让模型把前面的番外也一起撇开 */
+const INCLUDE_PREVIOUS_LINE = "前面是之前写过的番外，人物关系和已经发生的事以它们为准，这一篇可以是新的故事。";
 
 /** 拆回去时去掉拼的时候补的那个句号 */
 function dropAddedStop(value: string): string {
@@ -97,13 +99,15 @@ function dropAddedStop(value: string): string {
 }
 
 /** 反过来：把 buildStoryExtraInstruction 拼出来的那句（番外指令卡复制出来的）拆回模板各项。
- *  不是这个格式就返回 null。人称照拆，名字不管（换个角色的番外窗口也能用）；「带上之前的番外」不在指令里，不返回 */
+ *  不是这个格式就返回 null。人称照拆，名字不管（换个角色的番外窗口也能用）；
+ *  「带上之前的番外」那句跳过、开关不跟着变（旧指令里没有这句，看不出当时勾没勾） */
 export function parseStoryExtraInstruction(text: string): Omit<StoryExtraTemplate, "includePrevious"> | null {
     let body = text.trim();
     const wrapped = /^[（(]\s*\$?\s*系统指令\s*[:：]\s*([\s\S]*?)\s*[）)]$/.exec(body);
     if (wrapped) body = wrapped[1];
     if (!body.startsWith(INSTRUCTION_HEAD)) return null;
     body = body.slice(INSTRUCTION_HEAD.length);
+    if (body.startsWith(INCLUDE_PREVIOUS_LINE)) body = body.slice(INCLUDE_PREVIOUS_LINE.length);
     // 两个人称每次都有，从这里分开：前面是 if线 / 梗概 / 字数 / 场景 / 文风，后面是其它要求
     const persons = Array.from(body.matchAll(/以(第[一二三]人称)称呼[^，。]*?，以(第[一二三]人称)称呼[^，。]*?。/g)).pop();
     if (!persons || persons.index === undefined) return null;
@@ -138,9 +142,10 @@ export function parseStoryExtraInstruction(text: string): Omit<StoryExtraTemplat
 /** 模板拼成发出去的那句指令，格式照用户给的范例：
  *  （$系统指令：现在暂停当前剧情，为我生成一个番外小剧场。不需要记忆区，标题自拟。这是一条if线：……。大概内容为……。
  *   内容要4000字以上，我需要3个不同的场景，文风……，以第二人称称呼{user}，以第三人称称呼{char}。其它要求）
- *  哪项没填就省掉那一句。剧情历史不走宏替换，所以名字在这里直接代入。 */
+ *  哪项没填就省掉那一句；勾了「带上之前的番外」开头后面多一句。剧情历史不走宏替换，所以名字在这里直接代入。 */
 export function buildStoryExtraInstruction(template: StoryExtraTemplate, names: { user: string; char: string }): string {
-    let body = "现在暂停当前剧情，为我生成一个番外小剧场。不需要记忆区，标题自拟。";
+    let body = INSTRUCTION_HEAD;
+    if (template.includePrevious) body += INCLUDE_PREVIOUS_LINE;
     if (template.ifLine.trim()) body += asSentence(`这是一条if线：${template.ifLine.trim()}`);
     if (template.content.trim()) body += asSentence(`大概内容为${template.content.trim()}`);
     const clauses: string[] = [];
