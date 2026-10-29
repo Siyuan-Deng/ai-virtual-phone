@@ -925,10 +925,16 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                     </button>
                 )}
             </div>
-            {/* 美化主题的「+」菜单开关，和「更多」里两个指令的快捷按钮：默认 display:none，不改变任何人的默认样子；
-                给美化主题用（比如收进主题自己画的加号菜单），不用先点开「更多」 */}
+            {/* 美化主题的「+」菜单开关，和「更多」里几项的快捷按钮（照片墙、文字图片、两个指令）：
+                默认 display:none，不改变任何人的默认样子；给美化主题用（比如收进主题自己画的加号菜单），不用先点开「更多」 */}
             <div className="chat-input-quick-actions">
                 {themeMenu.toggle}
+                <button type="button" disabled={inputLocked} aria-label="照片墙" title="照片墙" onClick={() => onOpenRichModal("photo")}>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>
+                </button>
+                <button type="button" disabled={inputLocked} aria-label="文字图片" title="文字图片" onClick={() => onOpenRichModal("text_photo")}>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="7" y1="8" x2="17" y2="8" /><line x1="7" y1="12" x2="14" y2="12" /><line x1="7" y1="16" x2="11" y2="16" /></svg>
+                </button>
                 <button type="button" disabled={inputLocked} aria-label="系统指令" title="系统指令" onClick={() => onOpenRichModal("system_instruction")}>
                     <AlertCircle size={22} strokeWidth={1.5} aria-hidden="true" />
                 </button>
