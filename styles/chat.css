@@ -1399,6 +1399,14 @@
 .chat-quote-preview-name {
   display: none;
 }
+/* 输入栏里系统指令、番外指令模式的快捷按钮，和「更多」里的「表情」：
+   都是默认不显示，给美化主题挪位置用 */
+.chat-input-quick-actions {
+  display: none;
+}
+.chat-plus-menu-item[data-theme-only] {
+  display: none;
+}
 
 /* ── Group chat sender name (above bubble) ── */
 .chat-group-sender-name {

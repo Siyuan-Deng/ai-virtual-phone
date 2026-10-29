@@ -36,6 +36,8 @@ interface MessageBubbleProps {
     msg: ChatMessage;
     onUpdate?: (updated: ChatMessage) => void;
     charName?: string;
+    /** 聊天里给 TA 起的备注（没有就是空）；只给引用里藏着的「@名字」用，红包、拍一拍等仍用 charName */
+    charDisplayName?: string;
     userName?: string;
     onSystemMessage?: (text: string) => void;
     groupSize?: number;
@@ -88,7 +90,7 @@ function PluginKindBubble({ msg, kind }: { msg: ChatMessage; kind: string }) {
  * Renders a message bubble based on its mediaType.
  * Falls back to ReactMarkdown for plain text messages.
  */
-export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charName, userName, onSystemMessage, groupSize, onShowDetail, characterId, onMusicPlay, onActionSelect, displayContent, defaultTranslationExpanded = false }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charName, charDisplayName, userName, onSystemMessage, groupSize, onShowDetail, characterId, onMusicPlay, onActionSelect, displayContent, defaultTranslationExpanded = false }: MessageBubbleProps) {
     switch (msg.mediaType) {
         case "red_packet":
             return <RedPacketBubble msg={msg} charName={charName} userName={userName} groupSize={groupSize} onShowDetail={onShowDetail} />;
@@ -113,7 +115,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
         case "dice":
             return <DiceBubble msg={msg} />;
         case "quote":
-            return <QuoteBubble msg={msg} displayContent={displayContent} defaultTranslationExpanded={defaultTranslationExpanded} charName={charName} userName={userName} />;
+            return <QuoteBubble msg={msg} displayContent={displayContent} defaultTranslationExpanded={defaultTranslationExpanded} charName={charDisplayName || charName} userName={userName} />;
         case "music_share":
             return <MusicShareBubble msg={msg} onPlay={onMusicPlay} />;
         case "media_file":
@@ -157,6 +159,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
         if (prev.msg.mediaUrl !== next.msg.mediaUrl) return false;
     }
     if (prev.charName !== next.charName) return false;
+    if (prev.charDisplayName !== next.charDisplayName) return false;
     if (prev.userName !== next.userName) return false;
     if (prev.groupSize !== next.groupSize) return false;
     if (prev.characterId !== next.characterId) return false;

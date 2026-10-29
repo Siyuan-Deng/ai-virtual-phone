@@ -730,6 +730,8 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     );
     const suggestEnabled = !inputLocked && !panelOpen && !suggestClosed && inputText.trim().length > 0;
     const plusMenuItems = [
+        // 「表情」：默认藏着（输入栏本来就有表情按钮）；给美化主题用，比如把表情收进「更多」
+        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" /></svg>, label: "表情", themeOnly: true, onClick: onToggleEmojiPanel },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>, label: "照片墙", onClick: () => onOpenRichModal("photo") },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="7" y1="8" x2="17" y2="8" /><line x1="7" y1="12" x2="14" y2="12" /><line x1="7" y1="16" x2="11" y2="16" /></svg>, label: "文字图片", onClick: () => onOpenRichModal("text_photo") },
         { icon: <AlertCircle size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "系统指令", onClick: () => onOpenRichModal("system_instruction") },
@@ -892,11 +894,21 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                     </button>
                 )}
             </div>
+            {/* 「更多」里两个指令的快捷按钮：默认 display:none，不改变任何人的默认样子；
+                给美化主题用（比如收进主题自己画的加号菜单），不用先点开「更多」 */}
+            <div className="chat-input-quick-actions">
+                <button type="button" disabled={inputLocked} aria-label="系统指令" title="系统指令" onClick={() => onOpenRichModal("system_instruction")}>
+                    <AlertCircle size={22} strokeWidth={1.5} aria-hidden="true" />
+                </button>
+                <button type="button" disabled={inputLocked} aria-label="番外指令模式" title="番外指令模式" onClick={onToggleTheaterMode} {...(theaterMode ? { "data-active": "" } : {})}>
+                    <Clapperboard size={22} strokeWidth={1.5} aria-hidden="true" />
+                </button>
+            </div>
 
             {showPlusMenu && (
                 <div className="chat-plus-menu">
                     {plusMenuItems.map((item, i) => (
-                        <div key={`${item.label}-${i}`} onClick={item.onClick} className="chat-plus-menu-item flex flex-col items-center gap-1.5 cursor-pointer" {...(item.active ? { "data-active": "" } : {})}>
+                        <div key={`${item.label}-${i}`} onClick={item.onClick} className="chat-plus-menu-item flex flex-col items-center gap-1.5 cursor-pointer" data-label={item.label} {...(item.active ? { "data-active": "" } : {})} {...(item.themeOnly ? { "data-theme-only": "" } : {})}>
                             <div className="chat-plus-icon-box">
                                 {item.icon}
                             </div>
@@ -6257,6 +6269,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 msg={renderMsg}
                                                 displayContent={msg.displayProjected ? undefined : bubbleDisplayContent}
                                                 charName={character?.name}
+                                                charDisplayName={session.isGroup ? undefined : session.alias}
                                                 userName={userIdentity?.name || "你"}
                                                 groupSize={session.isGroup ? (session.participantIds?.length || 0) + (session.isSpectator ? 0 : 1) : undefined}
                                                 onShowDetail={setMediaDetailMsg}
