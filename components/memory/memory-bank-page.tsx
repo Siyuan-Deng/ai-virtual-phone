@@ -44,10 +44,11 @@ const MEMORY_TOKEN_BUDGET_MIN: Record<MemoryBudgetKey, number> = {
     coreMemoryTokenBudget: 100,
     longTermTokenBudget: 200,
 };
+// 滑块的刻度是从最小值起数的：步长要能整除最小值，不然只能停在 1000、6000、11000… 这种怪数上
 const MEMORY_TOKEN_BUDGET_STEP: Record<MemoryBudgetKey, number> = {
-    shortTermTokenBudget: 5000,
-    coreMemoryTokenBudget: 1000,
-    longTermTokenBudget: 1000,
+    shortTermTokenBudget: 1000,
+    coreMemoryTokenBudget: 100,
+    longTermTokenBudget: 100,
 };
 const MANUAL_MEMORY_CONTENT_LIMIT = 3000;
 // 详情页时间线最多解析渲染的条数：全量历史可能有几万条，
