@@ -1395,6 +1395,10 @@
 .chat-msg-meta {
   display: none;
 }
+/* 引用消息里「@被引用的人」，同样默认不显示，给美化主题用 */
+.chat-quote-preview-name {
+  display: none;
+}
 
 /* ── Group chat sender name (above bubble) ── */
 .chat-group-sender-name {

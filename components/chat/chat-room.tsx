@@ -608,6 +608,8 @@ function normalizeCustomPanelHeight(value: unknown): string | undefined {
 
 const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     characterName: string;
+    /** 顶栏上显示的聊天名（群聊是群名），挂到输入栏的 data-chat-name 上给美化主题用 */
+    chatTitle?: string;
     characterId: string;
     stickerCharacterIds?: string[];
     isGroup: boolean;
@@ -639,6 +641,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
 	onSendSticker: (name: string, url?: string) => void;
 }>(function ChatTextInputBar({
     characterName,
+    chatTitle,
     characterId,
     stickerCharacterIds,
     isGroup,
@@ -748,7 +751,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     ];
 
     return (
-        <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input">
+        <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input" data-chat-name={chatTitle || characterName}>
             {theaterMode && (
                 <div className="chat-theater-mode-strip" role="status">
                     <span className="chat-theater-mode-icon" aria-hidden="true">
@@ -820,9 +823,10 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                 enterKeyHint={enterToSendEnabled ? "send" : "enter"}
                 className="chat-input-textarea"
                 disabled={inputLocked}
+                // 平时的占位是一个空格：看不见，但能让美化主题用 :placeholder-shown 判断输入框是不是空的
                 placeholder={inputLocked
                     ? (isSpectator ? "围观中，你不在这个群里" : `禁言中，剩余${Math.ceil(muteRemainingMs / 60000)}分钟`)
-                    : (theaterMode ? "写下番外指令..." : undefined)}
+                    : (theaterMode ? "写下番外指令..." : " ")}
             />
 
             <div className="chat-input-actions">
@@ -928,6 +932,8 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
 }));
 
 const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
+    /** 顶栏上显示的聊天名，挂到输入栏的 data-chat-name 上给美化主题用 */
+    chatTitle?: string;
     isOfflineGenerating: boolean;
     isSpectator: boolean;
     showEmojiPanel: boolean;
@@ -938,6 +944,7 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
     onSendText: (text: string) => boolean;
     onStopGeneration: () => void;
 }>(function OfflineTextInputBar({
+    chatTitle,
     isOfflineGenerating,
     isSpectator,
     showEmojiPanel,
@@ -1006,7 +1013,7 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
     };
 
     return (
-        <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input">
+        <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input" data-chat-name={chatTitle || ""}>
             <textarea
                 ref={textareaRef}
                 rows={1}
@@ -1034,7 +1041,8 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
                 enterKeyHint={enterToSendEnabled ? "send" : "enter"}
                 className="chat-input-textarea"
                 disabled={isSpectator}
-                placeholder={isSpectator ? "围观中，点右侧按钮推进他们的线下互动" : undefined}
+                // 平时的占位是一个空格：看不见，但能让美化主题用 :placeholder-shown 判断输入框是不是空的
+                placeholder={isSpectator ? "围观中，点右侧按钮推进他们的线下互动" : " "}
             />
             <div className="chat-input-actions">
                 <button
@@ -6207,13 +6215,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 给美化主题用（如 Discord 风格每组消息上方的「名字 时间」）。
                                                 单聊也带上，因为单聊里页面上原本没有逐条的名字和时间 */}
                                             <div className="chat-msg-meta" aria-hidden="true">
-                                                <span className="chat-msg-meta-name">
-                                                    {msg.role === "user"
+                                                {(() => {
+                                                    const metaName = msg.role === "user"
                                                         ? (userIdentity?.name || "你")
                                                         : session.isGroup
                                                             ? (msg.senderName || (msg.senderCharacterId ? groupCharMap.get(msg.senderCharacterId)?.name : "") || "群成员")
-                                                            : (session.alias || character?.name || "TA")}
-                                                </span>
+                                                            : (session.alias || character?.name || "TA");
+                                                    // data-name 让美化主题能用 attr() 拿到名字（比如换成手填的 ID）
+                                                    return <span className="chat-msg-meta-name" data-name={metaName}>{metaName}</span>;
+                                                })()}
                                                 <span className="chat-msg-meta-time">{formatChatMetaTime(msg.createdAt)}</span>
                                             </div>
                                             {session.isGroup && msg.role !== "user" && (
@@ -6464,6 +6474,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 <OfflineTextInputBar
                     key={session.id}
                     ref={offlineTextInputRef}
+                    chatTitle={session.isGroup ? (session.groupName || "群聊") : (session.alias || character?.name || "")}
                     isOfflineGenerating={isOfflineGenerating}
                     isSpectator={!!session.isGroup && !!session.isSpectator}
                     showEmojiPanel={showEmojiPanel}
@@ -6478,6 +6489,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             <ChatTextInputBar
                 ref={chatTextInputRef}
                 characterName={character?.name || "对方"}
+                chatTitle={session.isGroup ? (session.groupName || "群聊") : (session.alias || character?.name || "")}
                 characterId={session.contactId}
 	                stickerCharacterIds={session.isGroup ? session.participantIds : undefined}
 	                isGroup={!!session.isGroup}
