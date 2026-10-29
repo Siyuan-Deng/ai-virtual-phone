@@ -606,6 +606,36 @@ function normalizeCustomPanelHeight(value: unknown): string | undefined {
     return undefined;
 }
 
+/**
+ * 美化主题自己画的「+」菜单开没开。开关按钮放在 .chat-input-quick-actions 里，默认 display:none，
+ * 对不用主题的人没有任何影响；主题按输入栏上的 data-theme-menu-open 决定菜单显不显示
+ * （以前只能靠 :hover，iPhone 上点过的地方会一直算「悬停」，菜单会自己弹出来）。
+ * 点了菜单里任何一项、点输入栏别处、点输入栏外面，菜单都会收起来。
+ */
+function useThemeInputMenu() {
+    const [open, setOpen] = useState(false);
+    const barRef = useRef<HTMLDivElement | null>(null);
+    useEffect(() => {
+        if (!open) return;
+        const close = (e: PointerEvent) => {
+            if (!barRef.current?.contains(e.target as Node)) setOpen(false);
+        };
+        document.addEventListener("pointerdown", close);
+        return () => document.removeEventListener("pointerdown", close);
+    }, [open]);
+    const barProps = {
+        ref: barRef,
+        ...(open ? { "data-theme-menu-open": "" } : {}),
+        onClick: (e: React.MouseEvent) => {
+            if (open && !(e.target as Element).closest(".chat-input-theme-menu-toggle")) setOpen(false);
+        },
+    };
+    const toggle = (
+        <button type="button" className="chat-input-theme-menu-toggle" aria-label="展开菜单" aria-expanded={open} onClick={() => setOpen(v => !v)} />
+    );
+    return { barProps, toggle };
+}
+
 const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     characterName: string;
     /** 顶栏上显示的聊天名（群聊是群名），挂到输入栏的 data-chat-name 上给美化主题用 */
@@ -674,6 +704,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
 }, ref) {
     const [inputText, setInputText] = useState("");
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const themeMenu = useThemeInputMenu();
     // 表情包搜索联想：ESC/失焦置 true 隐藏，输入变化重新开启
     const [suggestClosed, setSuggestClosed] = useState(false);
     // 围观群/被禁言：输入与富媒体入口全部锁定，只留线下切换和生成按钮
@@ -753,7 +784,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     ];
 
     return (
-        <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input" data-chat-name={chatTitle || characterName}>
+        <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input" data-chat-name={chatTitle || characterName} {...themeMenu.barProps}>
             {theaterMode && (
                 <div className="chat-theater-mode-strip" role="status">
                     <span className="chat-theater-mode-icon" aria-hidden="true">
@@ -894,9 +925,10 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                     </button>
                 )}
             </div>
-            {/* 「更多」里两个指令的快捷按钮：默认 display:none，不改变任何人的默认样子；
+            {/* 美化主题的「+」菜单开关，和「更多」里两个指令的快捷按钮：默认 display:none，不改变任何人的默认样子；
                 给美化主题用（比如收进主题自己画的加号菜单），不用先点开「更多」 */}
             <div className="chat-input-quick-actions">
+                {themeMenu.toggle}
                 <button type="button" disabled={inputLocked} aria-label="系统指令" title="系统指令" onClick={() => onOpenRichModal("system_instruction")}>
                     <AlertCircle size={22} strokeWidth={1.5} aria-hidden="true" />
                 </button>
@@ -970,6 +1002,7 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
     const [inputText, setInputText] = useState("");
     const inputTextRef = useRef("");
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const themeMenu = useThemeInputMenu();
 
     const resetTextareaHeight = () => {
         if (textareaRef.current) textareaRef.current.style.height = "auto";
@@ -1025,7 +1058,7 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
     };
 
     return (
-        <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input" data-chat-name={chatTitle || ""}>
+        <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input" data-chat-name={chatTitle || ""} {...themeMenu.barProps}>
             <textarea
                 ref={textareaRef}
                 rows={1}
@@ -1098,6 +1131,10 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
                     )}
                 </button>
+            </div>
+            {/* 美化主题的「+」菜单开关：默认 display:none，不改变任何人的默认样子 */}
+            <div className="chat-input-quick-actions">
+                {themeMenu.toggle}
             </div>
             {showEmojiPanel && (
                 <EmojiPanel onSelect={(emoji) => appendText(emoji, { focus: false })} />
