@@ -5674,9 +5674,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             />
 
             {/* Message List */}
+            {/* data-has-bg-image 和外框上的一样，再挂一份在这里：单个聊天的自定义 CSS 选不到外框自己，
+                美化主题要靠它分辨「这个聊天设了背景图没有」 */}
             <div
                 ref={scrollRef}
                 className="page-body chat-room-main-pane flex flex-col gap-4 chat-scroll-anchored"
+                {...(bgImageResolved ? { "data-has-bg-image": "" } : {})}
                 onScroll={(e) => {
                     if (activeMessageId || activeOfflineTarget) closeContextMenu();
                 }}
