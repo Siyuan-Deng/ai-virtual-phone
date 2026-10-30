@@ -730,8 +730,7 @@ export async function generateListenReply(params: ReplyToUserParams): Promise<Li
     let cleaned = sanitizeListenText(first);
     // 回复只跟「用户自己说过的话」防重，不跟全量历史比——
     // 否则随便接一句都会被判定成复读，回复成功率会低到没法用。
-    const userLines = recentTexts.filter(Boolean);
-    let duplicate = isListenDuplicate(cleaned, userLines);
+    let duplicate = isListenDuplicate(cleaned, recentTexts);
     if (duplicate && RETRY_ON_DUPLICATE) {
         const retry = await runOnce("刚才那句回答不合适，换个说法重新回一句。");
         if (retry !== null) {
@@ -743,6 +742,7 @@ export async function generateListenReply(params: ReplyToUserParams): Promise<Li
         }
     }
     if (!cleaned) return { text: null, error: "模型这次没给出可用的话。" };
+    if (duplicate) return { text: null, error: "这条回复和之前太像，跳过了。" };
 
     return { text: cleaned };
 }

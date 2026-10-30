@@ -57,7 +57,7 @@ export default function ListenTogetherLayer({ track, currentTime, isPlaying, onN
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
     const [softSkipId, setSoftSkipId] = useState<string | null>(null);
-    // 1v1 对话：用户在这一轮里指定的对话对象（不指定就随机挑一个）
+    // 1v1 对话：talkTo 是用户这一轮指定的对话对象（不指定就随机挑一个）
     const [talkTo, setTalkTo] = useState<string | null>(null);
     const [draft, setDraft] = useState("");
     const [replying, setReplying] = useState(false);
@@ -171,7 +171,7 @@ export default function ListenTogetherLayer({ track, currentTime, isPlaying, onN
         setDraft("");
         setReplying(true);
 
-        // 先把用户这句话作为弹幕显示出来并写进历史（接话上下文要用）
+        // 先把用户这句话作为弹幕显示并写进历史（接话上下文要用）
         const current = trackRef.current;
         const userBubble: ListenBubble = {
             id: `lt_u_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,

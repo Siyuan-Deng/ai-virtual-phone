@@ -529,7 +529,7 @@
     display: none;
 }
 
-/* 弹幕区要给输入区让位 */
+/* 弹幕区给输入区让位 */
 .lt-bubbles {
     bottom: 104px;
 }
