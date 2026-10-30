@@ -265,3 +265,15 @@
 .lt-bubble[data-user] { background: color-mix(in srgb, var(--c-music-accent) 26%, transparent); border-color: color-mix(in srgb, var(--c-music-accent) 34%, transparent); border-radius: 14px 14px 14px 4px; }
 .lt-bubble[data-user] .lt-bubble-name { display: none; }
 .lt-bubbles { bottom: 104px; }
+
+/* 移动端面板：内容多时由面板内部滚动，避免底部按钮被裁掉。 */
+.lt-panel-mask { align-items: flex-start; justify-content: center; overflow-y: auto; padding: max(12px, var(--page-header-safe-top, 48px)) 14px 18px; box-sizing: border-box; }
+.lt-panel-official { box-sizing: border-box; width: min(390px, 100%); height: min(700px, calc(100dvh - var(--page-header-safe-top, 48px) - 18px)); max-height: none; min-height: 0; flex: 0 0 auto; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: max(24px, env(safe-area-inset-bottom, 0px)); }
+
+/* 角色头像固定为正方形，禁止 flex 压缩，统一裁成圆形。 */
+.lt-panel-avatar, .lt-panel-avatar img, .lt-panel-avatar-text { width: 30px; height: 30px; min-width: 30px; min-height: 30px; max-width: 30px; max-height: 30px; flex: 0 0 30px; aspect-ratio: 1 / 1; }
+.lt-panel-avatar { border-radius: 50%; overflow: hidden; }
+.lt-panel-avatar img { display: block; object-fit: cover; }
+.lt-panel-avatar-text { display: flex; align-items: center; justify-content: center; }
+.lt-pair-avatar, .lt-pair-avatar img { width: 46px; height: 46px; min-width: 46px; min-height: 46px; max-width: 46px; max-height: 46px; flex: 0 0 46px; aspect-ratio: 1 / 1; }
+.lt-pair-avatar img { display: block; object-fit: cover; }
