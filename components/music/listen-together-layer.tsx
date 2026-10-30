@@ -17,6 +17,7 @@ import {
     createBubble,
     decideListenSkip,
     generateListenComment,
+    generateListenReply,
     getRecentBubbleTexts,
     loadListenSession,
     markCommentLine,
@@ -56,6 +57,10 @@ export default function ListenTogetherLayer({ track, currentTime, isPlaying, onN
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
     const [softSkipId, setSoftSkipId] = useState<string | null>(null);
+    // 1v1 对话：用户在这一轮里指定的对话对象（不指定就随机挑一个）
+    const [talkTo, setTalkTo] = useState<string | null>(null);
+    const [draft, setDraft] = useState("");
+    const [replying, setReplying] = useState(false);
 
     // ── refs：调度器一律读 ref，避免闭包拿到旧值 ──
     const bubbleTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -153,6 +158,53 @@ export default function ListenTogetherLayer({ track, currentTime, isPlaying, onN
         if (mountedRef.current) pushBubble(bubble);
         return bubble;
     }, [pushBubble]);
+
+    // ── 1v1 对话：把用户说的话发给一个角色，让 TA 回一句 ──
+    const sendMessage = useCallback(async () => {
+        const text = draft.trim();
+        if (!text || replying || roster.length === 0) return;
+
+        // 定对话对象：用户点过谁就发给谁，否则随机挑一个
+        const target = roster.find(character => character.id === talkTo)
+            ?? roster[Math.floor(Math.random() * roster.length)];
+
+        setDraft("");
+        setReplying(true);
+
+        // 先把用户这句话作为弹幕显示出来并写进历史（接话上下文要用）
+        const current = trackRef.current;
+        const userBubble: ListenBubble = {
+            id: `lt_u_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            characterId: "__user__",
+            characterName: "我",
+            text,
+            at: Date.now(),
+            kind: "user",
+        };
+        appendListenHistory(current.id, userBubble);
+        pushBubble(userBubble);
+
+        try {
+            const result = await generateListenReply({
+                character: target,
+                track: current,
+                userLabel: resolveUserLabel(target.id),
+                userText: text,
+                recentTexts: getRecentBubbleTexts(current.id),
+            });
+            if (!result.text) {
+                if (result.error && mountedRef.current) setError(result.error);
+                return;
+            }
+            if (mountedRef.current) setError(null);
+            const reply = createBubble(target, result.text, "comment");
+            appendListenHistory(current.id, reply);
+            markCommentLine(target.id, current.id, result.text);
+            if (mountedRef.current) pushBubble(reply);
+        } finally {
+            if (mountedRef.current) setReplying(false);
+        }
+    }, [draft, pushBubble, replying, roster, talkTo]);
 
     // ── 手动「一起评」：串行触发全部角色，后面的能看到前面的（顺带验证接话）──
     const runAll = useCallback(async () => {
@@ -325,15 +377,18 @@ export default function ListenTogetherLayer({ track, currentTime, isPlaying, onN
                 {bubbles.map(bubble => {
                     const character = roster.find(item => item.id === bubble.characterId);
                     const isSoft = bubble.id === softSkipId && bubble.kind === "skip";
+                    const isUser = bubble.kind === "user";
                     return (
-                        <div key={bubble.id} className="lt-bubble">
-                            <span className="lt-bubble-avatar">
-                                {character?.avatar ? (
-                                    <img src={character.avatar} alt="" />
-                                ) : (
-                                    <span className="lt-bubble-avatar-text">{(bubble.characterName || "?").slice(0, 1)}</span>
-                                )}
-                            </span>
+                        <div key={bubble.id} className="lt-bubble" {...(isUser ? { "data-user": "" } : {})}>
+                            {!isUser && (
+                                <span className="lt-bubble-avatar">
+                                    {character?.avatar ? (
+                                        <img src={character.avatar} alt="" />
+                                    ) : (
+                                        <span className="lt-bubble-avatar-text">{(bubble.characterName || "?").slice(0, 1)}</span>
+                                    )}
+                                </span>
+                            )}
                             <div className="lt-bubble-body">
                                 <div className="lt-bubble-name">{bubble.characterName}</div>
                                 <div className="lt-bubble-text">{bubble.text}</div>
@@ -344,6 +399,55 @@ export default function ListenTogetherLayer({ track, currentTime, isPlaying, onN
                         </div>
                     );
                 })}
+            </div>
+
+            {/* 1v1 对话输入区：多人时先在左边点一下选跟谁说 */}
+            <div className="lt-chat-bar">
+                {roster.length > 1 && (
+                    <div className="lt-chat-who">
+                        {roster.map(character => (
+                            <button
+                                key={character.id}
+                                className="lt-chat-who-btn"
+                                {...(talkTo === character.id ? { "data-on": "" } : {})}
+                                onClick={() => setTalkTo(prev => (prev === character.id ? null : character.id))}
+                                title={`跟${character.name || "角色"}说话`}
+                            >
+                                {character.avatar ? (
+                                    <img src={character.avatar} alt="" />
+                                ) : (
+                                    <span>{(character.name || "?").slice(0, 1)}</span>
+                                )}
+                            </button>
+                        ))}
+                    </div>
+                )}
+                <input
+                    className="lt-chat-input"
+                    value={draft}
+                    onChange={event => setDraft(event.target.value)}
+                    onKeyDown={event => {
+                        if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                            event.preventDefault();
+                            void sendMessage();
+                        }
+                    }}
+                    placeholder={
+                        replying
+                            ? "对方正在回…"
+                            : roster.length > 1 && talkTo
+                                ? `跟${roster.find(c => c.id === talkTo)?.name || "TA"}说点什么`
+                                : "说点什么…"
+                    }
+                    disabled={replying}
+                />
+                <button
+                    className="lt-chat-send"
+                    onClick={() => void sendMessage()}
+                    disabled={replying || !draft.trim()}
+                >
+                    发送
+                </button>
             </div>
 
             {/* 多人切歌弹窗 */}

@@ -436,6 +436,131 @@
     font-weight: 600;
 }
 
+/* ── 1v1 对话输入区 ── */
+/* 底部留出播放器控制条的高度，别把控制条压住 */
+.lt-chat-bar {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 62px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 5px 5px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--c-music-surface-solid, rgba(0, 0, 0, 0.4)) 82%, transparent);
+    border: 1px solid color-mix(in srgb, var(--c-music-accent) 20%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    pointer-events: auto;
+}
+
+.lt-chat-who {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.lt-chat-who-btn {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 1px solid transparent;
+    background: color-mix(in srgb, var(--c-music-accent) 14%, transparent);
+    color: var(--c-music-accent);
+    font-size: calc(9.9px * var(--app-text-scale, 1));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    opacity: 0.6;
+    transition: opacity 0.18s, border-color 0.18s;
+}
+
+.lt-chat-who-btn img { width: 100%; height: 100%; object-fit: cover; }
+
+.lt-chat-who-btn[data-on] {
+    opacity: 1;
+    border-color: var(--c-music-accent);
+}
+
+.lt-chat-input {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--c-music-text);
+    font-size: calc(11.3px * var(--app-text-scale, 1));
+    outline: none;
+}
+
+.lt-chat-input::placeholder {
+    color: color-mix(in srgb, var(--c-music-text) 42%, transparent);
+}
+
+.lt-chat-send {
+    flex-shrink: 0;
+    padding: 5px 13px;
+    border-radius: 999px;
+    border: none;
+    background: var(--c-music-accent);
+    color: var(--c-music-bg, #fff);
+    font-size: calc(10.8px * var(--app-text-scale, 1));
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.18s;
+}
+
+.lt-chat-send:disabled { opacity: 0.4; cursor: default; }
+
+/* 用户自己的气泡：靠右、换色、不带头像 */
+.lt-bubble[data-user] {
+    background: color-mix(in srgb, var(--c-music-accent) 26%, transparent);
+    border-color: color-mix(in srgb, var(--c-music-accent) 34%, transparent);
+    border-radius: 14px 14px 14px 4px;
+}
+
+.lt-bubble[data-user] .lt-bubble-name {
+    display: none;
+}
+
+/* 弹幕区要给输入区让位 */
+.lt-bubbles {
+    bottom: 104px;
+}
+
+/* ── 歌词页返回按钮 ──
+   歌词行自身 stopPropagation（点它跳进度），所以点歌词文字时父容器的
+   「返回封面」收不到事件，黑胶模式下会卡在歌词页出不去。 */
+.mp-lyrics-back {
+    position: absolute;
+    top: 8px;
+    left: 12px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 4px 11px 4px 7px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--c-music-accent) 26%, transparent);
+    background: color-mix(in srgb, var(--c-music-surface-solid, rgba(0, 0, 0, 0.4)) 70%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: var(--c-music-accent);
+    font-size: calc(10px * var(--app-text-scale, 1));
+    cursor: pointer;
+    transition: background 0.18s;
+}
+
+.mp-lyrics-back:hover {
+    background: color-mix(in srgb, var(--c-music-accent) 18%, transparent);
+}
+
 /* 播放器头部「一起听」入口点亮态 */
 .mp-top-btn[data-on] {
     color: var(--c-music-accent);

@@ -19,6 +19,7 @@ import MusicArtistPage from "./music-artist";
 import { loadMusicBg, playerBgStyle, MUSIC_BG_EVENT, type MusicBgConfig } from "@/lib/music-bg";
 import ListenTogetherPanel from "./listen-together-panel";
 import ListenTogetherLayer from "./listen-together-layer";
+import CharacterTastePage from "./character-taste-page";
 import { loadListenSession, saveListenSession } from "@/lib/music-listen-together";
 
 const PLAY_MODE_ICONS: Record<PlayMode, { svg: string; label: string }> = {
@@ -72,6 +73,7 @@ export default function MusicPlayer() {
     const [showComments, setShowComments] = useState(false);
     // 一起听：设置面板开关 + 会话是否在跑。初值读 kv 可能早于水合，下面会再校正一次。
     const [showListenPanel, setShowListenPanel] = useState(false);
+    const [showTastePage, setShowTastePage] = useState(false);
     const [listenActive, setListenActive] = useState(() => {
         const session = loadListenSession();
         return session.active && session.characterIds.length > 0;
@@ -503,6 +505,17 @@ export default function MusicPlayer() {
                             <circle cx="18" cy="16" r="3" />
                         </svg>
                     </button>
+                    <button
+                        className="music-player-ctrl-btn mp-top-btn"
+                        onClick={() => setShowTastePage(true)}
+                        title="TA 的歌单"
+                    >
+                        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M4 6h11M4 12h11M4 18h7" />
+                            <circle cx="18" cy="16" r="2.5" />
+                            <path d="M20.5 16V7l-3 1" />
+                        </svg>
+                    </button>
                     <button className="music-player-ctrl-btn mp-top-btn" onClick={togglePlayerStyle} title={playerStyle === "vinyl" ? "切换现代样式" : "切换黑胶样式"}>
                         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                             <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" />
@@ -526,6 +539,19 @@ export default function MusicPlayer() {
             <div className="mp-body">
                 {view === "lyrics" ? (
                     <div className="mp-lyrics-wrap" onClick={() => setView("cover")}>
+                        {/* 歌词行自己会 stopPropagation（点它跳进度），所以点歌词文字时
+                            父容器的「返回封面」永远收不到事件——黑胶模式下会卡在歌词页出不去。
+                            这里给一个明确的返回按钮，不再依赖点空白区域。 */}
+                        <button
+                            className="mp-lyrics-back"
+                            onClick={(e) => { e.stopPropagation(); setView("cover"); }}
+                            aria-label="返回封面"
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M15 19 8 12l7-7" />
+                            </svg>
+                            <span>{playerStyle === "vinyl" ? "唱片" : "封面"}</span>
+                        </button>
                         {hasLyrics ? (
                             <div className="mp-lyrics" ref={lyricsContainerRef}>
                                 {parsedLyrics.current.map((line, i) => {
@@ -711,6 +737,11 @@ export default function MusicPlayer() {
                     onStart={startListenTogether}
                     onClose={() => setShowListenPanel(false)}
                 />
+            )}
+
+            {/* TA 的歌单：角色音乐偏好 */}
+            {showTastePage && (
+                <CharacterTastePage onClose={() => setShowTastePage(false)} />
             )}
 
             {/* Queue drawer */}

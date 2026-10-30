@@ -11,6 +11,7 @@
 
 import { simpleLLMCall } from "./api-helpers";
 import { formatCharacterRelationsForPrompt } from "./character-world-storage";
+import { loadCharacterTaste, tasteToPromptBlock } from "./character-music-taste";
 import { kvGet, kvSet } from "./kv-db";
 import type { Character } from "./character-types";
 import type { MusicTrack } from "./music-storage";
@@ -42,8 +43,8 @@ export type ListenBubble = {
     characterName: string;
     text: string;
     at: number;
-    /** comment=普通点评，skip=提议切歌 */
-    kind: "comment" | "skip";
+    /** comment=普通点评，skip=提议切歌，user=用户自己说的话 */
+    kind: "comment" | "skip" | "user";
 };
 
 type ListenHistoryStore = Record<string, { bubbles: ListenBubble[]; updatedAt: number }>;
@@ -510,6 +511,12 @@ function buildSharedContext(input: ListenContextInput, recentTexts: string[]): s
         lines.push(`【歌词气质】歌词里反复出现的情绪词：${moodWords}。可以顺着这个气质说话，但别把词直接念出来。`, "");
     }
 
+    // 角色自己的音乐偏好：让 TA 的点评带品味，而不是对什么歌都一个反应
+    const tasteBlock = tasteToPromptBlock(loadCharacterTaste(character.id));
+    if (tasteBlock) {
+        lines.push("【你自己的音乐口味】", tasteBlock, "点评时可以带上你的偏好，但别每句都提。", "");
+    }
+
     const moodBlock = buildMoodBlock(character.id, track.id);
     if (moodBlock) lines.push("【听歌记忆】", moodBlock, "");
 
@@ -661,6 +668,83 @@ export async function decideListenSkip(params: DecideSkipParams): Promise<Listen
     const reasonMatch = raw.match(/"reason"\s*:\s*"([^"]*)"/);
     const reason = skip ? sanitizeListenText(reasonMatch?.[1] || "") : "";
     return { skip, reason };
+}
+
+// ── 回复用户（1v1 对话）────────────────────────────────
+
+export type ReplyToUserParams = ListenContextInput & {
+    /** 用户刚说的话 */
+    userText: string;
+    /** 这段对话的最近几条（含用户发言），给接续用 */
+    recentTexts?: string[];
+};
+
+/**
+ * 角色回应用户在播放器里说的话。
+ * 和短评是同一个上下文组装 + 同一条出口清洗，区别只在任务描述：
+ * 这次是「回答对方」，而不是「随口点评」。
+ */
+export async function generateListenReply(params: ReplyToUserParams): Promise<ListenCommentResult> {
+    const { character, track, userLabel, userText } = params;
+    const said = (userText || "").trim();
+    if (!said) return { text: null, error: "没有说话内容。" };
+
+    if (!character.persona?.trim() && !character.personality?.trim()) {
+        return { text: null, error: `角色「${character.name || "未命名"}」还没有人设，先去角色编辑器填人设或性格。` };
+    }
+    const apiConfig = resolveCharacterApiConfig(character.id);
+    if (!apiConfig) {
+        return { text: null, error: "这个角色还没有绑定可用的 API 配置，先到「设置 → 绑定」里给它指定一个。" };
+    }
+
+    const recentTexts = params.recentTexts ?? getRecentBubbleTexts(track.id);
+    const systemPrompt = [
+        `你正在和一个人一起听歌。你是「${character.name || "这个角色"}」。`,
+        "对方会在听歌时随口跟你说话，你要像平时那样接话，不是客服答疑。",
+        "",
+        ...buildSharedContext({ character, track, userLabel }, recentTexts),
+        "【输出要求】",
+        "1. 只回一句话，10~50 字，最多不超过 80 字。",
+        "2. 像面对面随口说话，可以带情绪、可以反问，但不要长篇解释。",
+        "3. 不写动作、神态、环境描写，不用括号，不写角色名前缀，不加表情符号。",
+        "4. 直接给出那句话本身，不要任何前后缀。",
+        "5. 如果对方只是感慨，就顺着情绪接，不要扯回歌曲信息上。",
+    ].join("\n");
+
+    const runOnce = async (nudge: string | null): Promise<string | null> => {
+        const result = await simpleLLMCall(
+            apiConfig,
+            [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: nudge ? `${nudge}\n对方刚说：${said}` : `对方刚说：${said}` },
+            ],
+            { temperature: 0.9, max_tokens: 2048 },
+        );
+        if (result.error || !result.content) return null;
+        return result.content;
+    };
+
+    const first = await runOnce(null);
+    if (first === null) return { text: null, error: "模型没有返回内容，检查 API 配置或稍后重试。" };
+
+    let cleaned = sanitizeListenText(first);
+    // 回复只跟「用户自己说过的话」防重，不跟全量历史比——
+    // 否则随便接一句都会被判定成复读，回复成功率会低到没法用。
+    const userLines = recentTexts.filter(Boolean);
+    let duplicate = isListenDuplicate(cleaned, userLines);
+    if (duplicate && RETRY_ON_DUPLICATE) {
+        const retry = await runOnce("刚才那句回答不合适，换个说法重新回一句。");
+        if (retry !== null) {
+            const retryCleaned = sanitizeListenText(retry);
+            if (retryCleaned) {
+                cleaned = retryCleaned;
+                duplicate = false;
+            }
+        }
+    }
+    if (!cleaned) return { text: null, error: "模型这次没给出可用的话。" };
+
+    return { text: cleaned };
 }
 
 // ── 组装一条弹幕（新行为的样板）────────────────────────
