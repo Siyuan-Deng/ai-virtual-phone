@@ -17,6 +17,9 @@ import {
 import MusicCommentsPage from "./music-comments";
 import MusicArtistPage from "./music-artist";
 import { loadMusicBg, playerBgStyle, MUSIC_BG_EVENT, type MusicBgConfig } from "@/lib/music-bg";
+import ListenTogetherPanel from "./listen-together-panel";
+import ListenTogetherLayer from "./listen-together-layer";
+import { loadListenSession, saveListenSession } from "@/lib/music-listen-together";
 
 const PLAY_MODE_ICONS: Record<PlayMode, { svg: string; label: string }> = {
     sequence: {
@@ -67,6 +70,12 @@ export default function MusicPlayer() {
         (typeof window !== "undefined" && kvGet("music-player-style") === "vinyl") ? "vinyl" : "modern");
     const [showQueue, setShowQueue] = useState(false);
     const [showComments, setShowComments] = useState(false);
+    // 一起听：设置面板开关 + 会话是否在跑。初值读 kv 可能早于水合，下面会再校正一次。
+    const [showListenPanel, setShowListenPanel] = useState(false);
+    const [listenActive, setListenActive] = useState(() => {
+        const session = loadListenSession();
+        return session.active && session.characterIds.length > 0;
+    });
     const [artistView, setArtistView] = useState<{ id: number; name: string } | null>(null);
     const [palette, setPalette] = useState<CoverPalette>(DEFAULT_COVER_PALETTE);
     const [bgCfg, setBgCfg] = useState<MusicBgConfig>(() => loadMusicBg());
@@ -91,6 +100,9 @@ export default function MusicPlayer() {
                 const fresh = loadMusicBg();
                 return JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh;
             });
+            // 一起听会话状态同样依赖 kv 水合，首帧读到的是空缓存
+            const session = loadListenSession();
+            if (session.active && session.characterIds.length > 0) setListenActive(true);
         }, ms));
         return () => timers.forEach(clearTimeout);
     }, []);
@@ -337,6 +349,25 @@ export default function MusicPlayer() {
         window.dispatchEvent(new CustomEvent("open-mini-chat"));
     }, []);
 
+    // ── 一起听：开始 / 结束（会话落 kv，换页不丢）──
+    const startListenTogether = useCallback((characterIds: string[], intervalMin: number, intervalMax: number) => {
+        saveListenSession({
+            ...loadListenSession(),
+            active: true,
+            characterIds,
+            intervalMin,
+            intervalMax,
+            startedAt: Date.now(),
+        });
+        setListenActive(true);
+        setShowListenPanel(false);
+    }, []);
+
+    const exitListenTogether = useCallback(() => {
+        saveListenSession({ ...loadListenSession(), active: false });
+        setListenActive(false);
+    }, []);
+
     const openArtistPage = useCallback(async () => {
         if (!player.currentTrack) return;
         if (!isNeteaseTrack || !isNeteaseConfigured()) {
@@ -460,6 +491,18 @@ export default function MusicPlayer() {
                     </button>
                 </div>
                 <div className="mp-top-actions">
+                    <button
+                        className="music-player-ctrl-btn mp-top-btn"
+                        {...(listenActive ? { "data-on": "" } : {})}
+                        onClick={() => setShowListenPanel(true)}
+                        title={listenActive ? "一起听进行中" : "一起听"}
+                    >
+                        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M9 18V5l12-2v13" />
+                            <circle cx="6" cy="18" r="3" />
+                            <circle cx="18" cy="16" r="3" />
+                        </svg>
+                    </button>
                     <button className="music-player-ctrl-btn mp-top-btn" onClick={togglePlayerStyle} title={playerStyle === "vinyl" ? "切换现代样式" : "切换黑胶样式"}>
                         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                             <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" />
@@ -650,6 +693,25 @@ export default function MusicPlayer() {
                     <span>分享</span>
                 </button>
             </div>
+
+            {/* 一起听：实时互动层（会话在跑时挂上） */}
+            {listenActive && (
+                <ListenTogetherLayer
+                    track={track}
+                    currentTime={player.currentTime}
+                    isPlaying={player.isPlaying}
+                    onNext={handleNext}
+                    onExit={exitListenTogether}
+                />
+            )}
+
+            {/* 一起听：启动前设置面板 */}
+            {showListenPanel && (
+                <ListenTogetherPanel
+                    onStart={startListenTogether}
+                    onClose={() => setShowListenPanel(false)}
+                />
+            )}
 
             {/* Queue drawer */}
             {showQueue && (
