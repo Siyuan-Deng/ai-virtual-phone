@@ -1,5 +1,5 @@
 // components/music/character-taste-page.tsx
-// 角色的音乐偏好 / 私人歌单：查看 + 重新生成 + 一键把歌加进播放队列。
+// 角色的音乐偏好 / 私人歌单：查看 + 重新生成 + 把歌加进播放队列。
 "use client";
 
 import { useCallback, useEffect, useState } from "react";

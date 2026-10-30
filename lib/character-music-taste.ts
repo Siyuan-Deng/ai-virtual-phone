@@ -4,6 +4,9 @@
 // 与一起听同一条铁律：走 simpleLLMCall + 角色聊天的 API 绑定，不走预设系统组装
 // （角色扮演预设会把这个结构化任务带成散文，JSON 直接解析不出来）。
 //
+// 注意：这里刻意不 import music-listen-together 的 trimPersona，
+// 否则两个模块互相 import 形成循环依赖。人设预算自己截一刀就够了。
+//
 // 产物只存「歌名 + 歌手 + 理由」，不存音频：音频要靠网易云搜索现找，
 // 用户没配网易云时这部分自然为空，歌单仍然可以看。
 
@@ -12,10 +15,10 @@ import { kvGet, kvSet } from "./kv-db";
 import type { Character } from "./character-types";
 import { loadApiConfigs, loadBindingConfig, resolveBinding } from "./settings-storage";
 import { renderUserNameMacro } from "./user-macro";
-import { trimPersona } from "./music-listen-together";
 
 const TASTE_KEY = "music-character-taste-v1";
 const TASTE_MAX_CHARACTERS = 60;
+const TASTE_PERSONA_BUDGET = 1500;
 
 export type TasteSong = {
     title: string;
@@ -113,7 +116,11 @@ export async function generateCharacterTaste(
     if (!apiConfig) throw new Error("还没给这个角色绑定 API 配置，去「设置 → 绑定」里指定一个。");
 
     const name = character.name?.trim() || "这个角色";
-    const persona = renderUserNameMacro(trimPersona(character.persona || ""), userName);
+    const rawPersona = (character.persona || "").trim();
+    const persona = renderUserNameMacro(
+        rawPersona.length > TASTE_PERSONA_BUDGET ? `${rawPersona.slice(0, TASTE_PERSONA_BUDGET)}…` : rawPersona,
+        userName,
+    );
     const personality = renderUserNameMacro((character.personality || "").trim(), userName);
 
     const systemPrompt = [
@@ -131,7 +138,7 @@ export async function generateCharacterTaste(
         "- 不要出现「主人」这类称呼，也不要写第二人称对话。",
         "",
         "只输出一行 JSON，不要代码块、不要任何解释：",
-        '{"genres":["风格标签",...],"artists":["常听歌手",...],"habit":"一句听歌习惯，30字以内","songs":[{"title":"歌名","artist":"歌手","why":"理由"}]}',
+        '{"genres":["风格标签"],"artists":["常听歌手"],"habit":"一句听歌习惯，30字以内","songs":[{"title":"歌名","artist":"歌手","why":"理由"}]}',
     ].filter(Boolean).join("\n");
 
     const result = await simpleLLMCall(

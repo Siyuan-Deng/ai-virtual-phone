@@ -539,7 +539,7 @@ export default function MusicPlayer() {
             <div className="mp-body">
                 {view === "lyrics" ? (
                     <div className="mp-lyrics-wrap" onClick={() => setView("cover")}>
-                        {/* 歌词行自己会 stopPropagation（点它跳进度），所以点歌词文字时
+                        {/* 歌词行自己 stopPropagation（点它跳进度），所以点歌词文字时
                             父容器的「返回封面」永远收不到事件——黑胶模式下会卡在歌词页出不去。
                             这里给一个明确的返回按钮，不再依赖点空白区域。 */}
                         <button
