@@ -505,16 +505,8 @@ export default function MusicPlayer() {
                             <circle cx="18" cy="16" r="3" />
                         </svg>
                     </button>
-                    <button
-                        className="music-player-ctrl-btn mp-top-btn"
-                        onClick={() => setShowTastePage(true)}
-                        title="TA 的歌单"
-                    >
-                        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M4 6h11M4 12h11M4 18h7" />
-                            <circle cx="18" cy="16" r="2.5" />
-                            <path d="M20.5 16V7l-3 1" />
-                        </svg>
+                    <button className="music-player-ctrl-btn mp-top-btn" onClick={() => setShowTastePage(true)} title="TA 的歌单">
+                        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h11M4 12h11M4 18h7" /><circle cx="18" cy="16" r="2.5" /><path d="M20.5 16V7l-3 1" /></svg>
                     </button>
                     <button className="music-player-ctrl-btn mp-top-btn" onClick={togglePlayerStyle} title={playerStyle === "vinyl" ? "切换现代样式" : "切换黑胶样式"}>
                         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -539,17 +531,8 @@ export default function MusicPlayer() {
             <div className="mp-body">
                 {view === "lyrics" ? (
                     <div className="mp-lyrics-wrap" onClick={() => setView("cover")}>
-                        {/* 歌词行自己 stopPropagation（点它跳进度），所以点歌词文字时
-                            父容器的「返回封面」永远收不到事件——黑胶模式下会卡在歌词页出不去。
-                            这里给一个明确的返回按钮，不再依赖点空白区域。 */}
-                        <button
-                            className="mp-lyrics-back"
-                            onClick={(e) => { e.stopPropagation(); setView("cover"); }}
-                            aria-label="返回封面"
-                        >
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M15 19 8 12l7-7" />
-                            </svg>
+                        <button className="mp-lyrics-back" onClick={(event) => { event.stopPropagation(); setView("cover"); }} aria-label="返回封面">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M15 19 8 12l7-7" /></svg>
                             <span>{playerStyle === "vinyl" ? "唱片" : "封面"}</span>
                         </button>
                         {hasLyrics ? (
@@ -739,10 +722,8 @@ export default function MusicPlayer() {
                 />
             )}
 
-            {/* TA 的歌单：角色音乐偏好 */}
-            {showTastePage && (
-                <CharacterTastePage onClose={() => setShowTastePage(false)} />
-            )}
+            {/* TA 的歌单 */}
+            {showTastePage && <CharacterTastePage onClose={() => setShowTastePage(false)} />}
 
             {/* Queue drawer */}
             {showQueue && (

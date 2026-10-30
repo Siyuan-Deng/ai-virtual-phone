@@ -24,6 +24,16 @@ const HISTORY_KEY = "music-listen-together-v1";           // 每首歌的弹幕�
 const MOOD_KEY = "music-listen-together-mood-v1";         // 角色 × 歌 的情绪记忆
 const SESSION_KEY = "music-listen-together-session-v1";   // 会话：是否开启 / 哪些角色 / 发言间隔
 const SELECTED_KEY = "music-listen-together-selected-v1"; // 上次勾选的角色
+const RELATION_KEY = "music-listen-together-relation-v1"; // 角色距离 / 累计时长 / 最近一起听
+
+export type ListenRelation = {
+    characterId: string;
+    distanceKm: number | null; // null = 就在身边
+    listenedSeconds: number;
+    lastListenedAt: number;
+};
+
+type ListenRelationStore = Record<string, ListenRelation>;
 
 // ── 容量与预算 ─────────────────────────────────────────
 export const BUBBLE_MAX_CHARS = 80;       // 单条弹幕上限（出口截断）
@@ -43,8 +53,8 @@ export type ListenBubble = {
     characterName: string;
     text: string;
     at: number;
-    /** comment=普通点评，skip=提议切歌 */
-    kind: "comment" | "skip";
+    /** comment=普通点评，skip=提议切歌，user=用户自己说的话 */
+    kind: "comment" | "skip" | "user";
 };
 
 type ListenHistoryStore = Record<string, { bubbles: ListenBubble[]; updatedAt: number }>;
@@ -124,6 +134,69 @@ export function loadSelectedCharacterIds(): string[] {
 
 export function saveSelectedCharacterIds(ids: string[]): void {
     kvSet(SELECTED_KEY, JSON.stringify(ids));
+}
+
+function loadRelationStore(): ListenRelationStore {
+    try {
+        const raw = kvGet(RELATION_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw) as unknown;
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as ListenRelationStore : {};
+    } catch {
+        return {};
+    }
+}
+
+function saveRelationStore(store: ListenRelationStore): void {
+    kvSet(RELATION_KEY, JSON.stringify(store));
+}
+
+export function getListenRelation(characterId: string): ListenRelation {
+    const stored = loadRelationStore()[characterId];
+    return stored ?? {
+        characterId,
+        distanceKm: null,
+        listenedSeconds: 0,
+        lastListenedAt: 0,
+    };
+}
+
+export function saveListenDistance(characterId: string, distanceKm: number | null): void {
+    if (!characterId) return;
+    const store = loadRelationStore();
+    store[characterId] = { ...getListenRelation(characterId), distanceKm: distanceKm === null ? null : Math.max(0, Math.round(distanceKm * 10) / 10) };
+    saveRelationStore(store);
+}
+
+export function addListenDuration(characterIds: string[], seconds: number): void {
+    const duration = Math.max(0, Math.min(60, seconds));
+    if (duration <= 0 || characterIds.length === 0) return;
+    const store = loadRelationStore();
+    const now = Date.now();
+    for (const characterId of characterIds) {
+        const relation = store[characterId] ?? getListenRelation(characterId);
+        store[characterId] = { ...relation, listenedSeconds: relation.listenedSeconds + duration, lastListenedAt: now };
+    }
+    saveRelationStore(store);
+}
+
+export function markListenStarted(characterIds: string[]): void {
+    if (characterIds.length === 0) return;
+    const store = loadRelationStore();
+    const now = Date.now();
+    for (const characterId of characterIds) {
+        const relation = store[characterId] ?? getListenRelation(characterId);
+        store[characterId] = { ...relation, lastListenedAt: now };
+    }
+    saveRelationStore(store);
+}
+
+export function formatListenDuration(seconds: number): string {
+    const totalMinutes = Math.floor(Math.max(0, seconds) / 60);
+    if (totalMinutes < 60) return `${totalMinutes} 分钟`;
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return minutes > 0 ? `${hours} 小时 ${minutes} 分钟` : `${hours} 小时`;
 }
 
 // ── API 配置解析 ───────────────────────────────────────
@@ -511,11 +584,8 @@ function buildSharedContext(input: ListenContextInput, recentTexts: string[]): s
         lines.push(`【歌词气质】歌词里反复出现的情绪词：${moodWords}。可以顺着这个气质说话，但别把词直接念出来。`, "");
     }
 
-    // 角色自己的音乐偏好：让 TA 的点评带品味，而不是对什么歌都一个反应
     const tasteBlock = tasteToPromptBlock(loadCharacterTaste(character.id));
-    if (tasteBlock) {
-        lines.push("【你自己的音乐口味】", tasteBlock, "点评时可以带上你的偏好，但别每句都提。", "");
-    }
+    if (tasteBlock) lines.push("【你自己的音乐口味】", tasteBlock, "点评时可以带上自己的偏好，但别每句都提。", "");
 
     const moodBlock = buildMoodBlock(character.id, track.id);
     if (moodBlock) lines.push("【听歌记忆】", moodBlock, "");
@@ -668,6 +738,40 @@ export async function decideListenSkip(params: DecideSkipParams): Promise<Listen
     const reasonMatch = raw.match(/"reason"\s*:\s*"([^"]*)"/);
     const reason = skip ? sanitizeListenText(reasonMatch?.[1] || "") : "";
     return { skip, reason };
+}
+
+// ── 回复用户（1v1 对话）────────────────────────────────
+
+export type ReplyToUserParams = ListenContextInput & {
+    userText: string;
+    recentTexts?: string[];
+};
+
+export async function generateListenReply(params: ReplyToUserParams): Promise<ListenCommentResult> {
+    const { character, track, userLabel, userText } = params;
+    const said = userText.trim();
+    if (!said) return { text: null, error: "没有说话内容。" };
+    if (!character.persona?.trim() && !character.personality?.trim()) {
+        return { text: null, error: `角色「${character.name || "未命名"}」还没有人设。` };
+    }
+    const apiConfig = resolveCharacterApiConfig(character.id);
+    if (!apiConfig) return { text: null, error: "这个角色还没有绑定 API 配置。" };
+    const recentTexts = params.recentTexts ?? getRecentBubbleTexts(track.id);
+    const systemPrompt = [
+        `你正在和一个人一起听歌。你是「${character.name || "这个角色"}」。`,
+        "对方会在听歌时随口跟你说话，请像平时一样接话，不要像客服答疑。",
+        "",
+        ...buildSharedContext({ character, track, userLabel }, recentTexts),
+        "【输出要求】只回一句 10~50 字的话，最多 80 字；不写动作、神态、括号、角色名前缀或表情符号；直接输出回复本身。",
+    ].join("\n");
+    const result = await simpleLLMCall(apiConfig, [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `对方刚说：${said}` },
+    ], { temperature: 0.9, max_tokens: 2048 });
+    if (result.error || !result.content) return { text: null, error: result.error || "模型没有返回内容。" };
+    const cleaned = sanitizeListenText(result.content);
+    if (!cleaned) return { text: null, error: "模型没有给出可用回复。" };
+    return { text: cleaned };
 }
 
 // ── 组装一条弹幕（新行为的样板）────────────────────────
