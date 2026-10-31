@@ -38,6 +38,13 @@ export default function ListenTogetherPanel({ onStart, onClose }: Props) {
     const [distanceDraft, setDistanceDraft] = useState("");
     const [intervalMin, setIntervalMin] = useState(() => loadListenSession().intervalMin);
     const [intervalMax, setIntervalMax] = useState(() => loadListenSession().intervalMax);
+    const [intervalPreset, setIntervalPreset] = useState<"quiet" | "normal" | "active" | "custom">(() => {
+        const { intervalMin, intervalMax } = loadListenSession();
+        if (intervalMin === 90 && intervalMax === 180) return "quiet";
+        if (intervalMin === 10 && intervalMax === 30) return "active";
+        if (intervalMin === 25 && intervalMax === 60) return "normal";
+        return "custom";
+    });
     const [userAvatar, setUserAvatar] = useState<string | undefined>();
 
     const ready = useMemo(
@@ -94,20 +101,31 @@ export default function ListenTogetherPanel({ onStart, onClose }: Props) {
         setDistanceDraft(next === null ? "" : String(next));
     };
 
+    const applyIntervalPreset = (preset: "quiet" | "normal" | "active") => {
+        const values = {
+            quiet: [90, 180],
+            normal: [25, 60],
+            active: [10, 30],
+        } as const;
+        const [min, max] = values[preset];
+        setIntervalPreset(preset);
+        setIntervalMin(min);
+        setIntervalMax(max);
+    };
+
     const start = () => {
         if (!activeId) return;
         const min = Math.max(5, Math.min(300, intervalMin));
         const max = Math.max(min, Math.min(600, intervalMax));
         saveSelectedCharacterIds([activeId]);
         markListenStarted([activeId]);
-        // 面板只保存偏好；active 必须由播放器的 startListenTogether 在用户真正点开始时写入。
-        saveListenSession({ ...loadListenSession(), active: false, characterIds: [activeId], intervalMin: min, intervalMax: max, startedAt: 0 });
+        saveListenSession({ ...loadListenSession(), characterIds: [activeId], intervalMin: min, intervalMax: max });
         onStart([activeId], min, max);
     };
 
     return (
         <div className="lt-panel-mask" onClick={onClose}>
-            <div className="lt-panel lt-panel-official" onClick={event => event.stopPropagation()}>
+            <div className="lt-panel lt-panel-official" role="dialog" aria-modal="true" aria-label="开始一起听" onClick={event => event.stopPropagation()}>
                 <div className="lt-panel-head">
                     <div>
                         <span className="lt-panel-eyebrow">LISTEN TOGETHER</span>
@@ -118,22 +136,24 @@ export default function ListenTogetherPanel({ onStart, onClose }: Props) {
                     </button>
                 </div>
 
-                <div className="lt-pair-preview">
-                    <div className="lt-pair-avatars">
-                        <span className="lt-pair-avatar lt-pair-avatar-user">
-                            {userAvatar ? <img src={userAvatar} alt="" /> : <span>我</span>}
-                        </span>
-                        <span className="lt-pair-avatar lt-pair-avatar-character">
-                            {activeCharacter?.avatar ? <img src={activeCharacter.avatar} alt="" /> : <span>{(activeCharacter?.name || "?").slice(0, 1)}</span>}
-                        </span>
+                <div className="lt-panel-scroll">
+                    <div className="lt-panel-scroll-inner">
+                    <div className="lt-pair-preview">
+                        <div className="lt-pair-avatars">
+                            <span className="lt-pair-avatar lt-pair-avatar-user">
+                                {userAvatar ? <img src={userAvatar} alt="" /> : <span>我</span>}
+                            </span>
+                            <span className="lt-pair-avatar lt-pair-avatar-character">
+                                {activeCharacter?.avatar ? <img src={activeCharacter.avatar} alt="" /> : <span>{(activeCharacter?.name || "?").slice(0, 1)}</span>}
+                            </span>
+                        </div>
+                        <div className="lt-pair-copy">
+                            <strong>和 {activeCharacter?.name || "TA"} 一起听</strong>
+                            <span>已一起听 {formatListenDuration(activeRelation?.listenedSeconds || 0)}</span>
+                        </div>
                     </div>
-                    <div className="lt-pair-copy">
-                        <strong>和 {activeCharacter?.name || "TA"} 一起听</strong>
-                        <span>已一起听 {formatListenDuration(activeRelation?.listenedSeconds || 0)}</span>
-                    </div>
-                </div>
 
-                <div className="lt-panel-section">
+                    <div className="lt-panel-section">
                     <div className="lt-section-title"><b>选择陪听对象</b><span>{ready.length} 位可用角色</span></div>
                     <div className="lt-sort-tabs" role="tablist">
                         <button className="lt-sort-tab" {...(sortMode === "chat" ? { "data-on": "" } : {})} onClick={() => setSortMode("chat")}>聊天最多</button>
@@ -171,13 +191,23 @@ export default function ListenTogetherPanel({ onStart, onClose }: Props) {
                     </div>
                 </div>
 
-                <div className="lt-panel-section lt-interval-section">
-                    <div className="lt-section-title"><b>自动发言间隔</b><span>{intervalMin}s – {intervalMax}s</span></div>
-                    <div className="lt-range-row"><span>最短</span><input type="range" min={5} max={300} step={5} value={intervalMin} onChange={event => setIntervalMin(Number(event.target.value))} /></div>
-                    <div className="lt-range-row"><span>最长</span><input type="range" min={10} max={600} step={5} value={intervalMax} onChange={event => setIntervalMax(Number(event.target.value))} /></div>
+                    <div className="lt-panel-section lt-interval-section">
+                        <div className="lt-section-title"><b>自动发言间隔</b><span>{intervalMin}s – {intervalMax}s</span></div>
+                        <div className="lt-interval-presets" aria-label="主动发言频率">
+                            <button data-on={intervalPreset === "quiet" ? "" : undefined} onClick={() => applyIntervalPreset("quiet")}>安静</button>
+                            <button data-on={intervalPreset === "normal" ? "" : undefined} onClick={() => applyIntervalPreset("normal")}>正常</button>
+                            <button data-on={intervalPreset === "active" ? "" : undefined} onClick={() => applyIntervalPreset("active")}>活跃</button>
+                            <button data-on={intervalPreset === "custom" ? "" : undefined} onClick={() => setIntervalPreset("custom")}>自定义</button>
+                        </div>
+                        <div className="lt-range-row"><span>最短</span><input type="range" min={5} max={300} step={5} value={intervalMin} onChange={event => { setIntervalPreset("custom"); setIntervalMin(Number(event.target.value)); }} /></div>
+                        <div className="lt-range-row"><span>最长</span><input type="range" min={10} max={600} step={5} value={intervalMax} onChange={event => { setIntervalPreset("custom"); setIntervalMax(Number(event.target.value)); }} /></div>
+                    </div>
+                    </div>
                 </div>
 
-                <button className="lt-start-button" disabled={!activeId} onClick={start}>开始一起听</button>
+                <div className="lt-panel-footer">
+                    <button className="lt-start-button" disabled={!activeId} onClick={start}>开始一起听</button>
+                </div>
             </div>
         </div>
     );

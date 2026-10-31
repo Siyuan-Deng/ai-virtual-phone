@@ -7,13 +7,34 @@
 .lt-panel-official {
     width: min(390px, calc(100% - 28px));
     max-height: min(90%, 700px);
-    padding: 22px 20px 20px;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 22px 20px 0;
     border-radius: 22px;
     background: var(--c-music-bg, #f7f7f8);
     border: 1px solid color-mix(in srgb, var(--c-music-text) 10%, transparent);
     color: var(--c-music-text);
     box-shadow: 0 22px 65px rgba(0, 0, 0, 0.24);
+    overflow: hidden;
+}
+
+.lt-panel-scroll {
+    min-height: 0;
+    flex: 1 1 auto;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 1px 18px;
+}
+
+.lt-panel-scroll-inner { min-height: 100%; }
+
+.lt-panel-footer {
+    flex: 0 0 auto;
+    padding: 12px 0 max(16px, env(safe-area-inset-bottom, 0px));
+    background: var(--c-music-bg, #f7f7f8);
+    border-top: 1px solid color-mix(in srgb, var(--c-music-text) 9%, transparent);
 }
 
 .lt-panel-official .lt-panel-head {
@@ -221,10 +242,14 @@
 
 .lt-range-row input { flex: 1; accent-color: var(--c-music-accent); }
 
+.lt-interval-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; margin: 10px 0 12px; }
+.lt-interval-presets button { min-width: 0; min-height: 32px; border: 1px solid var(--c-music-surface-solid); border-radius: 8px; background: var(--c-music-surface); color: var(--c-music-text); font-size: 10px; cursor: pointer; }
+.lt-interval-presets button[data-on] { border-color: color-mix(in srgb, var(--c-music-accent) 48%, transparent); color: var(--c-music-accent); background: color-mix(in srgb, var(--c-music-accent) 9%, transparent); }
+
 .lt-start-button {
     width: 100%;
     min-height: 42px;
-    margin-top: 20px;
+    margin-top: 0;
     border: 0;
     border-radius: 12px;
     background: var(--c-music-accent);
@@ -266,60 +291,16 @@
 .lt-bubble[data-user] .lt-bubble-name { display: none; }
 .lt-bubbles { bottom: 104px; }
 
-/* 移动端面板：内容多时由面板内部滚动，避免底部按钮被裁掉。 */
-.lt-panel-mask { align-items: flex-start; justify-content: center; overflow-y: auto; padding: max(12px, var(--page-header-safe-top, 48px)) 14px 18px; box-sizing: border-box; }
-.lt-panel-official { box-sizing: border-box; width: min(390px, 100%); height: min(700px, calc(100dvh - var(--page-header-safe-top, 48px) - 18px)); max-height: none; min-height: 0; flex: 0 0 auto; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: max(24px, env(safe-area-inset-bottom, 0px)); }
+/* 移动端：遮罩不参与滚动；仅中间内容区滚动，启动按钮始终可点击。 */
+.lt-panel-mask { position: fixed; inset: 0; align-items: center; justify-content: center; overflow: hidden; padding: max(12px, var(--page-header-safe-top, 48px)) 14px max(12px, env(safe-area-inset-bottom, 0px)); box-sizing: border-box; }
+.lt-panel-official { box-sizing: border-box; width: min(390px, 100%); height: min(700px, calc(100dvh - var(--page-header-safe-top, 48px) - max(24px, env(safe-area-inset-bottom, 0px)))); max-height: none; min-height: 0; flex: 0 1 auto; }
 
 /* 角色头像固定为正方形，禁止 flex 压缩，统一裁成圆形。 */
 .lt-panel-avatar, .lt-panel-avatar img, .lt-panel-avatar-text { width: 30px; height: 30px; min-width: 30px; min-height: 30px; max-width: 30px; max-height: 30px; flex: 0 0 30px; aspect-ratio: 1 / 1; }
-.lt-panel-avatar { border-radius: 50%; overflow: hidden; }
-.lt-panel-avatar img { display: block; object-fit: cover; }
+.lt-panel-avatar { display: block; border-radius: 50%; overflow: hidden; }
+.lt-panel-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .lt-panel-avatar-text { display: flex; align-items: center; justify-content: center; }
 .lt-pair-avatar, .lt-pair-avatar img { width: 46px; height: 46px; min-width: 46px; min-height: 46px; max-width: 46px; max-height: 46px; flex: 0 0 46px; aspect-ratio: 1 / 1; }
-.lt-pair-avatar img { display: block; object-fit: cover; }
-
-/* 完整的弹层高度链：这是手机端可滚到底的关键。 */
-.lt-panel-mask {
-    position: absolute;
-    inset: 0;
-    z-index: 80;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    touch-action: pan-y;
-    background: rgba(0, 0, 0, 0.42);
-    backdrop-filter: blur(3px);
-    -webkit-backdrop-filter: blur(3px);
-    padding: calc(var(--page-header-safe-top, 48px) + 10px) 14px calc(18px + env(safe-area-inset-bottom, 0px));
-    box-sizing: border-box;
-}
-
-.lt-panel-official {
-    position: relative;
-    display: block;
-    width: min(390px, 100%);
-    height: auto;
-    max-height: calc(100dvh - var(--page-header-safe-top, 48px) - 28px - env(safe-area-inset-bottom, 0px));
-    min-height: min-content;
-    margin: 0 auto;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-y;
-    padding-bottom: calc(82px + env(safe-area-inset-bottom, 0px));
-}
-
-/* 开始按钮始终留在视口内，不需要拖到容器最底部。 */
-.lt-start-button {
-    position: sticky;
-    bottom: -20px;
-    z-index: 2;
-    margin-top: 18px;
-    box-shadow: 0 -10px 18px var(--c-music-bg, #f7f7f8);
-}
-
-@supports not (height: 100dvh) {
-    .lt-panel-official { max-height: calc(100vh - var(--page-header-safe-top, 48px) - 28px); }
-}
+.lt-pair-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.lt-chat-who-btn img, .lt-bubble-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.lt-chat-who-btn, .lt-bubble-avatar { flex: 0 0 auto; aspect-ratio: 1 / 1; overflow: hidden; border-radius: 50%; }

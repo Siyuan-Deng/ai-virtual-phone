@@ -180,13 +180,15 @@ export default function ListenTogetherLayer({ track, currentTime, isPlaying, onN
         try {
             const result = await generateListenReply({ character: target, track: current, userLabel: resolveUserLabel(target.id), userText: text, recentTexts: getRecentBubbleTexts(current.id) });
             if (!result.text) {
-                if (result.error && mountedRef.current) setError(result.error);
+                if (mountedRef.current) setError(result.error ? "TA 暂时没有接上这句话" : "这次没能听清，等会儿再说");
                 return;
             }
             const reply = createBubble(target, result.text, "comment");
             appendListenHistory(current.id, reply);
             markCommentLine(target.id, current.id, result.text);
-            if (mountedRef.current) pushBubble(reply);
+            if (mountedRef.current) { setError(null); pushBubble(reply); }
+        } catch {
+            if (mountedRef.current) setError("这次没能听清，等会儿再说");
         } finally {
             if (mountedRef.current) setReplying(false);
         }

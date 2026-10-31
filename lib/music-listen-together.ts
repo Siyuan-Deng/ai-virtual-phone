@@ -100,15 +100,21 @@ export function loadListenSession(): ListenSession {
         const raw = kvGet(SESSION_KEY);
         if (!raw) return { ...DEFAULT_SESSION };
         const parsed = JSON.parse(raw) as Partial<ListenSession>;
-        return {
-            active: parsed.active === true,
-            characterIds: Array.isArray(parsed.characterIds)
-                ? parsed.characterIds.filter((id): id is string => typeof id === "string")
-                : [],
+        const startedAt = typeof parsed.startedAt === "number" ? parsed.startedAt : 0;
+        const characterIds = Array.isArray(parsed.characterIds)
+            ? parsed.characterIds.filter((id): id is string => typeof id === "string")
+            : [];
+        // 旧版本会在仅选择角色时写入 active=true；没有开始时间的一律视为未开始。
+        const active = parsed.active === true && startedAt > 0 && characterIds.length > 0;
+        const session = {
+            active,
+            characterIds,
             intervalMin: clampNumber(parsed.intervalMin, 5, 300, DEFAULT_SESSION.intervalMin),
             intervalMax: clampNumber(parsed.intervalMax, 5, 600, DEFAULT_SESSION.intervalMax),
-            startedAt: typeof parsed.startedAt === "number" ? parsed.startedAt : 0,
+            startedAt,
         };
+        if (parsed.active === true && !active) kvSet(SESSION_KEY, JSON.stringify(session));
+        return session;
     } catch {
         return { ...DEFAULT_SESSION };
     }
