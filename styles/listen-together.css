@@ -7,34 +7,13 @@
 .lt-panel-official {
     width: min(390px, calc(100% - 28px));
     max-height: min(90%, 700px);
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    padding: 22px 20px 0;
+    padding: 22px 20px 20px;
     border-radius: 22px;
     background: var(--c-music-bg, #f7f7f8);
     border: 1px solid color-mix(in srgb, var(--c-music-text) 10%, transparent);
     color: var(--c-music-text);
     box-shadow: 0 22px 65px rgba(0, 0, 0, 0.24);
-    overflow: hidden;
-}
-
-.lt-panel-scroll {
-    min-height: 0;
-    flex: 1 1 auto;
     overflow-y: auto;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
-    padding: 0 1px 18px;
-}
-
-.lt-panel-scroll-inner { min-height: 100%; }
-
-.lt-panel-footer {
-    flex: 0 0 auto;
-    padding: 12px 0 max(16px, env(safe-area-inset-bottom, 0px));
-    background: var(--c-music-bg, #f7f7f8);
-    border-top: 1px solid color-mix(in srgb, var(--c-music-text) 9%, transparent);
 }
 
 .lt-panel-official .lt-panel-head {
@@ -242,14 +221,10 @@
 
 .lt-range-row input { flex: 1; accent-color: var(--c-music-accent); }
 
-.lt-interval-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; margin: 10px 0 12px; }
-.lt-interval-presets button { min-width: 0; min-height: 32px; border: 1px solid var(--c-music-surface-solid); border-radius: 8px; background: var(--c-music-surface); color: var(--c-music-text); font-size: 10px; cursor: pointer; }
-.lt-interval-presets button[data-on] { border-color: color-mix(in srgb, var(--c-music-accent) 48%, transparent); color: var(--c-music-accent); background: color-mix(in srgb, var(--c-music-accent) 9%, transparent); }
-
 .lt-start-button {
     width: 100%;
     min-height: 42px;
-    margin-top: 0;
+    margin-top: 20px;
     border: 0;
     border-radius: 12px;
     background: var(--c-music-accent);
@@ -291,16 +266,49 @@
 .lt-bubble[data-user] .lt-bubble-name { display: none; }
 .lt-bubbles { bottom: 104px; }
 
-/* 移动端：遮罩不参与滚动；仅中间内容区滚动，启动按钮始终可点击。 */
-.lt-panel-mask { position: fixed; inset: 0; align-items: center; justify-content: center; overflow: hidden; padding: max(12px, var(--page-header-safe-top, 48px)) 14px max(12px, env(safe-area-inset-bottom, 0px)); box-sizing: border-box; }
-.lt-panel-official { box-sizing: border-box; width: min(390px, 100%); height: min(700px, calc(100dvh - var(--page-header-safe-top, 48px) - max(24px, env(safe-area-inset-bottom, 0px)))); max-height: none; min-height: 0; flex: 0 1 auto; }
+/* 发言失败：摘要与技术原因使用不同层级和颜色，默认不打断听歌。 */
+.lt-layer-error {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px 8px;
+    pointer-events: auto;
+    color: #ffb454;
+}
+.lt-layer-error .lt-error-summary { color: #ffb454; }
+.lt-error-detail-toggle {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #8ec5ff;
+    font: inherit;
+    font-size: 10px;
+    text-decoration: underline;
+    cursor: pointer;
+}
+.lt-error-detail {
+    flex: 0 0 100%;
+    max-height: 96px;
+    margin-top: 2px;
+    padding: 7px 9px;
+    overflow: auto;
+    border: 1px solid rgba(255, 120, 100, 0.28);
+    border-radius: 8px;
+    background: rgba(80, 20, 24, 0.72);
+    color: #ffb7a8;
+    font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* 移动端面板：内容多时由面板内部滚动，避免底部按钮被裁掉。 */
+.lt-panel-mask { align-items: flex-start; justify-content: center; overflow-y: auto; padding: max(12px, var(--page-header-safe-top, 48px)) 14px 18px; box-sizing: border-box; }
+.lt-panel-official { box-sizing: border-box; width: min(390px, 100%); height: min(700px, calc(100dvh - var(--page-header-safe-top, 48px) - 18px)); max-height: none; min-height: 0; flex: 0 0 auto; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: max(24px, env(safe-area-inset-bottom, 0px)); }
 
 /* 角色头像固定为正方形，禁止 flex 压缩，统一裁成圆形。 */
 .lt-panel-avatar, .lt-panel-avatar img, .lt-panel-avatar-text { width: 30px; height: 30px; min-width: 30px; min-height: 30px; max-width: 30px; max-height: 30px; flex: 0 0 30px; aspect-ratio: 1 / 1; }
-.lt-panel-avatar { display: block; border-radius: 50%; overflow: hidden; }
-.lt-panel-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.lt-panel-avatar { border-radius: 50%; overflow: hidden; }
+.lt-panel-avatar img { display: block; object-fit: cover; }
 .lt-panel-avatar-text { display: flex; align-items: center; justify-content: center; }
 .lt-pair-avatar, .lt-pair-avatar img { width: 46px; height: 46px; min-width: 46px; min-height: 46px; max-width: 46px; max-height: 46px; flex: 0 0 46px; aspect-ratio: 1 / 1; }
-.lt-pair-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.lt-chat-who-btn img, .lt-bubble-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
-.lt-chat-who-btn, .lt-bubble-avatar { flex: 0 0 auto; aspect-ratio: 1 / 1; overflow: hidden; border-radius: 50%; }
+.lt-pair-avatar img { display: block; object-fit: cover; }

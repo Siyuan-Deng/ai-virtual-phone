@@ -50,12 +50,19 @@ type Props = {
 
 type SkipVote = { characterId: string; characterName: string; reason: string };
 
+function formatFailureDetail(value: unknown): string {
+    const detail = value instanceof Error ? value.message : typeof value === "string" ? value : "";
+    return detail.trim() || "请求未返回可用的错误信息。";
+}
+
 export default function ListenTogetherLayer({ track, currentTime, isPlaying, onNext, onExit }: Props) {
     const [session, setSession] = useState<ListenSession>(() => loadListenSession());
     const [characters] = useState<Character[]>(() => loadCharacters());
     const [bubbles, setBubbles] = useState<ListenBubble[]>([]);
     const [pendingSkip, setPendingSkip] = useState<SkipVote | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [errorDetail, setErrorDetail] = useState<string | null>(null);
+    const [showErrorDetail, setShowErrorDetail] = useState(false);
     const [busy, setBusy] = useState(false);
     const [softSkipId, setSoftSkipId] = useState<string | null>(null);
     const [talkTo, setTalkTo] = useState<string | null>(null);
@@ -70,6 +77,20 @@ export default function ListenTogetherLayer({ track, currentTime, isPlaying, onN
     const lastEvalAtRef = useRef(0);
     const denyCountRef = useRef(0);
     const denyCooldownUntilRef = useRef(0);
+
+    const reportFailure = useCallback((detail: string | undefined, summary = "TA 暂时没有接上这句话") => {
+        if (!mountedRef.current) return;
+        setError(summary);
+        setErrorDetail(detail || "模型没有返回可用内容。");
+        setShowErrorDetail(false);
+    }, []);
+
+    const clearFailure = useCallback(() => {
+        if (!mountedRef.current) return;
+        setError(null);
+        setErrorDetail(null);
+        setShowErrorDetail(false);
+    }, []);
 
     const trackRef = useRef(track);
     const currentTimeRef = useRef(currentTime);
@@ -148,16 +169,16 @@ export default function ListenTogetherLayer({ track, currentTime, isPlaying, onN
             recentTexts: getRecentBubbleTexts(current.id),
         });
         if (!result.text) {
-            if (result.error && mountedRef.current) setError(result.error);
+            reportFailure(result.error);
             return null;
         }
-        if (mountedRef.current) setError(null);
+        clearFailure();
         const bubble = createBubble(character, result.text, "comment");
         appendListenHistory(current.id, bubble);
         markCommentLine(character.id, current.id, result.text);
         if (mountedRef.current) pushBubble(bubble);
         return bubble;
-    }, [pushBubble]);
+    }, [clearFailure, pushBubble, reportFailure]);
 
     const sendMessage = useCallback(async () => {
         const text = draft.trim();
@@ -180,19 +201,18 @@ export default function ListenTogetherLayer({ track, currentTime, isPlaying, onN
         try {
             const result = await generateListenReply({ character: target, track: current, userLabel: resolveUserLabel(target.id), userText: text, recentTexts: getRecentBubbleTexts(current.id) });
             if (!result.text) {
-                if (mountedRef.current) setError(result.error ? "TA 暂时没有接上这句话" : "这次没能听清，等会儿再说");
+                reportFailure(result.error);
                 return;
             }
             const reply = createBubble(target, result.text, "comment");
             appendListenHistory(current.id, reply);
             markCommentLine(target.id, current.id, result.text);
-            if (mountedRef.current) { setError(null); pushBubble(reply); }
-        } catch {
-            if (mountedRef.current) setError("这次没能听清，等会儿再说");
+            clearFailure();
+            if (mountedRef.current) pushBubble(reply);
         } finally {
             if (mountedRef.current) setReplying(false);
         }
-    }, [draft, pushBubble, replying, roster, talkTo]);
+    }, [clearFailure, draft, pushBubble, replying, reportFailure, roster, talkTo]);
 
     // ── 手动「一起评」：串行触发全部角色，后面的能看到前面的（顺带验证接话）──
     const runAll = useCallback(async () => {
@@ -208,7 +228,7 @@ export default function ListenTogetherLayer({ track, currentTime, isPlaying, onN
             speakingRef.current = false;
             if (mountedRef.current) setBusy(false);
         }
-    }, [roster, speak]);
+    }, [reportFailure, roster, speak]);
 
     // ── 切歌阈值：按人数动态 ──
     // 1 人=不弹窗，走弹幕内嵌「切歌」软确认；2 人=1 票即弹窗；3 人+=≥2 票或 ≥60%。
@@ -285,7 +305,7 @@ export default function ListenTogetherLayer({ track, currentTime, isPlaying, onN
                     playedSeconds: currentTimeRef.current,
                     recentTexts: getRecentBubbleTexts(trackRef.current.id),
                 });
-                if (decision.error && mountedRef.current) setError(decision.error);
+                if (decision.error) reportFailure(decision.error, "TA 暂时没有接上这句话");
                 if (decision.skip && mountedRef.current && !pendingSkipRef.current) {
                     requestSkip({
                         characterId: character.id,
@@ -365,7 +385,17 @@ export default function ListenTogetherLayer({ track, currentTime, isPlaying, onN
                 </div>
             </div>
 
-            {error && <div className="lt-layer-error">{error}</div>}
+            {error && (
+                <div className="lt-layer-error" role="status">
+                    <span className="lt-error-summary">{error}</span>
+                    {errorDetail && (
+                        <button className="lt-error-detail-toggle" onClick={() => setShowErrorDetail(prev => !prev)} aria-expanded={showErrorDetail}>
+                            {showErrorDetail ? "收起原因" : "查看原因"}
+                        </button>
+                    )}
+                    {showErrorDetail && errorDetail && <div className="lt-error-detail">{formatFailureDetail(errorDetail)}</div>}
+                </div>
+            )}
 
             {/* 弹幕堆叠 */}
             <div className="lt-bubbles">
