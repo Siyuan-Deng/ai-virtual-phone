@@ -277,3 +277,49 @@
 .lt-panel-avatar-text { display: flex; align-items: center; justify-content: center; }
 .lt-pair-avatar, .lt-pair-avatar img { width: 46px; height: 46px; min-width: 46px; min-height: 46px; max-width: 46px; max-height: 46px; flex: 0 0 46px; aspect-ratio: 1 / 1; }
 .lt-pair-avatar img { display: block; object-fit: cover; }
+
+/* 完整的弹层高度链：这是手机端可滚到底的关键。 */
+.lt-panel-mask {
+    position: absolute;
+    inset: 0;
+    z-index: 80;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    background: rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    padding: calc(var(--page-header-safe-top, 48px) + 10px) 14px calc(18px + env(safe-area-inset-bottom, 0px));
+    box-sizing: border-box;
+}
+
+.lt-panel-official {
+    position: relative;
+    display: block;
+    width: min(390px, 100%);
+    height: auto;
+    max-height: calc(100dvh - var(--page-header-safe-top, 48px) - 28px - env(safe-area-inset-bottom, 0px));
+    min-height: min-content;
+    margin: 0 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    padding-bottom: calc(82px + env(safe-area-inset-bottom, 0px));
+}
+
+/* 开始按钮始终留在视口内，不需要拖到容器最底部。 */
+.lt-start-button {
+    position: sticky;
+    bottom: -20px;
+    z-index: 2;
+    margin-top: 18px;
+    box-shadow: 0 -10px 18px var(--c-music-bg, #f7f7f8);
+}
+
+@supports not (height: 100dvh) {
+    .lt-panel-official { max-height: calc(100vh - var(--page-header-safe-top, 48px) - 28px); }
+}

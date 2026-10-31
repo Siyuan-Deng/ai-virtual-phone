@@ -76,7 +76,11 @@ export default function MusicPlayer() {
     const [showTastePage, setShowTastePage] = useState(false);
     const [listenActive, setListenActive] = useState(() => {
         const session = loadListenSession();
-        return session.active && session.characterIds.length > 0;
+        // 旧版本可能把「只选了角色、还没点开始」的临时状态持久化成 active；
+        // 这种陈旧会话不能自动恢复，否则用户一打开就会看到「已结束」。
+        const valid = session.active && session.characterIds.length > 0 && session.startedAt > 0;
+        if (!valid && session.active) saveListenSession({ ...session, active: false });
+        return valid;
     });
     const [artistView, setArtistView] = useState<{ id: number; name: string } | null>(null);
     const [palette, setPalette] = useState<CoverPalette>(DEFAULT_COVER_PALETTE);
@@ -104,7 +108,12 @@ export default function MusicPlayer() {
             });
             // 一起听会话状态同样依赖 kv 水合，首帧读到的是空缓存
             const session = loadListenSession();
-            if (session.active && session.characterIds.length > 0) setListenActive(true);
+            if (session.active && session.characterIds.length > 0 && session.startedAt > 0) {
+                setListenActive(true);
+            } else if (session.active) {
+                saveListenSession({ ...session, active: false });
+                setListenActive(false);
+            }
         }, ms));
         return () => timers.forEach(clearTimeout);
     }, []);

@@ -100,7 +100,8 @@ export default function ListenTogetherPanel({ onStart, onClose }: Props) {
         const max = Math.max(min, Math.min(600, intervalMax));
         saveSelectedCharacterIds([activeId]);
         markListenStarted([activeId]);
-        saveListenSession({ ...loadListenSession(), characterIds: [activeId], intervalMin: min, intervalMax: max });
+        // 面板只保存偏好；active 必须由播放器的 startListenTogether 在用户真正点开始时写入。
+        saveListenSession({ ...loadListenSession(), active: false, characterIds: [activeId], intervalMin: min, intervalMax: max, startedAt: 0 });
         onStart([activeId], min, max);
     };
 
