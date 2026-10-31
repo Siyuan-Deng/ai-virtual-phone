@@ -244,23 +244,43 @@ export async function getThemeAssetDataUrl(id: string): Promise<string | null> {
   return record?.dataUrl ?? null;
 }
 
+// 批量读：原实现对每个 id 各走一次 readAssetRecord，每次都「开库 → 事务 → 关库」，
+// 几十条资产就是几十次连接建立/关闭。这里合并成单连接 + 单事务。
+// 注意事务写法：必须先挂 transaction.oncomplete 再发请求——反过来（先 await 请求
+// 再挂完成回调）是竞态，事务可能在挂之前就提交完毕，回调永不触发。
+async function readAssetRecordsBatch(ids: string[]): Promise<ThemeAssetRecord[]> {
+  const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+  if (uniqueIds.length === 0) return [];
+
+  const database = await openThemeDb();
+  if (!database) return [];
+
+  try {
+    const transaction = database.transaction(THEME_ASSET_STORE, "readonly");
+    const store = transaction.objectStore(THEME_ASSET_STORE);
+    const done = runTransactionDone(transaction);
+    const requests = uniqueIds.map((id) => runRequest(store.get(id)));
+    const rows = await Promise.all(requests);
+    await done;
+    return rows.filter((row): row is ThemeAssetRecord => Boolean(row && (row as ThemeAssetRecord).id));
+  } catch {
+    return [];
+  } finally {
+    database.close();
+  }
+}
+
 export async function getThemeAssetMap(ids: string[]): Promise<Record<string, string>> {
   const map: Record<string, string> = {};
-  const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
-  const rows = await Promise.all(uniqueIds.map((id) => readAssetRecord(id)));
+  const rows = await readAssetRecordsBatch(ids);
   rows.forEach((row) => {
-    if (!row) {
-      return;
-    }
     map[row.id] = row.dataUrl;
   });
   return map;
 }
 
 export async function readThemeAssetRecords(ids: string[]): Promise<ThemeAssetRecord[]> {
-  const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
-  const rows = await Promise.all(uniqueIds.map((id) => readAssetRecord(id)));
-  return rows.filter((row): row is ThemeAssetRecord => Boolean(row));
+  return readAssetRecordsBatch(ids);
 }
 
 export async function writeThemeAssetRecords(records: ThemeAssetRecord[]): Promise<void> {

@@ -258,6 +258,19 @@ export function MainApp() {
         console.warn("[MainApp] desktop theme preload failed:", error);
       }
 
+      // 字体预热：此前 BUILTIN_FONT_URLS / warmBuiltinFonts / scheduleIdleTask 三个
+      // 声明只有定义、没有调用点，首屏先用系统兜底字体排版、主题字体到位后整页重排，
+      // 表现为「闪 + 卡」。这里恢复预热，但只推到空闲期做、并设 1.5s 上限到点放行：
+      // 它只是让首帧直接就是最终排版，不该挡住进入。
+      // 与上面的主题资产准备互不依赖，所以放在它之后异步启动，不并入 await。
+      let prewarmCancelled = false;
+      const cancelIdle = scheduleIdleTask(() => {
+        const timeoutId = window.setTimeout(() => { prewarmCancelled = true; }, 1500);
+        void warmBuiltinFonts(() => prewarmCancelled || cancelled)
+          .finally(() => window.clearTimeout(timeoutId));
+      });
+      if (cancelled) cancelIdle();
+
       if (cancelled) return;
       setPreparedDesktopTheme(nextPreparedTheme);
       setHydrated(true);

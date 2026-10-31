@@ -1,0 +1,325 @@
+
+
+/* ═══════════════════════════════════════════
+   一起听 · 官方简约版面板与关系卡片
+   ═══════════════════════════════════════════ */
+
+.lt-panel-official {
+    width: min(390px, calc(100% - 28px));
+    max-height: min(90%, 700px);
+    padding: 22px 20px 20px;
+    border-radius: 22px;
+    background: var(--c-music-bg, #f7f7f8);
+    border: 1px solid color-mix(in srgb, var(--c-music-text) 10%, transparent);
+    color: var(--c-music-text);
+    box-shadow: 0 22px 65px rgba(0, 0, 0, 0.24);
+    overflow-y: auto;
+}
+
+.lt-panel-official .lt-panel-head {
+    margin-bottom: 16px;
+}
+
+.lt-panel-eyebrow {
+    display: block;
+    margin-bottom: 3px;
+    color: var(--c-music-accent);
+    font-size: 8px;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+}
+
+.lt-panel-official .lt-panel-head b {
+    display: block;
+    font-size: 21px;
+    letter-spacing: 0;
+}
+
+.lt-panel-official .lt-panel-close {
+    background: var(--c-music-surface);
+    color: var(--c-music-text);
+}
+
+.lt-pair-preview {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 15px;
+    border-radius: 16px;
+    background: var(--c-music-surface);
+    border: 1px solid var(--c-music-surface-solid);
+    margin-bottom: 20px;
+}
+
+.lt-pair-avatars {
+    position: relative;
+    width: 74px;
+    height: 48px;
+    flex-shrink: 0;
+}
+
+.lt-pair-avatar {
+    position: absolute;
+    top: 2px;
+    width: 46px;
+    height: 46px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--c-music-bg);
+    border: 3px solid var(--c-music-surface);
+    color: var(--c-music-accent);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.lt-pair-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.lt-pair-avatar-user { left: 0; z-index: 1; }
+.lt-pair-avatar-character { left: 28px; z-index: 2; }
+
+.lt-pair-copy {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 4px;
+}
+
+.lt-pair-copy strong {
+    font-size: 14px;
+    font-weight: 650;
+}
+
+.lt-pair-copy span,
+.lt-section-title span {
+    color: color-mix(in srgb, var(--c-music-text) 52%, transparent);
+    font-size: 10px;
+}
+
+.lt-panel-section { margin-top: 18px; }
+
+.lt-section-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 9px;
+}
+
+.lt-section-title b {
+    font-size: 12px;
+    font-weight: 650;
+}
+
+.lt-sort-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 3px;
+    margin-bottom: 8px;
+    border-radius: 10px;
+    background: var(--c-music-surface);
+}
+
+.lt-sort-tab {
+    flex: 1;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: color-mix(in srgb, var(--c-music-text) 55%, transparent);
+    font-size: 10px;
+    cursor: pointer;
+}
+
+.lt-sort-tab[data-on] {
+    background: var(--c-music-bg);
+    color: var(--c-music-text);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    font-weight: 600;
+}
+
+.lt-panel-chars-official { gap: 5px; margin: 0; }
+
+.lt-panel-chars-official .lt-panel-char {
+    min-height: 52px;
+    padding: 7px 10px;
+    border-radius: 12px;
+    background: transparent;
+    border-color: transparent;
+}
+
+.lt-panel-chars-official .lt-panel-char[data-checked] {
+    background: var(--c-music-surface);
+    border-color: color-mix(in srgb, var(--c-music-accent) 42%, transparent);
+}
+
+.lt-panel-name-wrap {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.lt-panel-name-wrap small {
+    color: color-mix(in srgb, var(--c-music-text) 48%, transparent);
+    font-size: 9px;
+}
+
+.lt-distance-options {
+    display: flex;
+    gap: 7px;
+}
+
+.lt-distance-option,
+.lt-distance-custom {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 0 11px;
+    border: 1px solid var(--c-music-surface-solid);
+    border-radius: 10px;
+    background: transparent;
+    color: color-mix(in srgb, var(--c-music-text) 68%, transparent);
+    font-size: 10px;
+    cursor: pointer;
+}
+
+.lt-distance-option[data-on],
+.lt-distance-custom[data-on] {
+    border-color: color-mix(in srgb, var(--c-music-accent) 50%, transparent);
+    background: color-mix(in srgb, var(--c-music-accent) 10%, transparent);
+    color: var(--c-music-accent);
+}
+
+.lt-distance-custom { gap: 5px; flex: 1; }
+.lt-distance-custom input {
+    width: 52px;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--c-music-text);
+    text-align: right;
+    font-size: 11px;
+}
+
+.lt-interval-section {
+    padding-top: 16px;
+    border-top: 1px solid color-mix(in srgb, var(--c-music-text) 9%, transparent);
+}
+
+.lt-range-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-top: 7px;
+    color: color-mix(in srgb, var(--c-music-text) 48%, transparent);
+    font-size: 9px;
+}
+
+.lt-range-row input { flex: 1; accent-color: var(--c-music-accent); }
+
+.lt-start-button {
+    width: 100%;
+    min-height: 42px;
+    margin-top: 20px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--c-music-accent);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.lt-start-button:disabled { opacity: 0.45; cursor: default; }
+.lt-panel-empty { padding: 18px; text-align: center; color: color-mix(in srgb, var(--c-music-text) 50%, transparent); font-size: 10px; }
+
+/* 互动层的用户气泡与输入栏 */
+.lt-chat-bar {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 62px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 5px 5px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--c-music-surface-solid, rgba(0, 0, 0, 0.4)) 82%, transparent);
+    border: 1px solid color-mix(in srgb, var(--c-music-accent) 20%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    pointer-events: auto;
+}
+
+.lt-chat-who { display: flex; gap: 4px; flex-shrink: 0; }
+.lt-chat-who-btn { width: 24px; height: 24px; border-radius: 50%; overflow: hidden; border: 1px solid transparent; background: color-mix(in srgb, var(--c-music-accent) 14%, transparent); color: var(--c-music-accent); display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; opacity: 0.6; }
+.lt-chat-who-btn img { width: 100%; height: 100%; object-fit: cover; }
+.lt-chat-who-btn[data-on] { opacity: 1; border-color: var(--c-music-accent); }
+.lt-chat-input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: none; border-radius: 999px; background: transparent; color: var(--c-music-text); font-size: 11px; outline: none; }
+.lt-chat-send { flex-shrink: 0; padding: 5px 13px; border-radius: 999px; border: none; background: var(--c-music-accent); color: #fff; font-size: 10px; cursor: pointer; }
+.lt-chat-send:disabled { opacity: 0.4; cursor: default; }
+.lt-bubble[data-user] { background: color-mix(in srgb, var(--c-music-accent) 26%, transparent); border-color: color-mix(in srgb, var(--c-music-accent) 34%, transparent); border-radius: 14px 14px 14px 4px; }
+.lt-bubble[data-user] .lt-bubble-name { display: none; }
+.lt-bubbles { bottom: 104px; }
+
+/* 移动端面板：内容多时由面板内部滚动，避免底部按钮被裁掉。 */
+.lt-panel-mask { align-items: flex-start; justify-content: center; overflow-y: auto; padding: max(12px, var(--page-header-safe-top, 48px)) 14px 18px; box-sizing: border-box; }
+.lt-panel-official { box-sizing: border-box; width: min(390px, 100%); height: min(700px, calc(100dvh - var(--page-header-safe-top, 48px) - 18px)); max-height: none; min-height: 0; flex: 0 0 auto; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: max(24px, env(safe-area-inset-bottom, 0px)); }
+
+/* 角色头像固定为正方形，禁止 flex 压缩，统一裁成圆形。 */
+.lt-panel-avatar, .lt-panel-avatar img, .lt-panel-avatar-text { width: 30px; height: 30px; min-width: 30px; min-height: 30px; max-width: 30px; max-height: 30px; flex: 0 0 30px; aspect-ratio: 1 / 1; }
+.lt-panel-avatar { border-radius: 50%; overflow: hidden; }
+.lt-panel-avatar img { display: block; object-fit: cover; }
+.lt-panel-avatar-text { display: flex; align-items: center; justify-content: center; }
+.lt-pair-avatar, .lt-pair-avatar img { width: 46px; height: 46px; min-width: 46px; min-height: 46px; max-width: 46px; max-height: 46px; flex: 0 0 46px; aspect-ratio: 1 / 1; }
+.lt-pair-avatar img { display: block; object-fit: cover; }
+
+/* 完整的弹层高度链：这是手机端可滚到底的关键。 */
+.lt-panel-mask {
+    position: absolute;
+    inset: 0;
+    z-index: 80;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    background: rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    padding: calc(var(--page-header-safe-top, 48px) + 10px) 14px calc(18px + env(safe-area-inset-bottom, 0px));
+    box-sizing: border-box;
+}
+
+.lt-panel-official {
+    position: relative;
+    display: block;
+    width: min(390px, 100%);
+    height: auto;
+    max-height: calc(100dvh - var(--page-header-safe-top, 48px) - 28px - env(safe-area-inset-bottom, 0px));
+    min-height: min-content;
+    margin: 0 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    padding-bottom: calc(82px + env(safe-area-inset-bottom, 0px));
+}
+
+/* 开始按钮始终留在视口内，不需要拖到容器最底部。 */
+.lt-start-button {
+    position: sticky;
+    bottom: -20px;
+    z-index: 2;
+    margin-top: 18px;
+    box-shadow: 0 -10px 18px var(--c-music-bg, #f7f7f8);
+}
+
+@supports not (height: 100dvh) {
+    .lt-panel-official { max-height: calc(100vh - var(--page-header-safe-top, 48px) - 28px); }
+}
