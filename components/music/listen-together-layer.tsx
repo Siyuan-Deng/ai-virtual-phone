@@ -20,6 +20,7 @@ import {
     generateListenComment,
     generateListenReply,
     getRecentBubbleTexts,
+    getListenHistory,
     loadListenSession,
     markCommentLine,
     markSkipDenied,
@@ -58,7 +59,7 @@ function formatFailureDetail(value: unknown): string {
 export default function ListenTogetherLayer({ track, currentTime, isPlaying, onNext, onExit }: Props) {
     const [session, setSession] = useState<ListenSession>(() => loadListenSession());
     const [characters] = useState<Character[]>(() => loadCharacters());
-    const [bubbles, setBubbles] = useState<ListenBubble[]>([]);
+    const [bubbles, setBubbles] = useState<ListenBubble[]>(() => getListenHistory(track.id));
     const [pendingSkip, setPendingSkip] = useState<SkipVote | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [errorDetail, setErrorDetail] = useState<string | null>(null);
@@ -145,7 +146,7 @@ export default function ListenTogetherLayer({ track, currentTime, isPlaying, onN
 
     // ── 换歌：清空弹幕、重置冷却、记「陪听过一次」──
     useEffect(() => {
-        setBubbles([]);
+        setBubbles(getListenHistory(track.id));
         bubbleTimersRef.current.forEach(timer => clearTimeout(timer));
         bubbleTimersRef.current.clear();
         setPendingSkip(null);
@@ -372,11 +373,11 @@ export default function ListenTogetherLayer({ track, currentTime, isPlaying, onN
         <div className="lt-layer">
             {/* 顶部状态条 */}
             <div className="lt-live-bar">
+                <button className="lt-room-back" onClick={exit} aria-label="结束一起听并返回播放器">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+                </button>
                 <span className="lt-live-dot" />
-                <b>一起听</b>
-                <span className="lt-live-people">
-                    {roster.map(character => character.name || "角色").join("、")}
-                </span>
+                <div className="lt-room-title"><b>一起听</b><span>{roster.map(character => character.name || "角色").join("、")}</span></div>
                 <div className="lt-live-actions">
                     <button className="lt-live-btn" onClick={() => void runAll()} disabled={busy}>
                         {busy ? "说话中" : "一起评"}
