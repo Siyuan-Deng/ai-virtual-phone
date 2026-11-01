@@ -89,6 +89,52 @@ export function cleanStoryExtraScenes(value: string): string {
     return value.trim().replace(/个(场景)?$/, "").trim();
 }
 
+const INSTRUCTION_HEAD = "现在暂停当前剧情，为我生成一个番外小剧场。不需要记忆区，标题自拟。";
+
+/** 拆回去时去掉拼的时候补的那个句号 */
+function dropAddedStop(value: string): string {
+    return value.trim().replace(/。$/, "").trim();
+}
+
+/** 反过来：把 buildStoryExtraInstruction 拼出来的那句（番外指令卡复制出来的）拆回模板各项。
+ *  不是这个格式就返回 null。人称照拆，名字不管（换个角色的番外窗口也能用）；「带上之前的番外」不在指令里，不返回 */
+export function parseStoryExtraInstruction(text: string): Omit<StoryExtraTemplate, "includePrevious"> | null {
+    let body = text.trim();
+    const wrapped = /^[（(]\s*\$?\s*系统指令\s*[:：]\s*([\s\S]*?)\s*[）)]$/.exec(body);
+    if (wrapped) body = wrapped[1];
+    if (!body.startsWith(INSTRUCTION_HEAD)) return null;
+    body = body.slice(INSTRUCTION_HEAD.length);
+    // 两个人称每次都有，从这里分开：前面是 if线 / 梗概 / 字数 / 场景 / 文风，后面是其它要求
+    const persons = Array.from(body.matchAll(/以(第[一二三]人称)称呼[^，。]*?，以(第[一二三]人称)称呼[^，。]*?。/g)).pop();
+    if (!persons || persons.index === undefined) return null;
+    const extra = dropAddedStop(body.slice(persons.index + persons[0].length));
+    let before = body.slice(0, persons.index);
+    const clauses = /(?:内容要([^，。]{1,40}?)字以上，)?(?:我需要([^，。]{1,20}?)个不同的场景，)?(?:文风([^。！？!?]{1,200}?)，)?$/.exec(before);
+    const words = clauses?.[1] ?? "";
+    const scenes = clauses?.[2] ?? "";
+    const style = clauses?.[3] ?? "";
+    if (clauses) before = before.slice(0, clauses.index);
+    let ifLine = "";
+    let content = before;
+    const ifMatch = /^这是一条if线：([\s\S]*?[。！？!?…」”’）)】])(?:大概内容为([\s\S]*))?$/.exec(before);
+    if (ifMatch) {
+        ifLine = ifMatch[1];
+        content = ifMatch[2] ?? "";
+    } else {
+        content = before.replace(/^大概内容为/, "");
+    }
+    return {
+        content: dropAddedStop(content),
+        ifLine: dropAddedStop(ifLine),
+        style: style.trim(),
+        words: words.trim(),
+        scenes: scenes.trim(),
+        userPerson: persons[1] as StoryExtraPerson,
+        charPerson: persons[2] as StoryExtraPerson,
+        extra,
+    };
+}
+
 /** 模板拼成发出去的那句指令，格式照用户给的范例：
  *  （$系统指令：现在暂停当前剧情，为我生成一个番外小剧场。不需要记忆区，标题自拟。这是一条if线：……。大概内容为……。
  *   内容要4000字以上，我需要3个不同的场景，文风……，以第二人称称呼{user}，以第三人称称呼{char}。其它要求）

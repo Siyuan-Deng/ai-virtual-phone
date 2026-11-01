@@ -2244,9 +2244,10 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
 
       {/* CSS Style Modal */}
       {cssModalOpen && (
-        <div style={{
+        <div className="story-css-modal" style={{
           position: "absolute", inset: 0, zIndex: 300,
-          background: "var(--c-story-bg-top, #fdfdfd)",
+          // 和番外模板面板一样：上层是页面底色；主题把底色设成透明（用壁纸）时露出下层的侧栏色，不让后面的正文透上来
+          background: "linear-gradient(var(--c-story-bg-top, #fdfdfd), var(--c-story-bg-top, #fdfdfd)), linear-gradient(180deg, var(--c-story-drawer-top, rgba(253, 253, 254, 0.98)), var(--c-story-drawer-bottom, rgba(248, 249, 250, 0.98)))",
           display: "flex", flexDirection: "column",
         }}>
           <div style={{

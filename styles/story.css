@@ -2035,6 +2035,73 @@
           justify-content: space-between;
           padding: 16px 20px 8px;
         }
+        /* 标题右边：粘贴指令、关闭 */
+        .story-template-head-actions {
+          display: inline-flex;
+          align-items: center;
+          gap: 14px;
+        }
+        .story-template-paste {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          border: none;
+          background: none;
+          padding: 0;
+          font: inherit;
+          font-size: calc(11.5px*var(--app-text-scale,1));
+          letter-spacing: 0.04em;
+          color: var(--c-story-sub, #94a3b8);
+        }
+        /* 识别了粘贴的番外指令：标题下面一条提示，右边撤销 */
+        .story-template-notice {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin: 0 20px 6px;
+          padding: 8px 12px;
+          /* 和「发送番外指令」同一套：标题色当底，字用侧栏色（壁纸主题常把页面底色设成透明，不能拿它当字色） */
+          background: var(--c-story-heading, #1e293b);
+          color: var(--c-story-on-heading, var(--c-story-drawer-top, #ffffff));
+          font-size: calc(12px*var(--app-text-scale,1));
+          letter-spacing: 0.04em;
+        }
+        .story-template-notice button {
+          margin-left: auto;
+          border: none;
+          background: none;
+          padding: 0;
+          font: inherit;
+          font-weight: 600;
+          color: inherit;
+          opacity: 0.85;
+        }
+        /* 侧栏显示选项、页面样式里的「日间模式 | 某套 ▾」：照「正篇 | 番外」那条的样子，直角、不套外框 */
+        .story-app-shell .night-side-tabs {
+          gap: 0;
+          padding: 0;
+          border: 1px solid var(--c-story-heading, #1e293b);
+          border-radius: 0;
+          background: transparent;
+        }
+        .story-app-shell .night-side-tabs button[role="tab"] {
+          padding: 7px 0;
+          border-radius: 0;
+          background: transparent;
+          box-shadow: none;
+          opacity: 1;
+          font-size: calc(12px*var(--app-text-scale,1));
+          font-weight: 400;
+          letter-spacing: 0.1em;
+          color: var(--c-story-heading, #1e293b);
+        }
+        .story-app-shell .night-side-tabs button[role="tab"][data-on="true"] {
+          background: var(--c-story-heading, #1e293b);
+          color: var(--c-story-on-heading, var(--c-story-drawer-top, #ffffff));
+        }
+        .story-app-shell .night-side-menu {
+          border-radius: 0;
+        }
         .story-template-title {
           font-size: calc(15px*var(--app-text-scale,1));
           font-weight: 600;

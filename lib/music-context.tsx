@@ -7,6 +7,7 @@ import { getAudioBlob, markTrackPlayed } from "./music-storage";
 import { findPlayableMatch, getNeteaseLyrics, getNeteasePlayUrl, getNeteasePlayInfo, getNeteaseSongDetail } from "./music-service";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { registerMusicControlBridge } from "./music-control-bridge";
+import { setMusicNowPlaying } from "./now-playing";
 
 // ── Types ──
 
@@ -110,6 +111,13 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         persistQueue(queue);
     }, [queue]);
+
+    // 锁屏、灵动岛：放歌时显示歌名、歌手、封面；停了交回去（后台保活那套或者系统默认）
+    useEffect(() => {
+        setMusicNowPlaying(isPlaying && currentTrack
+            ? { title: currentTrack.title, artist: currentTrack.artist, album: currentTrack.album, artwork: currentTrack.coverUrl }
+            : null);
+    }, [isPlaying, currentTrack]);
 
     /** Wrapped setQueue with max size enforcement */
     const setQueue = useCallback((tracks: MusicTrack[]) => {

@@ -6,7 +6,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ChevronRight, Search } from "lucide-react";
+import { Check, ChevronRight, Search } from "lucide-react";
 import { getSchemes, findScheme } from "@/lib/css-scheme-storage";
 import { NIGHT_SET_ID, getNightBinding, loadNightSet, lookSetName, nightSlotKeys, setNightBinding, useNightRevision, type NightBinding } from "@/lib/night-mode";
 import { NIGHT_THEME_GROUP_LABELS, NIGHT_THEME_GROUPS, type NightThemeGroup } from "@/lib/night-theme";
@@ -228,22 +228,22 @@ export function NightSetPage({ setId, onOpenEntity }: { setId: string; onOpenEnt
                 <section className="night-set-group">
                     <div className="night-set-group-head">
                         <h3 className="appearance-menu-section-title">角色</h3>
+                        <button
+                            type="button"
+                            className="night-set-filter"
+                            data-on={onlyConfigured ? "true" : undefined}
+                            aria-pressed={onlyConfigured}
+                            onClick={() => setOnlyConfigured((value) => !value)}
+                        >
+                            {onlyConfigured ? <Check size={13} strokeWidth={2.4} aria-hidden="true" /> : null}
+                            筛选已配置角色
+                        </button>
                         <button type="button" onClick={() => setBatchOpen(true)}>批量设置</button>
                     </div>
                     <label className="night-set-search">
                         <Search size={14} aria-hidden="true" />
                         <input value={query} placeholder="搜角色" onChange={(event) => setQuery(event.target.value)} />
                     </label>
-                    <div className="night-set-filter">
-                        <button
-                            type="button"
-                            data-on={onlyConfigured ? "true" : undefined}
-                            aria-pressed={onlyConfigured}
-                            onClick={() => setOnlyConfigured((value) => !value)}
-                        >
-                            筛选已配置角色
-                        </button>
-                    </div>
                     <div className="menu-group">
                         {shown.length ? shown.map((entity) => (
                             <button key={entity.id} type="button" className="menu-item night-card-row" onClick={() => onOpenEntity(entity)}>

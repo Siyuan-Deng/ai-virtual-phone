@@ -69,7 +69,8 @@ export function LookSetManagePage({ onOpenSet }: { onOpenSet: (setId: string) =>
 
     return (
         <div className="night-page">
-            <div className="menu-group look-manage" ref={listRef}>
+            {/* 整页就这一个列表，直接铺在页面上，不再套一张卡 */}
+            <div className="look-manage" ref={listRef}>
                 {shown.map((set) => {
                     const meta = set.id === DAY_SET_ID ? "默认搭配" : Object.keys(loadNightSet(set.id)).length ? "已配置" : "";
                     return (

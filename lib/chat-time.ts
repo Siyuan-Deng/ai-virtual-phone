@@ -32,3 +32,27 @@ export function formatChatUiTime(dateStr: string): string {
 
     return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${hhmm}`;
 }
+
+/** 每条消息自带的时间（默认不显示，给美化主题用，比如 Discord 风格名字后面那串）。
+ *  和 formatChatUiTime 的区别：今天也写出「今天」，不按星期几说 */
+export function formatChatMetaTime(dateStr: string): string {
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return "";
+
+    const now = new Date();
+    const hhmm = `${padTwo(date.getHours())}:${padTwo(date.getMinutes())}`;
+
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterdayStart = new Date(todayStart.getTime() - 86400000);
+
+    if (date.getTime() >= todayStart.getTime()) {
+        return `今天 ${hhmm}`;
+    }
+    if (date.getTime() >= yesterdayStart.getTime()) {
+        return `昨天 ${hhmm}`;
+    }
+    if (date.getFullYear() === now.getFullYear()) {
+        return `${date.getMonth() + 1}月${date.getDate()}日 ${hhmm}`;
+    }
+    return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${hhmm}`;
+}

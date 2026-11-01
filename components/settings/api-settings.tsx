@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useContext } from "react";
-import { Plus, RefreshCw, Rss, AlertCircle, FileEdit, Trash2, X, Check, Copy, Folder, FolderPlus, FolderInput, Pencil, ChevronRight, Pin } from "lucide-react";
+import { Plus, RefreshCw, Rss, AlertCircle, FileEdit, Trash2, X, Check, Copy, Folder, FolderPlus, FolderInput, Pencil, ChevronRight, Pin, Eye, EyeClosed } from "lucide-react";
 import { SettingsContext } from "../phone-settings-app";
 import { useLongPressReorder } from "./use-long-press-reorder";
 import { applyGroupOrder } from "@/lib/list-order";
@@ -21,6 +21,7 @@ import { BottomSheet, ConfirmDialog, ContentDialog } from "@/components/ui/modal
 import { Toggle, Input } from "@/components/ui/form";
 import { Alert } from "@/components/ui/feedback";
 import { determineBaseUrl, simpleLLMCall } from "@/lib/api-helpers";
+import { getApiBalance, loadBalanceVisible, saveBalanceVisible, type ApiBalance } from "@/lib/api-balance";
 
 const DEFAULT_CONFIGS: ApiConfig[] = [
     {
@@ -35,6 +36,13 @@ const DEFAULT_CONFIGS: ApiConfig[] = [
         preventEmptyGenerateRambling: true,
     }
 ];
+
+/** 卡片上余额那行写什么；查不了的不写 */
+function balanceText(balance: ApiBalance | undefined): string | null {
+    if (balance?.kind === "ok") return `余额 ${balance.text}`;
+    if (balance?.kind === "failed") return "余额查不到";
+    return null;
+}
 
 function getNativeToolProtocolLabel(config: ApiConfig): string {
     if (config.provider === "Anthropic" && !config.baseUrl) return "Anthropic";
@@ -64,6 +72,10 @@ export function ApiSettings() {
     const [fetchedModels, setFetchedModels] = useState<Record<string, string[]>>({});
     const [isTesting, setIsTesting] = useState<Record<string, boolean>>({});
     const [testResult, setTestResult] = useState<Record<string, { success: boolean; message: string }>>({});
+    // 卡片上模型名下面那行余额：回到列表时挨个查（一分钟内查过的不重查），查不了的不显示。
+    // 大标题右边的小眼睛闭上就不显示、也不查
+    const [balanceVisible, setBalanceVisible] = useState(() => loadBalanceVisible());
+    const [balances, setBalances] = useState<Record<string, ApiBalance>>({});
 
     // Load from localStorage on mount
     useEffect(() => {
@@ -78,6 +90,17 @@ export function ApiSettings() {
         setRootOrder(loadApiConfigRootOrder());
         setIsLoaded(true);
     }, []);
+
+    useEffect(() => {
+        if (!isLoaded || !balanceVisible || editingId) return;
+        let cancelled = false;
+        for (const config of configs) {
+            void getApiBalance(config).then((result) => {
+                if (!cancelled) setBalances((prev) => (prev[config.id] === result ? prev : { ...prev, [config.id]: result }));
+            });
+        }
+        return () => { cancelled = true; };
+    }, [isLoaded, balanceVisible, editingId, configs]);
 
     const persist = useCallback((newConfigs: ApiConfig[]) => {
         setConfigs(newConfigs);
@@ -363,6 +386,9 @@ export function ApiSettings() {
                     {config.pinned ? <Pin size={13} className="ml-auto shrink-0 opacity-45" aria-label="已置顶" /> : null}
                 </div>
                 <span className="menu-desc truncate">{config.defaultModel || config.provider || "未设置模型"}</span>
+                {balanceVisible && balanceText(balances[config.id]) ? (
+                    <span className="menu-desc truncate">{balanceText(balances[config.id])}</span>
+                ) : null}
             </div>
             <div className="flex gap-2 shrink-0 items-center justify-end">
                 <button
@@ -513,6 +539,21 @@ export function ApiSettings() {
                 <>
                     <div className="flex items-center">
                         <h2 className="m-0 mx-2 ts-28 font-bold italic leading-none text-black">API Settings</h2>
+                        {/* 斜体大字看着重心偏下，眼睛跟着往下挪一点；灰色，不抢标题 */}
+                        <button
+                            type="button"
+                            className="ui-link-btn"
+                            style={{ color: "var(--c-icon)", transform: "translateY(3px)" }}
+                            aria-label={balanceVisible ? "隐藏余额" : "显示余额"}
+                            aria-pressed={balanceVisible}
+                            onClick={() => {
+                                const next = !balanceVisible;
+                                setBalanceVisible(next);
+                                saveBalanceVisible(next);
+                            }}
+                        >
+                            {balanceVisible ? <Eye size={20} /> : <EyeClosed size={20} />}
+                        </button>
                     </div>
 
                     {configs.length === 0 && folders.length === 0 ? (

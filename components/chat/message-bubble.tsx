@@ -36,6 +36,8 @@ interface MessageBubbleProps {
     msg: ChatMessage;
     onUpdate?: (updated: ChatMessage) => void;
     charName?: string;
+    /** 聊天里给 TA 起的备注（没有就是空）；只给引用里藏着的「@名字」用，红包、拍一拍等仍用 charName */
+    charDisplayName?: string;
     userName?: string;
     onSystemMessage?: (text: string) => void;
     groupSize?: number;
@@ -88,7 +90,7 @@ function PluginKindBubble({ msg, kind }: { msg: ChatMessage; kind: string }) {
  * Renders a message bubble based on its mediaType.
  * Falls back to ReactMarkdown for plain text messages.
  */
-export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charName, userName, onSystemMessage, groupSize, onShowDetail, characterId, onMusicPlay, onActionSelect, displayContent, defaultTranslationExpanded = false }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charName, charDisplayName, userName, onSystemMessage, groupSize, onShowDetail, characterId, onMusicPlay, onActionSelect, displayContent, defaultTranslationExpanded = false }: MessageBubbleProps) {
     switch (msg.mediaType) {
         case "red_packet":
             return <RedPacketBubble msg={msg} charName={charName} userName={userName} groupSize={groupSize} onShowDetail={onShowDetail} />;
@@ -113,7 +115,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
         case "dice":
             return <DiceBubble msg={msg} />;
         case "quote":
-            return <QuoteBubble msg={msg} displayContent={displayContent} defaultTranslationExpanded={defaultTranslationExpanded} />;
+            return <QuoteBubble msg={msg} displayContent={displayContent} defaultTranslationExpanded={defaultTranslationExpanded} charName={charDisplayName || charName} userName={userName} />;
         case "music_share":
             return <MusicShareBubble msg={msg} onPlay={onMusicPlay} />;
         case "media_file":
@@ -157,6 +159,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
         if (prev.msg.mediaUrl !== next.msg.mediaUrl) return false;
     }
     if (prev.charName !== next.charName) return false;
+    if (prev.charDisplayName !== next.charDisplayName) return false;
     if (prev.userName !== next.userName) return false;
     if (prev.groupSize !== next.groupSize) return false;
     if (prev.characterId !== next.characterId) return false;
@@ -1600,12 +1603,17 @@ function StickerBubble({ msg, characterId }: { msg: ChatMessage; characterId?: s
 
 // ── Quote ─────────────────────────────
 
-function QuoteBubble({ msg, displayContent, defaultTranslationExpanded = false }: { msg: ChatMessage; displayContent?: string; defaultTranslationExpanded?: boolean }) {
+function QuoteBubble({ msg, displayContent, defaultTranslationExpanded = false, charName, userName }: { msg: ChatMessage; displayContent?: string; defaultTranslationExpanded?: boolean; charName?: string; userName?: string }) {
     const d = msg.mediaData;
+    // 被引用的是谁：我点的引用会记下原消息的 role；角色写的 [引用:…] 没记，几乎都是在引用我
+    const quotedRole = d?.quoteRole ?? (msg.role === "user" ? "assistant" : "user");
+    const quotedName = quotedRole === "user" ? (userName || "你") : quotedRole === "assistant" ? (charName || "TA") : "";
     return (
         <div className="chat-quote-message max-w-full">
             {d?.quotePreview && (
                 <div className="chat-quote-preview bg-black/[0.06] border-l-[3px] border-l-black/15 px-2.5 py-1.5 ts-12 text-[var(--c-icon)] mb-1.5 rounded-r-[6px] truncate max-w-full">
+                    {/* 「@被引用的人」：默认 display:none，给美化主题用（Discord 回复那行开头的 @名字） */}
+                    {quotedName && <span className="chat-quote-preview-name" data-role={quotedRole} data-name={quotedName}>@{quotedName}</span>}
                     {d.quotePreview}
                 </div>
             )}

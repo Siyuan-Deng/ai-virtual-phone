@@ -130,6 +130,54 @@ function cleanClone(root: HTMLElement): HTMLElement {
     return root;
 }
 
+/** 单行省略号（不换行 + 超出藏起来 + 省略号，比如引用那块小灰牌）：截图库在 iPhone 上画出来的字比页面上宽一点点，
+ *  放得下的也会把最后几个字省略掉，放不下的省略得更早（截图库只在 Chrome 里修了前一种）。
+ *  这里照页面上量好的定下来：放得下的不用省略号；放不下的量好页面上截到哪个字，自己补上「…」。
+ *  画宽的那一点点落在框的右内边距里，不出框 */
+function settleEllipsis(stage: HTMLElement): void {
+    for (const el of Array.from(stage.querySelectorAll<HTMLElement>("*"))) {
+        const style = getComputedStyle(el);
+        if (style.textOverflow !== "ellipsis" || !/^(nowrap|pre)$/.test(style.whiteSpace) || style.overflowX === "visible") continue;
+        const fits = el.scrollWidth <= el.clientWidth;
+        el.normalize();
+        // 里面就是一段字的才自己补（::before / ::after 加的字不算在里面）
+        const node = el.firstChild;
+        if (!fits && !(node instanceof Text && el.childNodes.length === 1)) continue;
+        const width = style.width;
+        // 先关掉省略号再量：开着的时候量出来的只有看得见的那一截
+        force(el, { "text-overflow": "clip" });
+        if (fits || !(node instanceof Text)) continue;
+        const text = node.data;
+        const ellipsis = document.createElement("span");
+        ellipsis.textContent = "…";
+        el.appendChild(ellipsis);
+        const ellipsisWidth = ellipsis.getBoundingClientRect().width;
+        ellipsis.remove();
+        const box = el.getBoundingClientRect();
+        const limit = box.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight) - ellipsisWidth + 0.5;
+        const range = document.createRange();
+        const endOf = (index: number) => {
+            range.setStart(node, 0);
+            range.setEnd(node, index);
+            const rects = range.getClientRects();
+            return rects.length ? rects[rects.length - 1].right : box.left;
+        };
+        // 放得下的最长一段：二分找
+        let low = 0;
+        let high = text.length;
+        while (low < high) {
+            const mid = Math.ceil((low + high) / 2);
+            if (endOf(mid) <= limit) low = mid;
+            else high = mid - 1;
+        }
+        // emoji 这种两个字符的别拆成半个
+        if (low > 0 && low < text.length && /[\uD800-\uDBFF]/.test(text[low - 1])) low -= 1;
+        node.data = `${text.slice(0, low)}…`;
+        // 字变短了，宽度跟着内容走的框（引用灰牌）会缩，钉回页面上的宽
+        force(el, { width, "min-width": width, "max-width": width });
+    }
+}
+
 /** 从下往上找第一层不透明的底色，当整张图的底 */
 function baseColorOf(el: HTMLElement): string {
     for (let node: HTMLElement | null = el; node; node = node.parentElement) {
@@ -323,6 +371,7 @@ export async function renderChatScreenshot(parts: ChatScreenshotParts): Promise<
     host.appendChild(holder);
     try {
         await nextFrame();
+        settleEllipsis(stage);
         const height = Math.ceil(stage.getBoundingClientRect().height);
         const scale = Math.max(1, Math.min(
             window.devicePixelRatio || 2,

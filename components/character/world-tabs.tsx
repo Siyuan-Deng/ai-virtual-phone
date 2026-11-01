@@ -3,10 +3,14 @@
 // 世界卷宗 tab 条 + 卷宗编辑 sheet + 新建卷宗 sheet
 // 视觉隐喻：每个世界 = 一份牛皮纸案卷，激活的 tab 是「翻开的那份」，
 // 与画布纸面连成一体；编辑模式下拍立得可以拖到 tab 上「归档」进别的世界。
+// 长按一个 tab 可以左右拖动换顺序（和设置页卡片的长按拖动是同一套）。
 
 import { useState } from "react";
 import type { CharacterWorldGroup } from "@/lib/character-world-storage";
 import { DEFAULT_CHARACTER_WORLD_ID } from "@/lib/character-world-storage";
+import { useLongPressReorder } from "@/components/settings/use-long-press-reorder";
+
+const REORDER_GROUP = "world-tabs";
 
 export function WorldTabStrip({
   groups,
@@ -16,6 +20,7 @@ export function WorldTabStrip({
   onSelect,
   onOpenEditor,
   onOpenCreate,
+  onReorder,
 }: {
   groups: CharacterWorldGroup[];
   currentWorldId: string;
@@ -26,10 +31,14 @@ export function WorldTabStrip({
   /** 再次点按当前激活的 tab → 打开卷宗编辑 */
   onOpenEditor: () => void;
   onOpenCreate: () => void;
+  /** 长按拖完松手：新的顺序 */
+  onReorder: (orderedIds: string[]) => void;
 }) {
+  const reorder = useLongPressReorder((_group, orderedIds) => onReorder(orderedIds));
+  const ids = groups.map(group => group.id);
   return (
     <div className="wt-strip" role="tablist" aria-label="世界卷宗">
-      {groups.map(group => {
+      {reorder.order(REORDER_GROUP, groups).map(group => {
         const active = group.id === currentWorldId;
         const dropping = group.id === dropTargetWorldId;
         return (
@@ -39,6 +48,7 @@ export function WorldTabStrip({
             role="tab"
             aria-selected={active}
             data-world-tab-id={group.id}
+            {...reorder.itemProps(REORDER_GROUP, group.id, ids)}
             className={`wt-tab ${active ? "wt-tab-active" : ""} ${dropping ? "wt-tab-drop" : ""}`}
             onClick={() => (active ? onOpenEditor() : onSelect(group.id))}
             title={active ? "点按编辑这份卷宗" : `打开「${group.name}」`}

@@ -4,6 +4,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { loadWeixinBots, loadKeepAlive, type WeixinBotConfig } from "./weixin-storage";
 import { runBotLoop } from "./weixin-bridge";
+import { KEEP_ALIVE_DISPLAY_CHANGED_EVENT, latestChatCharacter, loadKeepAliveDisplay, msUntilNextRotation, resolveKeepAliveNowPlaying } from "./keep-alive-display";
+import { reapplyNowPlayingPosition, setKeepAliveNowPlaying } from "./now-playing";
+import { CHAT_MESSAGE_PUSHED_EVENT } from "./chat-storage";
 
 export type BotRunStatus = {
     status: "running" | "stopped" | "error";
@@ -68,6 +71,64 @@ function ensureAudioCreated() {
     _keepAliveAudio.src = URL.createObjectURL(blob);
     _keepAliveAudio.loop = true;
     _keepAliveAudio.volume = 0.01;
+    // 每循环一次（还有开始播的时候）Safari 会把锁屏进度拨回静音自己的时间，再把填的设回去
+    _keepAliveAudio.addEventListener("seeked", reapplyNowPlayingPosition);
+    _keepAliveAudio.addEventListener("playing", reapplyNowPlayingPosition);
+}
+
+/** 锁屏、灵动岛上显示「后台保活」里设的那套。改了设置、切到后台时重新算一次
+ *  （跟着角色的要换成最近聊天的那个）。没设过就是 null，照系统默认 */
+function refreshLockScreen() {
+    setKeepAliveNowPlaying(_keepAliveWanted ? resolveKeepAliveNowPlaying() : null);
+}
+
+function onVisibilityForLockScreen() {
+    if (document.visibilityState === "hidden") refreshLockScreen();
+}
+
+/** 跟着角色：一换角色聊天就马上换，不用等切到后台 */
+let _lockScreenCharacter: { name: string; avatar: string } | null = null;
+
+function onChatMessageForLockScreen() {
+    if (loadKeepAliveDisplay()?.mode !== "character") return;
+    const character = latestChatCharacter();
+    if (character?.name === _lockScreenCharacter?.name && character?.avatar === _lockScreenCharacter?.avatar) return;
+    _lockScreenCharacter = character;
+    refreshLockScreen();
+}
+
+/** 标题、副标题、封面放了好几个时，按「随机更换频率」到点重新算一次；选了不换就不用定时 */
+let _rotationTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleRotation() {
+    if (_rotationTimer) clearTimeout(_rotationTimer);
+    _rotationTimer = null;
+    const wait = msUntilNextRotation();
+    if (wait === null) return;
+    _rotationTimer = setTimeout(() => {
+        refreshLockScreen();
+        scheduleRotation();
+    }, wait);
+}
+
+/** 改了设置：马上换，频率变了定时也跟着重排 */
+function onDisplaySettingsChanged() {
+    refreshLockScreen();
+    scheduleRotation();
+}
+
+function listenLockScreen(on: boolean) {
+    window.removeEventListener(KEEP_ALIVE_DISPLAY_CHANGED_EVENT, onDisplaySettingsChanged);
+    window.removeEventListener(CHAT_MESSAGE_PUSHED_EVENT, onChatMessageForLockScreen);
+    document.removeEventListener("visibilitychange", onVisibilityForLockScreen);
+    if (_rotationTimer) clearTimeout(_rotationTimer);
+    _rotationTimer = null;
+    _lockScreenCharacter = null;
+    if (!on) return;
+    window.addEventListener(KEEP_ALIVE_DISPLAY_CHANGED_EVENT, onDisplaySettingsChanged);
+    window.addEventListener(CHAT_MESSAGE_PUSHED_EVENT, onChatMessageForLockScreen);
+    document.addEventListener("visibilitychange", onVisibilityForLockScreen);
+    scheduleRotation();
 }
 
 /** 用户触摸时尝试播放（浏览器要求音频必须在用户手势中启动） */
@@ -93,6 +154,8 @@ async function startKeepAlive() {
 
     // 准备音频
     ensureAudioCreated();
+    refreshLockScreen();
+    listenLockScreen(true);
 
     // 先尝试直接播放（如果之前已有用户手势则可以成功）
     _keepAliveAudio!.play().catch(() => {
@@ -105,6 +168,8 @@ async function startKeepAlive() {
 function stopKeepAlive() {
     _keepAliveWanted = false;
     _suspendedForCall = false;
+    listenLockScreen(false);
+    setKeepAliveNowPlaying(null);
     _wakeLock?.release().catch(() => {});
     _wakeLock = null;
     if (_keepAliveAudio) {

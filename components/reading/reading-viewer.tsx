@@ -101,6 +101,10 @@ const DISCUSS_MIN_CHARS = 700;
 const DISCUSS_MAX_CHARS = 1600;
 const DISCUSS_MAX_PARAGRAPHS = 16;
 const MAX_MANUAL_PDF_PREFETCH_PAGES = 30;
+/** 滚动模式：视口从上往下这个比例处那条线落在哪章，哪章就算「正在读」 */
+const READING_SCROLL_LINE = 1 / 3;
+/** 批注报错、「这一批没有想写的」这种提示，过一会儿自己收起来 */
+const ANNOTATION_NOTICE_MS = 10_000;
 
 /** 聊天悬浮球/悬浮条/悬浮窗的位置记忆键 */
 const CHAT_FLOAT_POS_KEY = "reading-chat-float-pos-v1";
@@ -413,9 +417,9 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     const initialScrollFractionRef = useRef<number | null>(null); // 打开书时保存的章节内比例
     const pendingScrollFractionRef = useRef<number | null>(null); // 滑块跨章待定位比例
     const scrollContentRef = useRef<HTMLDivElement>(null);        // 滚动内容容器（含多章块）
-    const chapterMetricsRef = useRef<Map<number, { top: number; height: number }>>(new Map()); // 各章块在滚动坐标系中的 top/height
-    const pendingScrollActionRef = useRef<{ kind: "shift-forward"; oldScrollTop: number; removedHeight: number } | { kind: "shift-backward"; oldScrollTop: number } | null>(null);
-    const shiftCooldownRef = useRef(false);                      // 窗口平移后的冷却期，防止边界来回抖动
+    // 视口顶上那一段：它在滚动内容里的位置（与 scrollTop 同一坐标）、离视口顶多远。
+    // 上面的内容一变（窗口换章、插进批注、展开译文），就按它把视口拨回原处——Safari 不会自己做这件事
+    const scrollAnchorRef = useRef<{ el: HTMLElement; top: number; offset: number } | null>(null);
     const scrollPositionedKeyRef = useRef("");                   // 已做过初始定位的「书+模式」标识
     const chapterIndexRef = useRef(0);
     const chaptersLenRef = useRef(0);
@@ -472,20 +476,50 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         for (let i = start; i <= end; i++) out.push(chapters[i]);
         return out;
     }, [chapters, chapterIndex]);
+    // 滚动模式：某一章的块在滚动内容里的位置（与 scrollTop 同一坐标）；不在窗口里是 null。
+    // 每次现量：译文展开、批注插进来都会改高度，存下来的数会过时
+    const measureScrollChapter = useCallback((index: number): { top: number; height: number } | null => {
+        const body = scrollRef.current;
+        const chunk = scrollContentRef.current?.querySelector<HTMLElement>(`[data-chapter-index="${index}"]`);
+        if (!body || !chunk) return null;
+        const rect = chunk.getBoundingClientRect();
+        return { top: rect.top - body.getBoundingClientRect().top + body.scrollTop, height: rect.height };
+    }, []);
+    // 记下视口顶上那一段（第一段底边还在视口顶下面的）
+    const recordScrollAnchor = useCallback(() => {
+        const body = scrollRef.current;
+        const blocks = scrollContentRef.current?.querySelectorAll<HTMLElement>(".reading-scroll-block");
+        if (!body || !blocks || blocks.length === 0) {
+            scrollAnchorRef.current = null;
+            return;
+        }
+        const viewTop = body.getBoundingClientRect().top;
+        let lo = 0;
+        let hi = blocks.length - 1;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (blocks[mid].getBoundingClientRect().bottom <= viewTop) lo = mid + 1;
+            else hi = mid;
+        }
+        const el = blocks[lo];
+        const offset = el.getBoundingClientRect().top - viewTop;
+        scrollAnchorRef.current = { el, top: offset + body.scrollTop, offset };
+    }, []);
     // 滚动模式：将「章节内比例(0-1)」换算为具体滚动位置（窗口布局下按当前章块定位）
     const scrollToChapterFraction = useCallback((fraction: number, targetChapterIndex: number) => {
         const body = scrollRef.current;
         if (!body) return;
-        const metrics = chapterMetricsRef.current.get(targetChapterIndex);
+        const metrics = measureScrollChapter(targetChapterIndex);
         if (!metrics) return;
         const maxScroll = Math.max(0, body.scrollHeight - body.clientHeight);
         const span = Math.max(0, metrics.height - body.clientHeight);
         const target = Math.max(0, Math.min(maxScroll, metrics.top + Math.max(0, Math.min(1, fraction)) * span));
         body.scrollTop = target;
+        recordScrollAnchor();
         const actual = span > 0 ? Math.min(1, Math.max(0, (target - metrics.top) / span)) : 0;
         scrollFractionRef.current = actual;
         setScrollFraction(actual);
-    }, []);
+    }, [measureScrollChapter, recordScrollAnchor]);
     const currentChapter = chapters[chapterIndex];
 
     /** 当前屏上会用到的插图序号。只加载这些，读完就放掉，
@@ -1002,8 +1036,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         // 清空上一本书遗留的滚动定位状态
         initialScrollFractionRef.current = null;
         pendingScrollFractionRef.current = null;
-        pendingScrollActionRef.current = null;
-        shiftCooldownRef.current = false;
+        scrollAnchorRef.current = null;
         scrollPositionedKeyRef.current = "";
         setChaptersLoaded(false);
         setLoadFailed(false);
@@ -1153,6 +1186,12 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     useEffect(() => { refreshChatMessages(); }, [refreshChatMessages, companionId]);
 
     const [annotationError, setAnnotationError] = useState<string | null>(null);
+    // 报错那行挂在顶栏里：不收的话会一直挤着正文，只能退出重进
+    useEffect(() => {
+        if (!annotationError) return;
+        const timer = window.setTimeout(() => setAnnotationError(null), ANNOTATION_NOTICE_MS);
+        return () => window.clearTimeout(timer);
+    }, [annotationError]);
     const loadExistingAnnotationsForItems = useCallback(async (items: ParagraphRef[]) => {
         const chapterIndexes = [...new Set(items.map((item) => item.chapterIndex))];
         const itemKeys = new Set(items.map((item) => `${item.chapterIndex}:${item.paragraphIndex}`));
@@ -1792,6 +1831,12 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     // Chapter navigation
     const goToChapter = (idx: number, startFromEnd = false) => {
         if (idx < 0 || idx >= chapters.length) return;
+        // 滚动模式点的就是当前这章：章节号没变，下面那个定位 effect 不会跑，
+        // 待定位的比例会一直挂着，等下次滚到别的章时突然把人拽回章首。直接定位
+        if (isScrollMode && idx === chapterIndex) {
+            scrollToChapterFraction(startFromEnd ? 1 : 0, idx);
+            return;
+        }
         pendingTxtPageFractionRef.current = startFromEnd ? 1 : null;
         // 滚动模式：显式跳章后定位到新章节的起点（0）或终点（1），而非窗口顶部（可能是上一章）
         // 实际滚动位置由渲染后的 useLayoutEffect 依据章节块度量换算
@@ -2576,101 +2621,109 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         scrollRef.current?.scrollTo(0, 0);
     }, [txtPage, isScrollMode]);
 
-    // 滚动模式：监听滚动 —— 更新章节内滚动比例；无缝衔接（多章窗口平移，保持视觉连续）
-    // 前向：当前章内容读完（章底滚到视口顶部/底部）→ 移除顶部章块 + 补偿滚动位置，自然过渡到下一章
-    // 后向：滚到窗口顶部 → 顶部前插上一章块 + 补偿滚动位置，自然回到上一章（无需「上一章」按钮）
+    // 滚动模式：监听滚动 —— 更新章节内滚动比例；窗口换章（上一章 + 当前章 + 下一章，无缝衔接）
+    // 哪章算「正在读」看视口上三分之一那条线落在哪章。换章会挪动窗口顶上的内容、要拨回滚动位置，
+    // 而 iOS 惯性滑动时改 scrollTop 会顿一下、闪一下，所以等手指松开、停下来再换；
+    // 只有滑到窗口的头或尾、再不换就滑不动了，才马上换
     useEffect(() => {
         if (!isScrollMode) return;
         const body = scrollRef.current;
         if (!body) return;
         let rafId = 0;
+        let idleTimer = 0;
+        let touching = false;
+        const wantedShift = (): -1 | 0 | 1 => {
+            const ci = chapterIndexRef.current;
+            const current = measureScrollChapter(ci);
+            if (!current) return 0;
+            const line = body.scrollTop + body.clientHeight * READING_SCROLL_LINE;
+            if (ci < chaptersLenRef.current - 1 && current.top + current.height <= line) return 1;
+            // 往回也看上一章的底边（不看这章的顶）：两章之间隔着段落间距，两头各看各的会在缝里来回换
+            const previous = ci > 0 ? measureScrollChapter(ci - 1) : null;
+            if (previous && previous.top + previous.height > line) return -1;
+            return 0;
+        };
+        // 按 ref 算目标章：还没重新渲染时重复调用也只是设成同一个数
+        const shift = (direction: -1 | 1) => setChapterIndex(chapterIndexRef.current + direction);
+        const shiftWhenIdle = () => {
+            window.clearTimeout(idleTimer);
+            idleTimer = window.setTimeout(() => {
+                if (touching) return; // 松手时会再排一次
+                const direction = wantedShift();
+                if (direction) shift(direction);
+            }, 160);
+        };
         const onScroll = () => {
+            // 当场记：等到下一帧再记，中间要是正好重新渲染，会按旧位置拨回去
+            recordScrollAnchor();
+            shiftWhenIdle();
             if (rafId) return;
             rafId = window.requestAnimationFrame(() => {
                 rafId = 0;
-                const ci = chapterIndexRef.current;
-                const len = chaptersLenRef.current;
                 const viewport = body.clientHeight;
                 const maxScroll = Math.max(0, body.scrollHeight - viewport);
-                const metrics = chapterMetricsRef.current.get(ci);
-                let fraction = 0;
-                if (metrics) {
-                    const span = Math.max(1, metrics.height - viewport);
-                    fraction = Math.min(1, Math.max(0, (body.scrollTop - metrics.top) / span));
-                } else {
-                    fraction = maxScroll > 0 ? Math.min(1, Math.max(0, body.scrollTop / maxScroll)) : 0;
-                }
+                const current = measureScrollChapter(chapterIndexRef.current);
+                const fraction = current
+                    ? Math.min(1, Math.max(0, (body.scrollTop - current.top) / Math.max(1, current.height - viewport)))
+                    : maxScroll > 0 ? Math.min(1, Math.max(0, body.scrollTop / maxScroll)) : 0;
                 scrollFractionRef.current = fraction;
                 setScrollFraction(fraction);
-                if (!metrics) return;
-
-                // 离开顶部后解除平移冷却
-                if (body.scrollTop > 2) shiftCooldownRef.current = false;
-
-                const bottom = metrics.top + metrics.height;
-                // 高章节（超一屏）：章底滚到视口底部即衔接下一章，header 同步更新；
-                // 矮章节（不足一屏）：等章底滚到视口顶部再衔接，避免移除顶部章块后滚动位置为负导致跳动
-                const triggerAt = metrics.height >= viewport ? bottom - viewport - 2 : bottom - 2;
-                // 前向：当前章已读完 → 移除顶部章块，窗口后移
-                if (!shiftCooldownRef.current && ci < len - 1 && body.scrollTop >= triggerAt) {
-                    shiftCooldownRef.current = true;
-                    const prevMetrics = chapterMetricsRef.current.get(ci - 1);
-                    pendingScrollActionRef.current = {
-                        kind: "shift-forward",
-                        oldScrollTop: body.scrollTop,
-                        removedHeight: prevMetrics ? prevMetrics.height : 0,
-                    };
-                    setChapterIndex(ci + 1);
-                    return;
-                }
-                // 后向：已滚到窗口顶部 → 顶部前插上一章块，窗口前移
-                if (!shiftCooldownRef.current && ci > 0 && body.scrollTop <= 2) {
-                    shiftCooldownRef.current = true;
-                    pendingScrollActionRef.current = { kind: "shift-backward", oldScrollTop: body.scrollTop };
-                    setChapterIndex(ci - 1);
-                    return;
+                const direction = wantedShift();
+                if (direction && (body.scrollTop <= 2 || body.scrollTop >= maxScroll - 2)) {
+                    window.clearTimeout(idleTimer);
+                    shift(direction);
                 }
             });
         };
+        const onTouchStart = () => {
+            touching = true;
+            window.clearTimeout(idleTimer);
+        };
+        const onTouchEnd = () => {
+            touching = false;
+            shiftWhenIdle();
+        };
         body.addEventListener("scroll", onScroll, { passive: true });
+        body.addEventListener("touchstart", onTouchStart, { passive: true });
+        body.addEventListener("touchend", onTouchEnd, { passive: true });
+        body.addEventListener("touchcancel", onTouchEnd, { passive: true });
         return () => {
             body.removeEventListener("scroll", onScroll);
+            body.removeEventListener("touchstart", onTouchStart);
+            body.removeEventListener("touchend", onTouchEnd);
+            body.removeEventListener("touchcancel", onTouchEnd);
             if (rafId) window.cancelAnimationFrame(rafId);
+            window.clearTimeout(idleTimer);
         };
-    }, [isScrollMode]);
+    }, [isScrollMode, measureScrollChapter, recordScrollAnchor]);
 
-    // 滚动模式：渲染后测量各章块位置，并应用窗口平移补偿 / 显式定位（useLayoutEffect 保证在绘制前执行，无闪跳）
+    // 滚动模式：每次渲染完，视口顶上那段要是被上面的内容挤动了，就把滚动位置拨回去，读的地方不动。
+    // 窗口换章、插进批注、展开译文、字体变了都走这里。要放在下面那个显式定位的 effect 前面：跳章时它会接着改
     useLayoutEffect(() => {
-        if (!isScrollMode || !chaptersLoaded) return;
-        const content = scrollContentRef.current;
+        if (!isScrollMode) return;
         const body = scrollRef.current;
-        if (!content || !body || windowChapters.length === 0) return;
-
-        // 1. 测量窗口内各章块在滚动坐标系中的位置（top 与 body.scrollTop 同坐标系）
-        const bodyRect = body.getBoundingClientRect();
-        const metrics = new Map<number, { top: number; height: number }>();
-        for (const chunk of content.querySelectorAll<HTMLElement>("[data-chapter-index]")) {
-            const idx = Number(chunk.getAttribute("data-chapter-index"));
-            if (!Number.isFinite(idx)) continue;
-            const rect = chunk.getBoundingClientRect();
-            metrics.set(idx, { top: rect.top - bodyRect.top + body.scrollTop, height: rect.height });
-        }
-        chapterMetricsRef.current = metrics;
-
-        // 2. 窗口平移补偿（保持视觉位置不动，实现无缝衔接）
-        const action = pendingScrollActionRef.current;
-        if (action) {
-            pendingScrollActionRef.current = null;
-            if (action.kind === "shift-forward") {
-                body.scrollTop = Math.max(0, action.oldScrollTop - action.removedHeight);
-            } else {
-                const newPrev = metrics.get(chapterIndex - 1);
-                body.scrollTop = Math.max(0, action.oldScrollTop + (newPrev ? newPrev.height : 0));
-            }
+        const anchor = scrollAnchorRef.current;
+        if (!body || !anchor) return;
+        if (!anchor.el.isConnected) {
+            scrollAnchorRef.current = null;
             return;
         }
+        const top = anchor.el.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+        if (Math.abs(top - anchor.top) < 1) return;
+        // 平时在现在的 scrollTop 上补差值（记下以后又滑了一点也不会被拽回去）；
+        // 但读到最后几章时窗口只剩两章，删掉上面那章内容变短，浏览器会先把 scrollTop 压到底，
+        // 这时得从记下时的位置算，不然差一截，还会接着往回换章
+        const max = body.scrollHeight - body.clientHeight;
+        const base = body.scrollTop >= max - 1 ? Math.max(body.scrollTop, anchor.top - anchor.offset) : body.scrollTop;
+        body.scrollTop = base + top - anchor.top;
+        anchor.top = top;
+    });
 
-        // 3. 显式跳章 / 打开恢复 / 默认定位到当前章起点
+    // 滚动模式：显式跳章 / 打开恢复 / 默认定位到当前章起点（useLayoutEffect 保证在绘制前执行，无闪跳）
+    useLayoutEffect(() => {
+        if (!isScrollMode || !chaptersLoaded) return;
+        if (!scrollRef.current || windowChapters.length === 0) return;
+
         const positionKey = `${book.id}:${isScrollMode}`;
         const pendingFraction = pendingScrollFractionRef.current;
         const initialFraction = initialScrollFractionRef.current;
@@ -2685,8 +2738,10 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         } else if (scrollPositionedKeyRef.current !== positionKey) {
             scrollPositionedKeyRef.current = positionKey;
             scrollToChapterFraction(0, chapterIndex);
+        } else if (!scrollAnchorRef.current) {
+            recordScrollAnchor();
         }
-    }, [isScrollMode, chapterIndex, windowChapters, chaptersLoaded, annotations, txtLayoutVersion, book.id]);
+    }, [isScrollMode, chapterIndex, windowChapters, chaptersLoaded, annotations, txtLayoutVersion, book.id, recordScrollAnchor, scrollToChapterFraction]);
 
     // Swipe handlers for TXT
     const handleTouchStart = (e: React.TouchEvent) => {
@@ -2853,7 +2908,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
                     </div>
                 </div>
                 {annotationError && (
-                    <div className="reading-header-status" style={{ color: "var(--c-danger)" }}>{annotationError}</div>
+                    <button type="button" className="reading-header-status" style={{ color: "var(--c-danger)" }} onClick={() => setAnnotationError(null)}>{annotationError}</button>
                 )}
             </header>
 
@@ -2897,6 +2952,8 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             <div
                 ref={scrollRef}
                 className={`relative flex-1 min-h-0 px-4 pt-1 pb-3 ${(isPdf || isScrollMode) ? "overflow-auto" : "overflow-hidden"}`}
+                // 滚动模式自己按视口顶上那段拨回位置；Chrome 自带的滚动锚定也会拨一次，两次叠起来就跳飞了
+                style={isScrollMode ? { overflowAnchor: "none" } : undefined}
                 data-ui="body"
                 onClick={handleReadingSurfaceClick}
             >

@@ -152,6 +152,18 @@ export function saveCharacterWorldGroups(groups: CharacterWorldGroup[]): void {
     dispatchUpdated();
 }
 
+/** 世界卷宗 tab 的顺序（长按拖出来的）：照 orderedIds 排，没列到的按原来的先后接在后面 */
+export function reorderCharacterWorldGroups(orderedIds: string[]): void {
+    const groups = loadCharacterWorldGroups();
+    const rank = new Map(orderedIds.map((id, index) => [id, index]));
+    const sorted = groups
+        .map((group, index) => ({ group, key: rank.get(group.id) ?? orderedIds.length + index }))
+        .sort((a, b) => a.key - b.key)
+        .map(entry => entry.group);
+    if (sorted.every((group, index) => group === groups[index])) return;
+    saveCharacterWorldGroups(sorted);
+}
+
 export function createCharacterWorldGroup(name: string): CharacterWorldGroup {
     const groups = loadCharacterWorldGroups();
     const now = new Date().toISOString();

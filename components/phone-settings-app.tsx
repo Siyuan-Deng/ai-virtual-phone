@@ -15,6 +15,7 @@ import { RegexManager } from "./settings/regex-manager";
 import { DataManagement } from "./settings/data-management";
 import { UserIdentitySettings } from "./settings/user-identity";
 import { AboutDeclaration } from "./settings/about-declaration";
+import { KeepAliveDisplaySettings } from "./settings/keep-alive-display-settings";
 import { BindingManager } from "./settings/binding-manager";
 import { WeixinSettings } from "./settings/weixin-settings";
 import { CloudServicesPage } from "./settings/cloud-services-setup";
@@ -57,6 +58,7 @@ type SubPage =
     | "toolbox"
     | "agentComputer"
     | "moderation"
+    | "keepAlive"
     | "about";
 
 const SETTINGS_MENU = [
@@ -182,7 +184,9 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
             ? ""
             : currentPage === "moderation"
                 ? "管理中心"
-                : SETTINGS_MENU.find(m => m.id === currentPage)?.label || "设置";
+                : currentPage === "keepAlive"
+                    ? "后台保活"
+                    : SETTINGS_MENU.find(m => m.id === currentPage)?.label || "设置";
     const title = subpageTitle || defaultTitle;
 
     const setSubpageRightAction = useCallback((page: string, action: ReactNode | null) => {
@@ -326,6 +330,8 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                 return <ModerationCenter onNotice={onNotice} />;
             case "identity":
                 return <UserIdentitySettings />;
+            case "keepAlive":
+                return <KeepAliveDisplaySettings />;
             case "about":
                 return <AboutDeclaration />;
             default:
@@ -440,15 +446,18 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                                 </div>
                                 <Toggle checked={timeAware} onChange={handleTimeAwareChange} className="settings-toggle-control" />
                             </div>
-                            <div className="app-card card-featured settings-toggle-card">
+                            {/* 点这一格进去改锁屏和灵动岛显示什么；开关单独点只开关 */}
+                            <div className="app-card card-featured settings-toggle-card" role="button" tabIndex={0} style={{ cursor: "pointer" }} onClick={() => setCurrentPage("keepAlive")}>
                                 <span className="card-icon card-icon-glass">
                                     <GlassIcon name="keep-alive" />
                                 </span>
                                 <div className="card-featured-body">
                                     <div className="card-featured-label">后台保活</div>
-                                    <div className="card-featured-desc">切到后台时尽量保持网页运行，主动消息与轮询不中断</div>
+                                    <div className="card-featured-desc">切到后台时尽量保持网页运行，主动消息与轮询不中断。点击此项自定义样式。</div>
                                 </div>
-                                <Toggle checked={keepAlive} onChange={handleKeepAliveChange} className="settings-toggle-control" />
+                                <span onClick={(event) => event.stopPropagation()}>
+                                    <Toggle checked={keepAlive} onChange={handleKeepAliveChange} className="settings-toggle-control" />
+                                </span>
                             </div>
                         </div>
                         {isAdmin ? (
