@@ -3,12 +3,13 @@
 // 剧情正篇 / 番外：右下角「↑ 上一轮」「↓ 下一轮」两个方块键，和右上角两个按钮一个样子。
 // 一轮从你发出去的那条开始：你的发言、番外指令卡、系统指令卡（文章上挂着 data-story-round）。
 // 点一下把那条的开头滑到屏幕上方 1/3 处，下面能接着看它回的内容；
-// 往回翻到还没加载的地方，先加载再跳。
+// 往回翻到还没加载的地方，先加载再跳；下面没有下一轮了，「↓」就回到最底部。
+// 平时藏着，手指 / 滚轮滑动时才出现，停下 1.5 秒后淡出。
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 /** false：一直显示；true：滑动时才出现，停下 1.5 秒后淡出 */
-const AUTO_HIDE = false;
+const AUTO_HIDE = true;
 const LINE = 1 / 3;
 /** 滚动位置差几像素以内算「已经在这一轮」 */
 const SLACK = 4;
@@ -32,6 +33,8 @@ export function StoryRoundJump({ scrollRef, revision, hiddenHasRound, onLoadMore
   const headingRef = useRef<{ top: number; at: number } | null>(null);
   const pendingPrevRef = useRef<{ fromBottom: number } | null>(null);
   const sleepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 什么时候之前的滚动算「人在滑」：生成时自动贴底、内容变高也会触发滚动，那种不该把键叫出来
+  const userScrollUntilRef = useRef(0);
   const hiddenHasRoundRef = useRef(hiddenHasRound);
   hiddenHasRoundRef.current = hiddenHasRound;
 
@@ -63,8 +66,11 @@ export function StoryRoundJump({ scrollRef, revision, hiddenHasRound, onLoadMore
     const now = currentTop();
     const list = stops();
     setCanPrev(list.some((stop) => stop.want < now - SLACK) || hiddenHasRoundRef.current);
-    setCanNext(list.some((stop) => stop.want > now + SLACK));
-  }, [currentTop, stops]);
+    // 下面没有下一轮了也能点：回到最底部
+    const stage = scrollRef.current;
+    const maxScroll = stage ? Math.max(0, stage.scrollHeight - stage.clientHeight) : 0;
+    setCanNext(list.some((stop) => stop.want > now + SLACK) || now < maxScroll - SLACK);
+  }, [currentTop, scrollRef, stops]);
 
   const wake = useCallback(() => {
     if (!AUTO_HIDE) return;
@@ -77,6 +83,8 @@ export function StoryRoundJump({ scrollRef, revision, hiddenHasRound, onLoadMore
     const stage = scrollRef.current;
     if (!stage) return;
     headingRef.current = { top: stop.want, at: performance.now() };
+    // 跳过去的这一路也算在滑：滑到停下再过 1.5 秒才淡出，方便接着点
+    userScrollUntilRef.current = performance.now() + 1000;
     stage.scrollTo({ top: stop.want, behavior: "smooth" });
     stop.el.classList.remove("story-round-flash");
     void stop.el.offsetWidth;
@@ -102,10 +110,21 @@ export function StoryRoundJump({ scrollRef, revision, hiddenHasRound, onLoadMore
   }, [currentTop, jumpTo, onLoadMore, scrollRef, stops]);
 
   const goNext = useCallback(() => {
+    const stage = scrollRef.current;
+    if (!stage) return;
     const now = currentTop();
     const target = stops().find((stop) => stop.want > now + SLACK);
-    if (target) jumpTo(target);
-  }, [currentTop, jumpTo, stops]);
+    if (target) {
+      jumpTo(target);
+      return;
+    }
+    // 已经是最后一轮：回到最底部
+    const maxScroll = Math.max(0, stage.scrollHeight - stage.clientHeight);
+    if (now >= maxScroll - SLACK) return;
+    headingRef.current = { top: maxScroll, at: performance.now() };
+    userScrollUntilRef.current = performance.now() + 1000;
+    stage.scrollTo({ top: maxScroll, behavior: "smooth" });
+  }, [currentTop, jumpTo, scrollRef, stops]);
 
   useEffect(() => {
     const pending = pendingPrevRef.current;
@@ -121,25 +140,39 @@ export function StoryRoundJump({ scrollRef, revision, hiddenHasRound, onLoadMore
     const stage = scrollRef.current;
     if (!stage) return;
     let frame = 0;
-    const onScroll = () => {
-      wake();
+    const scheduleRefresh = () => {
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
         refresh();
       });
     };
-    // 自己用手指 / 滚轮滑了：不再按「正在去的那一轮」算
-    const takeOver = () => { headingRef.current = null; };
+    const onScroll = () => {
+      // 手指松开后的惯性也一直在滚：滚着就顺延，停下来才开始算 1.5 秒
+      const now = performance.now();
+      if (now < userScrollUntilRef.current) {
+        userScrollUntilRef.current = now + 300;
+        wake();
+      }
+      scheduleRefresh();
+    };
+    // 自己用手指 / 滚轮滑了：叫出两个键，并且不再按「正在去的那一轮」算
+    const takeOver = () => {
+      headingRef.current = null;
+      userScrollUntilRef.current = performance.now() + 1000;
+      wake();
+    };
     stage.addEventListener("scroll", onScroll, { passive: true });
     stage.addEventListener("touchstart", takeOver, { passive: true });
+    stage.addEventListener("touchmove", takeOver, { passive: true });
     stage.addEventListener("wheel", takeOver, { passive: true });
-    // 生成中、展开折叠、图片加载完，内容高度会变
-    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(onScroll) : null;
+    // 生成中、展开折叠、图片加载完，内容高度会变（只重算能不能点，不叫出键）
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(scheduleRefresh) : null;
     if (stage.firstElementChild) observer?.observe(stage.firstElementChild);
     return () => {
       stage.removeEventListener("scroll", onScroll);
       stage.removeEventListener("touchstart", takeOver);
+      stage.removeEventListener("touchmove", takeOver);
       stage.removeEventListener("wheel", takeOver);
       observer?.disconnect();
       if (frame) cancelAnimationFrame(frame);
