@@ -855,7 +855,9 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                     inputTextRef.current = next;
                     setSuggestClosed(false);
                     requestAnimationFrame(() => {
-                        setInputText(next);
+                        // 读这一帧时框里的实际内容：同一帧里点了发送、框已经清空的话，
+                        // 不能再把发出去的字写回 state
+                        setInputText(target.value);
                         target.style.height = "auto";
                         target.style.height = Math.min(target.scrollHeight, 120) + "px";
                     });
@@ -932,11 +934,16 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                         className="ui-bare-btn text-[var(--c-text)]"
                         title={!inputLocked && inputText.trim() ? "发送输入框内容并触发回复" : "触发 AI 主动回复"}
                         onClick={() => {
-                            const trimmed = inputText.trim();
+                            // 和 handleSubmit 一样从 DOM 读、发完清 DOM：输入框是 uncontrolled 的，
+                            // 只清 state 的话字还留在框里
+                            const ta = textareaRef.current;
+                            const trimmed = (ta ? ta.value : inputTextRef.current).trim();
                             // 输入框已有文字：发送输入框内容并立即触发模型回复（一次按键完成），
                             // 避免「打完字却忘记发送」；没文字时才只触发 AI 主动回复
                             if (!inputLocked && trimmed) {
                                 if (!onSendText(trimmed, { autoReply: true })) return;
+                                if (ta) ta.value = "";
+                                inputTextRef.current = "";
                                 setInputText("");
                                 resetTextareaHeight();
                             } else {
@@ -1203,8 +1210,6 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const offlineStreamAccumRef = useRef("");
     // 群聊/单聊流式预览解析的 rAF 合并帧（限频：一帧最多解析一次全文）
     const streamParseFrameRef = useRef(0);
-    // 线上流式预览的节流句柄（与 rAF 分开：改成 setTimeout 节流后不再需要 rAF 帧）
-    const streamParseTimerRef = useRef(0);
     // 线下模式流式预览解析的 rAF 合并帧（独立于线上，避免互相干扰）
     const offlineStreamFrameRef = useRef(0);
     const [activeOfflineTarget, setActiveOfflineTarget] = useState<OfflineActionTarget | null>(null);
@@ -2230,11 +2235,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     useEffect(() => {
         return () => {
             if (streamParseFrameRef.current) cancelAnimationFrame(streamParseFrameRef.current);
-            if (streamParseTimerRef.current) clearTimeout(streamParseTimerRef.current);
             if (offlineStreamFrameRef.current) cancelAnimationFrame(offlineStreamFrameRef.current);
             if (streamFollowRef.current) cancelAnimationFrame(streamFollowRef.current);
             streamParseFrameRef.current = 0;
-            streamParseTimerRef.current = 0;
             offlineStreamFrameRef.current = 0;
             streamFollowRef.current = 0;
         };
@@ -3402,11 +3405,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         onStreamDelta: (delta) => {
                             if (!isCurrentGeneration()) return;
                             streamAccumRef.current += delta;
-                            // 群聊要按角色前缀切分全文再净化，比单聊更重，光靠 rAF 合并
-                            // 仍然可能每帧跑一次。再叠一层节流，把频率压到肉眼够用的程度。
-                            if (streamParseTimerRef.current) return;
-                            streamParseTimerRef.current = window.setTimeout(() => {
-                                streamParseTimerRef.current = 0;
+                            // 群聊全文解析较重：合并到 rAF 下一帧执行，避免一帧多段增量重复解析
+                            if (streamParseFrameRef.current) return;
+                            streamParseFrameRef.current = window.requestAnimationFrame(() => {
+                                streamParseFrameRef.current = 0;
                                 if (!isCurrentGeneration()) return;
                                 const nameToId = new Map(groupCharacters.map(item => [item.name, item.id]));
                                 const rawParts = parseGroupChatResponse(streamAccumRef.current, nameToId);
@@ -3418,12 +3420,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                         texts: splitStreamPreviewSegments(cleanStreamText(item.responseText, { stripXmlTags: streamPreviewTagConfig.online, stripLiterals: streamPreviewTagConfig.stripTexts })),
                                     }));
                                 setStreamPreview({ parts });
-                            }, 200);
+                            });
                         },
                         onTextPart: () => {
-                            if (streamParseTimerRef.current) {
-                                clearTimeout(streamParseTimerRef.current);
-                                streamParseTimerRef.current = 0;
+                            if (streamParseFrameRef.current) {
+                                cancelAnimationFrame(streamParseFrameRef.current);
+                                streamParseFrameRef.current = 0;
                             }
                             streamAccumRef.current = "";
                             setStreamPreview(null);
@@ -3453,19 +3455,18 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         onStreamDelta: (delta) => {
                             if (!isCurrentGeneration()) return;
                             streamAccumRef.current += delta;
-                            // 预览更新：节流到 ~150ms 一次。cleanStreamText 每次都要净化全文，
-                            // 纯 rAF 合并仍接近每帧一次，长回复下会持续占住主线程。
-                            if (streamParseTimerRef.current) return;
-                            streamParseTimerRef.current = window.setTimeout(() => {
-                                streamParseTimerRef.current = 0;
+                            // 预览更新合并到 rAF 下一帧：每帧最多一次全文净化+setState，避免高频增量卡顿
+                            if (streamParseFrameRef.current) return;
+                            streamParseFrameRef.current = window.requestAnimationFrame(() => {
+                                streamParseFrameRef.current = 0;
                                 if (!isCurrentGeneration()) return;
                                 setStreamPreview({ texts: splitStreamPreviewSegments(cleanStreamText(streamAccumRef.current, { stripXmlTags: streamPreviewTagConfig.online, stripLiterals: streamPreviewTagConfig.stripTexts })) });
-                            }, 150);
+                            });
                         },
                         onTextPart: () => {
-                            if (streamParseTimerRef.current) {
-                                clearTimeout(streamParseTimerRef.current);
-                                streamParseTimerRef.current = 0;
+                            if (streamParseFrameRef.current) {
+                                cancelAnimationFrame(streamParseFrameRef.current);
+                                streamParseFrameRef.current = 0;
                             }
                             streamAccumRef.current = "";
                             setStreamPreview(null);

@@ -281,6 +281,13 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
           "music-recommend-hot-search",
           "music-recommend-toplists",
           "music-user-recent",
+          // 一起听（弹幕记录、角色×歌的情绪记忆、会话、上次选的角色、陪听距离和时长）和 TA 的歌单
+          "music-listen-together-v1",
+          "music-listen-together-mood-v1",
+          "music-listen-together-session-v1",
+          "music-listen-together-selected-v1",
+          "music-listen-together-relation-v1",
+          "music-character-taste-v1",
           "reading-import-diagnostic-v1",
           "reading_import_diag_v1",
           "ai_phone_music_sync_v1",

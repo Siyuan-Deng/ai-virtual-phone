@@ -207,8 +207,9 @@ export default function ListenTogetherPanel({ onStart, onClose }: Props) {
                             <button data-on={intervalPreset === "active" ? "" : undefined} onClick={() => applyIntervalPreset("active")}>活跃</button>
                             <button data-on={intervalPreset === "custom" ? "" : undefined} onClick={() => setIntervalPreset("custom")}>自定义</button>
                         </div>
-                        <div className="lt-range-row"><span>最短</span><input type="range" min={5} max={300} step={5} value={intervalMin} onChange={event => { setIntervalPreset("custom"); setIntervalMin(Number(event.target.value)); }} /></div>
-                        <div className="lt-range-row"><span>最长</span><input type="range" min={10} max={600} step={5} value={intervalMax} onChange={event => { setIntervalPreset("custom"); setIntervalMax(Number(event.target.value)); }} /></div>
+                        {/* 两个滑块互相推：最短拖过最长就把最长一起带上去，反过来也一样，不会出现「110s – 60s」 */}
+                        <div className="lt-range-row"><span>最短</span><input type="range" min={5} max={300} step={5} value={intervalMin} onChange={event => { const value = Number(event.target.value); setIntervalPreset("custom"); setIntervalMin(value); if (value > intervalMax) setIntervalMax(value); }} /></div>
+                        <div className="lt-range-row"><span>最长</span><input type="range" min={10} max={600} step={5} value={intervalMax} onChange={event => { const value = Number(event.target.value); setIntervalPreset("custom"); setIntervalMax(value); if (value < intervalMin) setIntervalMin(value); }} /></div>
                     </div>
                     </div>
                 </div>

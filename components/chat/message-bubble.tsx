@@ -2395,12 +2395,17 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
         setSynthFailed(false);
         synthesizeVoiceForMessage(msg.id, characterId, speechText)
             .then((dataUrl) => {
-                if (!mountedRef.current) return;
+                const save = () => onUpdate?.({ ...msg, mediaUrl: dataUrl, mediaData: { ...msg.mediaData, synthesizedFromText: speechText } });
+                // 合成途中离开了聊天：不播，但结果照样存进消息，下次点开不用再合成一遍（再花一次钱）
+                if (!mountedRef.current) {
+                    save();
+                    return;
+                }
                 setSynthesizing(false);
                 // 先出声再落状态：onUpdate 会让整条消息列表重渲染（数组复制 + 全部
                 // 气泡 diff），排在 playSrc 之前等于让用户多等一次列表更新才听到声音。
                 playSrc(dataUrl);
-                onUpdate?.({ ...msg, mediaUrl: dataUrl, mediaData: { ...msg.mediaData, synthesizedFromText: speechText } });
+                save();
             })
             .catch(() => {
                 if (!mountedRef.current) return;
