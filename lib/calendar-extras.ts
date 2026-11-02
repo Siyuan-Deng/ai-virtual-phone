@@ -349,7 +349,7 @@ function queueTaskKey(record: unknown): string {
 }
 
 /** 删掉和这些日程 / 备忘录有关的提醒记录和待回应队列（插件 cleanupReminderKeys） */
-function withoutReminderTraces(
+export function withoutReminderTraces(
     extras: CalendarExtras,
     eventIds: Set<string>,
     memoIds: Set<string>,
