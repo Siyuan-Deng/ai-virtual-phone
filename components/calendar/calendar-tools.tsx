@@ -646,6 +646,43 @@ export function CalendarSeriesSaveChoice({ onCurrent, onAll, close }: {
     );
 }
 
+/** 编辑重复系列里的一次、点删除时问范围，和上面「保存重复日程」同一个样子 */
+export function CalendarSeriesDeleteChoice({ onCurrent, onFollowing, onAll, close }: {
+    onCurrent: () => void;
+    onFollowing: () => void;
+    onAll: () => void;
+    close: () => void;
+}) {
+    return (
+        <ToolSheet title="删除重复日程" hideAction onBack={close} onDismiss={close}>
+            <p className="caltool-series-save-intro">这条日程属于一个重复系列。请选择要删除的范围。</p>
+            <div className="caltool-series-save-list">
+                <ClearOption
+                    className="caltool-series-save-option"
+                    title="仅删除这一次"
+                    description="只删当前这一天，其他日期保持原样"
+                    icon="1"
+                    onClick={() => { close(); onCurrent(); }}
+                />
+                <ClearOption
+                    className="caltool-series-save-option"
+                    title="删除这一次及以后"
+                    description="这一天和之后的都删掉，之前的保留"
+                    icon="后"
+                    onClick={() => { close(); onFollowing(); }}
+                />
+                <ClearOption
+                    danger
+                    title="删除整个重复日程"
+                    description="这个系列的所有日程、备注和待办都会删除"
+                    icon="全"
+                    onClick={() => { close(); onAll(); }}
+                />
+            </div>
+        </ToolSheet>
+    );
+}
+
 // ── 日历知情角色 ──
 
 function normalizeReaction(value: unknown): TodoReactionMode {

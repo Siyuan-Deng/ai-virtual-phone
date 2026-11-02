@@ -27,6 +27,7 @@ import {
     type CalendarRecurrenceFrequency,
     type CalendarRecurrenceSeries,
     type CalendarTodo,
+    withoutReminderTraces,
 } from "./calendar-extras";
 
 const USER = { ownerType: "user", ownerId: "self" } as const;
@@ -384,6 +385,55 @@ export function updateEntireSeries(input: {
     reportEventTodosChanged(input.currentItemId, extras.eventDetails[input.currentItemId]?.todos, eventDetails[input.currentItemId]?.todos);
     const count = keptIds.size + extensionDates.length;
     return { ok: true, count, message: `已修改整个重复日程，共 ${count} 次` };
+}
+
+/** 编辑系列里的一次后点删除、选「这一次及以后」或「整个重复日程」。
+ *  fromDate 为空：系列的每一次、附加信息、提醒记录和规则全删；
+ *  有值：这一天及以后的删掉，之前的保留，规则改成到前一天为止（「永远」也停了，不再往后补）。 */
+export function deleteSeriesOccurrences(seriesId: string, fromDate = ""): SeriesResult {
+    const extras = loadCalendarExtras();
+    const plans = loadOwnerCalendarPlansRaw(USER.ownerType, USER.ownerId);
+    const now = new Date().toISOString();
+    const removedIds = new Set<string>();
+    let keptAny = false;
+
+    for (const plan of plans) {
+        plan.items = plan.items.filter((item) => {
+            if (extras.eventDetails[item.id]?.seriesId !== seriesId) return true;
+            if (fromDate && item.date < fromDate) {
+                keptAny = true;
+                return true;
+            }
+            removedIds.add(item.id);
+            plan.updatedAt = now;
+            return false;
+        });
+    }
+    if (removedIds.size === 0) return { ok: false, error: "没有找到这个重复日程的实例" };
+
+    const eventDetails = { ...extras.eventDetails };
+    for (const id of removedIds) delete eventDetails[id];
+    const seriesStore = { ...extras.series };
+    const series = seriesStore[seriesId];
+    if (!keptAny) {
+        delete seriesStore[seriesId];
+    } else if (series) {
+        // 到前一天为止，不用「剩下的最后一次」：之后改整个系列延长结束日期时，
+        // 中间单独删掉的那几次不会被补回来
+        const untilDate = addDaysIso(fromDate, -1);
+        seriesStore[seriesId] = { ...series, forever: false, untilDate, materializedUntil: untilDate, updatedAt: now };
+    }
+    commit(plans, {
+        ...extras,
+        eventDetails,
+        series: seriesStore,
+        ...withoutReminderTraces(extras, removedIds, new Set()),
+    });
+    return {
+        ok: true,
+        count: removedIds.size,
+        message: fromDate && keptAny ? `已删除这一次及以后的 ${removedIds.size} 次` : `已删除整个重复日程，共 ${removedIds.size} 次`,
+    };
 }
 
 /** 「永远」的系列往后补到今天 + 两年。系列里一次都不剩了就把规则也删掉，不凭空复活。

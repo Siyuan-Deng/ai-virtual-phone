@@ -62,12 +62,14 @@ import { CalendarScheduleBanners, buildBannerGroups, memoColor } from "./calenda
 import {
   clampInt,
   createRecurringSeries,
+  deleteSeriesOccurrences,
   ensureForeverSeries,
   pruneEmptySeries,
   updateEntireSeries,
 } from "@/lib/calendar-recurrence";
 import {
   CalendarConfirmSheet,
+  CalendarSeriesDeleteChoice,
   CalendarSeriesSaveChoice,
   CalendarToolModal,
   type CalendarConfirmRequest,
@@ -552,6 +554,32 @@ export function PhoneCalendarApp({
     onNotice?.(dayCount > 1 ? `已创建 ${dayCount} 天的日程` : "日程已保存");
   };
 
+  const [askDeleteScope, setAskDeleteScope] = useState(false);
+
+  const handleDeleteRequest = () => {
+    if (!selectedOwner || !editingItem?.id) return;
+    // 重复系列里的一次：先问删这一次、这一次及以后，还是整个系列
+    if (selectedOwner.ownerType === "user" && editingItem.seriesId && loadCalendarExtras().series[editingItem.seriesId]) {
+      setAskDeleteScope(true);
+      return;
+    }
+    handleDeleteItem();
+  };
+
+  /** following：删这一次及以后；否则整个系列 */
+  const deleteSeries = (draft: CalendarEventDraft & { originalDate?: string }, following: boolean) => {
+    if (!draft.seriesId) return;
+    // 编辑框里改过日期也按原来那天算
+    const result = deleteSeriesOccurrences(draft.seriesId, following ? (draft.originalDate || draft.date) : "");
+    if (!result.ok) {
+      onNotice?.(result.error);
+      return;
+    }
+    setEditingItem(null);
+    refreshPlans();
+    onNotice?.(result.message);
+  };
+
   const handleDeleteItem = () => {
     if (!selectedOwner || !editingItem?.id) return;
     const targetWeekStart = getWeekStartIso(parseIsoDate(editingItem.originalDate || editingItem.date));
@@ -963,7 +991,7 @@ export function PhoneCalendarApp({
           withUserExtras={selectedOwner?.ownerType === "user"}
           onChange={next => setEditingItem(prev => (prev ? { ...prev, ...next } : next))}
           onSave={handleSaveDraft}
-          onDelete={handleDeleteItem}
+          onDelete={handleDeleteRequest}
           onClose={() => setEditingItem(null)}
         />
       )}
@@ -973,6 +1001,15 @@ export function PhoneCalendarApp({
           onCurrent={() => saveSingle(editingItem, true)}
           onAll={() => saveWholeSeries(editingItem)}
           close={() => setAskSeriesScope(false)}
+        />
+      ) : null}
+
+      {askDeleteScope && editingItem ? (
+        <CalendarSeriesDeleteChoice
+          onCurrent={handleDeleteItem}
+          onFollowing={() => deleteSeries(editingItem, true)}
+          onAll={() => deleteSeries(editingItem, false)}
+          close={() => setAskDeleteScope(false)}
         />
       ) : null}
 
