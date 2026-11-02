@@ -149,7 +149,7 @@ async function callReadingLLM(
     regexes?: RegexConfig[],
     appTags?: string[],
     userName?: string,
-    options?: { skipOutputRegex?: boolean },
+    options?: { skipOutputRegex?: boolean; signal?: AbortSignal },
 ): Promise<string> {
     return sendLLMRequest(
         config,
@@ -157,7 +157,7 @@ async function callReadingLLM(
         messages,
         regexes ?? [],
         { characterName, userName },
-        { appId: "reading", appTags, skipOutputRegex: options?.skipOutputRegex },
+        { appId: "reading", appTags, skipOutputRegex: options?.skipOutputRegex, signal: options?.signal },
     );
 }
 
@@ -492,6 +492,8 @@ export async function generateAnnotationBatch(
     targets: AnnotationTarget[],
     existingAnnotations: ReadingAnnotation[],
     characterId: string,
+    /** signal：批注框上点「停止」或者超时，掐掉这次请求 */
+    options?: { signal?: AbortSignal },
 ): Promise<AnnotationBatchResult> {
     const character = loadCharacters().find(c => c.id === characterId);
     if (!character) throw new Error("角色不存在");
@@ -526,7 +528,7 @@ export async function generateAnnotationBatch(
         input.regexes,
         input.appTags,
         input.userIdentity?.name,
-        { skipOutputRegex: true },
+        { skipOutputRegex: true, signal: options?.signal },
     );
     if (!responseText) throw new Error("API 返回空内容");
 

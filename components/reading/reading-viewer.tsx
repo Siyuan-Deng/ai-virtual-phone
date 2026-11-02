@@ -128,8 +128,12 @@ function getParagraphLength(text: string): number {
     return text.replace(/\s+/g, "").length || text.trim().length;
 }
 
-/** 静默重试：生成失败时按用户配置的次数重试，重试间隔逐渐加大，全部失败后抛出最后一次错误 */
-async function withAnnotationRetry<T>(task: () => Promise<T>, retryCount: number): Promise<T> {
+/** 一次批注请求等多久没回应就自动停（每次重试各算各的） */
+const ANNOTATION_TIMEOUT_MS = 2 * 60 * 1000;
+
+/** 静默重试：生成失败时按用户配置的次数重试，重试间隔逐渐加大，全部失败后抛出最后一次错误。
+ *  signal 停了（点了「停止」或超时）就不再重试 */
+async function withAnnotationRetry<T>(task: () => Promise<T>, retryCount: number, signal?: AbortSignal): Promise<T> {
     const maxAttempts = Math.max(1, retryCount + 1);
     let lastError: unknown = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -137,7 +141,7 @@ async function withAnnotationRetry<T>(task: () => Promise<T>, retryCount: number
             return await task();
         } catch (err) {
             lastError = err;
-            if (attempt >= maxAttempts) break;
+            if (signal?.aborted || attempt >= maxAttempts) break;
             await new Promise<void>((resolve) => setTimeout(resolve, Math.min(1200, 400 * attempt)));
         }
     }
@@ -410,6 +414,10 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
     const annotationInFlightRef = useRef(false);
     /** 正在生成中的批次 key：防止同一批在生成完成前被再次发起 */
     const inFlightBatchesRef = useRef<Set<string>>(new Set());
+    /** 正在跑的那次批注：点「停止」或超时就掐掉 */
+    const annotationAbortRef = useRef<{ controller: AbortController; reason: "user" | "timeout" | null } | null>(null);
+    /** 停掉的批次：自动批注 / 预生成不再自己重发（不然一停又立刻发同一批），手动批注这一段才会再跑 */
+    const stoppedBatchesRef = useRef<Set<string>>(new Set());
     const pendingTxtPageFractionRef = useRef<number | null>(null);
     const lastTxtPaginationSignatureRef = useRef("");
     // 滚动阅读模式：连续滚动（多章窗口无缝衔接）
@@ -1371,6 +1379,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         if (!companionId) return false;
         const batchKey = `${book.id}:${companionId}:${request.key}`;
         if (!options?.force && generatedBatchesRef.current.has(batchKey)) return false;
+        if (!options?.force && stoppedBatchesRef.current.has(batchKey)) return false;
         // 同步锁：同一时间只允许一个批注生成任务（auto/prefetch 竞态时后面的请求直接跳过，
         // 避免闭包里的 generating 旧值放行并发请求，导致同一批被重复生成）
         if (annotationInFlightRef.current) return false;
@@ -1378,6 +1387,9 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         if (!options?.force && inFlightBatchesRef.current.has(batchKey)) return false;
         annotationInFlightRef.current = true;
         inFlightBatchesRef.current.add(batchKey);
+        stoppedBatchesRef.current.delete(batchKey);
+        const run = { controller: new AbortController(), reason: null as "user" | "timeout" | null };
+        annotationAbortRef.current = run;
         setGenerating(true);
         setAnnotationError(null);
 
@@ -1388,18 +1400,31 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             const existing = await loadExistingAnnotationsForItems(request.items);
 
             const { annotations: newAnnotations, marks: newMarks } = await withAnnotationRetry(
-                () => generateAnnotationBatch(
-                    book,
-                    request.title,
-                    request.items.map((item) => ({
-                        chapterIndex: item.chapterIndex,
-                        paragraphIndex: item.paragraphIndex,
-                        text: item.text,
-                    })),
-                    existing,
-                    companionId,
-                ),
+                async () => {
+                    // 接口一直不回的话最长能挂 8 分多钟：2 分钟没回应就自己停
+                    const timer = setTimeout(() => {
+                        run.reason = "timeout";
+                        run.controller.abort();
+                    }, ANNOTATION_TIMEOUT_MS);
+                    try {
+                        return await generateAnnotationBatch(
+                            book,
+                            request.title,
+                            request.items.map((item) => ({
+                                chapterIndex: item.chapterIndex,
+                                paragraphIndex: item.paragraphIndex,
+                                text: item.text,
+                            })),
+                            existing,
+                            companionId,
+                            { signal: run.controller.signal },
+                        );
+                    } finally {
+                        clearTimeout(timer);
+                    }
+                },
                 readingConfig.annotationRetryCount > 0 ? readingConfig.annotationRetryCount : 0,
+                run.controller.signal,
             );
 
             generatedBatchesRef.current.add(batchKey);
@@ -1428,10 +1453,16 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             }
             return true;
         } catch (err) {
+            if (run.controller.signal.aborted) {
+                stoppedBatchesRef.current.add(batchKey);
+                if (run.reason === "timeout") setAnnotationError("批注 2 分钟没有回应，已自动停止");
+                return false;
+            }
             console.error("[Reading] Annotation error:", err);
             setAnnotationError(`批注失败: ${err instanceof Error ? err.message : String(err)}`);
             return false;
         } finally {
+            if (annotationAbortRef.current === run) annotationAbortRef.current = null;
             inFlightBatchesRef.current.delete(batchKey);
             annotationInFlightRef.current = false;
             setGenerating(false);
@@ -1458,6 +1489,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             }
             setAutoAnnotate(true);
             generatedBatchesRef.current.clear();
+            stoppedBatchesRef.current.clear();
             prefetchedBatchStartRef.current = -1; // 新的阅读体验：预生成触发标记一并重置
             const request = await materializeBatchRequest(size, "auto-current");
             if (request) await executeBatchAnnotation(request);
@@ -2915,6 +2947,19 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             {generating && (
                 <div className="reading-status-float" aria-live="polite">
                     {companion?.name || "AI"} 正在批注中...
+                    <span className="reading-status-divider" aria-hidden="true" />
+                    <button
+                        type="button"
+                        className="reading-status-stop"
+                        onClick={() => {
+                            const run = annotationAbortRef.current;
+                            if (!run) return;
+                            run.reason = "user";
+                            run.controller.abort();
+                        }}
+                    >
+                        停止
+                    </button>
                 </div>
             )}
 

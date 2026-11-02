@@ -4285,7 +4285,8 @@
   top: 80px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 35;
+  /* 压在顶栏（z-index 46）上面：胶囊落在顶栏的范围里，不然右边的「停止」点不到 */
+  z-index: 47;
   pointer-events: none;
   padding: 6px 14px;
   border-radius: 999px;
@@ -4297,6 +4298,27 @@
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   animation: reading-toast-in 0.35s ease-out both, reading-toast-pulse 2s ease-in-out 0.35s infinite;
+}
+/* 「正在批注中…」右边的「停止」：整条胶囊不接点击，只有这个字能点 */
+.reading-status-divider {
+  display: inline-block;
+  width: 1px;
+  height: 10px;
+  margin: 0 8px;
+  vertical-align: -1px;
+  background: currentColor;
+  opacity: 0.25;
+}
+.reading-status-stop {
+  pointer-events: auto;
+  border: 0;
+  margin: -4px -6px;
+  padding: 4px 6px;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  color: var(--c-danger, #d14343);
+  cursor: pointer;
 }
 @keyframes reading-toast-in {
   from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
