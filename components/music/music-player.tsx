@@ -20,6 +20,7 @@ import { loadMusicBg, playerBgStyle, MUSIC_BG_EVENT, type MusicBgConfig } from "
 import ListenTogetherPanel from "./listen-together-panel";
 import ListenTogetherLayer from "./listen-together-layer";
 import CharacterTastePage from "./character-taste-page";
+import TrackEditSheet from "./track-edit-sheet";
 import { loadListenSession, saveListenSession } from "@/lib/music-listen-together";
 
 const PLAY_MODE_ICONS: Record<PlayMode, { svg: string; label: string }> = {
@@ -74,6 +75,8 @@ export default function MusicPlayer() {
     // 一起听：设置面板开关 + 会话是否在跑。初值读 kv 可能早于水合，下面会再校正一次。
     const [showListenPanel, setShowListenPanel] = useState(false);
     const [showTastePage, setShowTastePage] = useState(false);
+    // 编辑歌曲（封面 / 歌词 / 歌名歌手）；lyrics：从歌词页「添加歌词」进来，光标直接放进歌词框
+    const [trackEditor, setTrackEditor] = useState<{ lyrics: boolean } | null>(null);
     const [listenActive, setListenActive] = useState(() => {
         const session = loadListenSession();
         // 旧版本可能把「只选了角色、还没点开始」的临时状态持久化成 active；
@@ -249,31 +252,50 @@ export default function MusicPlayer() {
 
     // ── Parse LRC lyrics ──
     const parsedLyrics = useRef<{ time: number; text: string }[]>([]);
+    // 自己贴的纯文字歌词：没有时间，整段显示，不跟着滚、点了也不跳
+    const plainLyricsRef = useRef(false);
     const [activeLyricIdx, setActiveLyricIdx] = useState(-1);
     const lyricsContainerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         const lrc = player.currentTrack?.lyrics || "";
+        plainLyricsRef.current = false;
         if (!lrc) {
             parsedLyrics.current = [];
             return;
         }
         const lines: { time: number; text: string }[] = [];
         for (const line of lrc.split("\n")) {
-            const match = line.match(/\[(\d+):(\d+(?:\.\d+)?)\](.*)/);
-            if (match) {
-                const mins = parseInt(match[1], 10);
-                const secs = parseFloat(match[2]);
-                lines.push({ time: mins * 60 + secs, text: match[3].trim() });
+            // 一行前面可能挂好几个时间（副歌重复那种 [00:12.00][01:30.00]歌词）
+            const stamps = line.match(/^(\s*\[\d+:\d+(?:\.\d+)?\])+/);
+            if (!stamps) continue;
+            const text = line.slice(stamps[0].length).trim();
+            for (const stamp of stamps[0].matchAll(/\[(\d+):(\d+(?:\.\d+)?)\]/g)) {
+                lines.push({ time: parseInt(stamp[1], 10) * 60 + parseFloat(stamp[2]), text });
             }
+        }
+        if (lines.length === 0) {
+            // 一个时间都没有：当纯文字整段显示（去掉 [ti:] [ar:] 这种标签行）
+            const plain = lrc.split("\n").map(line => line.trim()).filter(line => !/^\[[a-z]+:.*\]$/i.test(line));
+            while (plain.length > 0 && !plain[0]) plain.shift();
+            while (plain.length > 0 && !plain[plain.length - 1]) plain.pop();
+            plainLyricsRef.current = plain.length > 0;
+            parsedLyrics.current = plain.map(text => ({ time: -1, text }));
+            return;
         }
         lines.sort((a, b) => a.time - b.time);
         parsedLyrics.current = lines;
     }, [player.currentTrack?.lyrics]);
 
+    // 歌词解析存在 ref 里，暂停时没有别的东西触发重渲染：刚改完歌词要自己刷一下
+    const [, setLyricsVersion] = useState(0);
+    useEffect(() => {
+        setLyricsVersion(version => version + 1);
+    }, [player.currentTrack?.lyrics]);
+
     useEffect(() => {
         const lyrics = parsedLyrics.current;
-        if (lyrics.length === 0) { setActiveLyricIdx(-1); return; }
+        if (lyrics.length === 0 || plainLyricsRef.current) { setActiveLyricIdx(-1); return; }
         let idx = -1;
         for (let i = lyrics.length - 1; i >= 0; i--) {
             if (player.currentTime >= lyrics[i].time) {
@@ -294,7 +316,7 @@ export default function MusicPlayer() {
     const handleLyricClick = useCallback((idx: number, e: React.MouseEvent) => {
         e.stopPropagation();
         const line = parsedLyrics.current[idx];
-        if (line) player.seek(line.time);
+        if (line && line.time >= 0) player.seek(line.time);
     }, [player]);
 
     const [liked, setLiked] = useState(false);
@@ -527,10 +549,10 @@ export default function MusicPlayer() {
                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                         </svg>
                     </button>
-                    <button className="music-player-ctrl-btn mp-top-btn" onClick={openShareViaChat} title="分享到聊天">
+                    {/* 分享和下面那排的「分享」是同一个，这里换成编辑歌曲 */}
+                    <button className="music-player-ctrl-btn mp-top-btn" onClick={() => setTrackEditor({ lyrics: false })} title="编辑歌曲（封面、歌词）">
                         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                            <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
-                            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                            <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
                         </svg>
                     </button>
                 </div>
@@ -552,7 +574,7 @@ export default function MusicPlayer() {
                                         <div
                                             key={i}
                                             className="mp-lyric-line"
-                                            {...(i === activeLyricIdx ? { "data-active": "" } : dist === 1 ? { "data-near": "" } : {})}
+                                            {...(plainLyricsRef.current ? { "data-near": "" } : i === activeLyricIdx ? { "data-active": "" } : dist === 1 ? { "data-near": "" } : {})}
                                             onClick={(e) => handleLyricClick(i, e)}
                                         >
                                             {line.text || " "}
@@ -563,6 +585,10 @@ export default function MusicPlayer() {
                         ) : (
                             <div className="mp-lyrics mp-lyrics-empty">
                                 <div className="mp-lyric-line" data-active="">暂无歌词</div>
+                                <div className="mp-lyrics-add">
+                                    <button type="button" onClick={(event) => { event.stopPropagation(); setTrackEditor({ lyrics: true }); }}>添加歌词</button>
+                                    <span>贴歌词或导入 .lrc 文件，带时间的会跟着滚动</span>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -733,6 +759,17 @@ export default function MusicPlayer() {
 
             {/* TA 的歌单 */}
             {showTastePage && <CharacterTastePage onClose={() => setShowTastePage(false)} />}
+
+            {/* 编辑歌曲：封面 / 歌名歌手 / 歌词 */}
+            {trackEditor && player.currentTrackBase && (
+                <TrackEditSheet
+                    key={player.currentTrackBase.id}
+                    track={player.currentTrackBase}
+                    focusLyrics={trackEditor.lyrics}
+                    onClose={() => setTrackEditor(null)}
+                    onSaved={showMusicToast}
+                />
+            )}
 
             {/* Queue drawer */}
             {showQueue && (

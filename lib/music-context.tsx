@@ -8,13 +8,17 @@ import { findPlayableMatch, getNeteaseLyrics, getNeteasePlayUrl, getNeteasePlayI
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { registerMusicControlBridge } from "./music-control-bridge";
 import { setMusicNowPlaying } from "./now-playing";
+import { applyTrackOverride, trackBase, useTrackOverridesRevision } from "./music-track-overrides";
 
 // ── Types ──
 
 export type PlayMode = "sequence" | "shuffle" | "repeat-one";
 
 export type MusicState = {
+    /** 叠上了自己改的封面、歌词、歌名、歌手 */
     currentTrack: MusicTrack | null;
+    /** 没叠改动的原样，编辑歌曲时用来对比、恢复 */
+    currentTrackBase: MusicTrack | null;
     isPlaying: boolean;
     currentTime: number;
     duration: number;
@@ -97,7 +101,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const blobUrlRef = useRef<string | null>(null);
 
-    const [currentTrack, setCurrentTrack] = useState<MusicTrack | null>(null);
+    const [currentTrackBase, setCurrentTrack] = useState<MusicTrack | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
@@ -106,6 +110,19 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     const [volume, setVolumeState] = useState(0.8);
     const [showFullPlayer, setShowFullPlayer] = useState(false);
     const [floatDismissed, setFloatDismissed] = useState(false);
+
+    // 自己改的封面 / 歌词 / 歌名 / 歌手：放歌和播放列表都叠上；改了马上生效（正在放的这首也跟着变）
+    const overridesRevision = useTrackOverridesRevision();
+    const currentTrack = useMemo(
+        () => applyTrackOverride(currentTrackBase),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [currentTrackBase, overridesRevision],
+    );
+    const queueView = useMemo(
+        () => queue.map((track) => applyTrackOverride(track)),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [queue, overridesRevision],
+    );
 
     // Persist queue on change.
     useEffect(() => {
@@ -121,7 +138,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
 
     /** Wrapped setQueue with max size enforcement */
     const setQueue = useCallback((tracks: MusicTrack[]) => {
-        setQueueRaw(tracks.slice(0, QUEUE_MAX_SIZE));
+        setQueueRaw(tracks.slice(0, QUEUE_MAX_SIZE).map(trackBase));
     }, []);
 
     // Initialize audio element once
@@ -198,6 +215,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     const loadAndPlay = useCallback(async (track: MusicTrack) => {
         const audio = audioRef.current;
         if (!audio) return;
+        track = trackBase(track);
 
         cleanupBlobUrl();
         audio.pause();
@@ -243,7 +261,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
         cleanupBlobUrl();
         audio.pause();
         audio.src = url;
-        setCurrentTrack(track);
+        setCurrentTrack(trackBase(track));
         setCurrentTime(0);
         audio.play().catch(() => {});
     }, [cleanupBlobUrl]);
@@ -340,6 +358,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     const closeFullPlayer = useCallback(() => setShowFullPlayer(false), []);
 
     const playResolvedTrack = useCallback(async (track: MusicTrack): Promise<{ ok: boolean; message: string; track?: MusicTrack }> => {
+        track = trackBase(track);
         setFloatDismissed(false);
         setQueueRaw(prev => prev.some(item => item.id === track.id) ? prev : [track, ...prev]);
 
@@ -402,7 +421,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
         tracksToAdd: MusicTrack[],
         options?: { replace?: boolean; playFirst?: boolean },
     ): Promise<{ ok: boolean; message: string; queue: MusicTrack[] }> => {
-        const cleanTracks = tracksToAdd.filter(track => track.id && track.title);
+        const cleanTracks = tracksToAdd.filter(track => track.id && track.title).map(trackBase);
         if (cleanTracks.length === 0) return { ok: false, message: "没有可加入播放列表的歌曲", queue };
 
         const base = options?.replace ? [] : queue;
@@ -435,7 +454,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
                 currentTime,
                 duration,
                 playMode,
-                queue,
+                queue: queueView,
                 volume,
             }),
             playTrack: playResolvedTrack,
@@ -450,16 +469,16 @@ export function MusicProvider({ children }: { children: ReactNode }) {
         });
         return () => registerMusicControlBridge(null);
     }, [
-        currentTrack, isPlaying, currentTime, duration, playMode, queue, volume,
+        currentTrack, isPlaying, currentTime, duration, playMode, queueView, volume,
         playResolvedTrack, playByQuery, addToQueue, pause, resume, stop, next, prev, setPlayMode,
     ]);
 
     const controlsValue = useMemo<MusicControlsValue>(() => ({
-        currentTrack, isPlaying, duration, playMode, queue, volume, showFullPlayer, floatDismissed,
+        currentTrack, currentTrackBase, isPlaying, duration, playMode, queue: queueView, volume, showFullPlayer, floatDismissed,
         playTrack, playUrl, pause, resume, togglePlay, next, prev, seek,
         setPlayMode, setQueue, removeFromQueue, setVolume, stop, dismissFloat, openFullPlayer, closeFullPlayer,
     }), [
-        currentTrack, isPlaying, duration, playMode, queue, volume, showFullPlayer, floatDismissed,
+        currentTrack, currentTrackBase, isPlaying, duration, playMode, queueView, volume, showFullPlayer, floatDismissed,
         playTrack, playUrl, pause, resume, togglePlay, next, prev, seek,
         setQueue, removeFromQueue, setVolume, stop, dismissFloat, openFullPlayer, closeFullPlayer,
     ]);

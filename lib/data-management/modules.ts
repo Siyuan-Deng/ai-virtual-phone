@@ -309,6 +309,8 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
           "music-search-cache:",
           "music-playlist-tracks-",
           "music-playlist-detail-",
+          // 每首歌自己改的封面 / 歌词 / 歌名歌手
+          "music-track-override-v1:",
           "ai_phone_custom_app_data_v1:",
           "ai_phone_custom_app_timeline_v1:",
         ],
