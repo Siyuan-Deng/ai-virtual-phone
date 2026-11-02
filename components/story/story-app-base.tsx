@@ -38,6 +38,7 @@ function SolidBackIcon({ size = 17 }: { size?: number }) {
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { Avatar } from "@/components/ui/primitives";
 import { StoryHtmlRenderer, storyProseParagraphs } from "@/components/ui/story-html-renderer";
+import { StoryRoundJump } from "./story-round-jump";
 import { addMoment } from "@/lib/moment-storage";
 import { loadCharacters } from "@/lib/character-storage";
 import { maybeRunSummarization } from "@/lib/memory-summarizer";
@@ -317,6 +318,11 @@ type StoryComposerAppendRequest = {
 const STORY_GENERATION_STATUS = ["整理场景", "续写剧情", "打磨对白", "写入故事"];
 const STORY_INITIAL_LOAD = 10;
 const STORY_LOAD_MORE_COUNT = 10;
+
+/** 一轮从你发出去的那条开始：你的发言（含番外指令卡）、系统指令卡 */
+function isStoryRoundStart(message: StoryMessage): boolean {
+  return message.role === "user" || message.instruction === true;
+}
 
 function StoryGeneratingIndicator({
   characterName,
@@ -841,6 +847,11 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
     return messages.slice(-visibleMessageCount);
   }, [messages, visibleMessageCount]);
   const hasMoreMessages = visibleMessages.length < messages.length;
+  // 上下轮定位：还没加载出来的那段里有没有一轮的开头（你的发言、番外指令卡、系统指令卡）
+  const hiddenHasRound = useMemo(
+    () => messages.slice(0, messages.length - visibleMessages.length).some(isStoryRoundStart),
+    [messages, visibleMessages.length],
+  );
 
   const loadMoreMessages = useCallback(() => {
     if (!hasMoreMessages) return;
@@ -2069,6 +2080,7 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
                       className={`story-row${selectingMessageId === message.id ? " is-selecting" : ""}`}
                       data-role={message.role}
                       data-story-msg-id={message.id}
+                      data-story-round={isStoryRoundStart(message) ? "" : undefined}
                       onPointerDown={(e) => handleMsgPointerDown(e, message.id)}
                       onPointerMove={handleMsgPointerMove}
                       onPointerUp={handleMsgPointerUp}
@@ -2206,6 +2218,16 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
           </div>
         </div>
       </div>
+
+      {messages.length > 0 ? (
+        <StoryRoundJump
+          key={activeSessionId}
+          scrollRef={scrollRef}
+          revision={`${activeSessionId}:${visibleMessages.length}:${messages.length}`}
+          hiddenHasRound={hiddenHasRound}
+          onLoadMore={loadMoreMessages}
+        />
+      ) : null}
 
       <StoryComposer
         characterName={currentCharacter.name}
