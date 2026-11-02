@@ -43,6 +43,10 @@ export function StickerSearchSuggest({ query, characterIds, onSend, onClose }: S
   const [customItems, setCustomItems] = useState<StickerSearchItem[]>([]);
   const loadSeqRef = useRef(0);
   useEffect(() => {
+    // 懒加载：没输入就不去 IndexedDB 解析贴纸包。
+    // 原来挂载即加载，点开输入框的瞬间就要把全部自定义贴纸读一遍并解析成 url，
+    // 是「点输入框就卡」的直接来源。
+    if (!debouncedQuery) return;
     const seq = ++loadSeqRef.current;
     let cancelled = false;
     (async () => {
@@ -68,7 +72,7 @@ export function StickerSearchSuggest({ query, characterIds, onSend, onClose }: S
       // 只清理最后一次加载，避免竞态时旧结果覆盖新结果
       if (loadSeqRef.current === seq) setCustomItems([]);
     };
-  }, [characterIds]);
+  }, [characterIds, debouncedQuery]);
 
   // ── 内置表情包（emoji 兜底） ──
   const builtinItems = useMemo<StickerSearchItem[]>(

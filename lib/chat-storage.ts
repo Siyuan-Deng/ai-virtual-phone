@@ -459,9 +459,22 @@ function getStableMessageOrder(msg: ChatMessage): number | null {
     return typeof msg.order === "number" && Number.isFinite(msg.order) ? msg.order : null;
 }
 
+// createdAt 是 ISO 字符串，new Date() 解析单次几千纳秒。排序时每条消息会被
+// 比较 O(log n) 次，几千条消息就是十几万次重复解析——全在主线程同步跑。
+// 同一个字符串解析结果必然相同，直接按字符串缓存。
+const _messageTimeCache = new Map<string, number>();
+const MESSAGE_TIME_CACHE_LIMIT = 20000;
+
 function getMessageTimeValue(msg: Pick<ChatMessage, "createdAt">): number {
-    const value = new Date(msg.createdAt).getTime();
-    return Number.isFinite(value) ? value : 0;
+    const raw = msg.createdAt;
+    if (!raw) return 0;
+    const cached = _messageTimeCache.get(raw);
+    if (cached !== undefined) return cached;
+    const parsed = new Date(raw).getTime();
+    const value = Number.isFinite(parsed) ? parsed : 0;
+    if (_messageTimeCache.size >= MESSAGE_TIME_CACHE_LIMIT) _messageTimeCache.clear();
+    _messageTimeCache.set(raw, value);
+    return value;
 }
 
 export function compareChatMessages(a: ChatMessage, b: ChatMessage): number {
@@ -540,14 +553,19 @@ export function reindexSessionMessageOrdersByTime(sessionId: string): void {
     }
 }
 
+// 本函数被 refreshSessionPreviewMetadata 对「每个会话」调用一次，而后者又被
+// loadChatSessions() 带进发消息路径。原实现先全量 filter+sort 再取最后一条——
+// 为了拿一条消息排序整个会话，几十个会话叠加就是「发完消息卡几秒」的主要来源。
+// 改为单次扫描取排序意义上的最大值，不建数组、不排序，结果与旧实现等价
+// （旧实现返回的就是排序后最后一条可见消息）。
 export function getLastVisibleSessionMessage(sessionId: string): ChatMessage | null {
-    const messages = getSortedSessionMessages(sessionId);
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-        const msg = messages[i];
+    let best: ChatMessage | null = null;
+    for (const msg of _messagesCache) {
+        if (msg.sessionId !== sessionId) continue;
         if (!isSessionPreviewCandidate(msg)) continue;
-        return msg;
+        if (best === null || compareChatMessages(msg, best) > 0) best = msg;
     }
-    return null;
+    return best;
 }
 
 // ── Storage Keys (settings & follow-up stay in localStorage) ──
