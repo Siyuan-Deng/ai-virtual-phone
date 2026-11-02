@@ -2644,6 +2644,48 @@
   width: 100%;
 }
 
+/* 截断量：右边一个数字框，下面写范围（分应用那页每行也是这个框） */
+.memory-number-item .menu-label-group {
+  flex: 1;
+  min-width: 0;
+}
+
+.memory-budget-field {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.ui-input.memory-budget-input {
+  width: 92px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  text-align: right;
+  font-size: calc(14px*var(--app-text-scale,1));
+  font-variant-numeric: tabular-nums;
+}
+
+.memory-budget-range {
+  font-size: calc(10.5px*var(--app-text-scale,1));
+  font-variant-numeric: tabular-nums;
+}
+
+.memory-app-budget-row[data-custom] .memory-budget-input {
+  color: var(--chip-accent);
+  font-weight: 600;
+}
+
+/* 分应用那页：没单独设时框里是「默认 100000」，要放得下 */
+.memory-app-budget-row .memory-budget-input {
+  width: 120px;
+}
+
+.memory-app-budget-row .memory-budget-input::placeholder {
+  font-size: calc(12.5px*var(--app-text-scale,1));
+}
+
 .data-management-menu .menu-label-group > .menu-label {
   font-weight: 600;
 }

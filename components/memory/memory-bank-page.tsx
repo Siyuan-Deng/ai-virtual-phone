@@ -44,11 +44,6 @@ const MEMORY_TOKEN_BUDGET_MIN: Record<MemoryBudgetKey, number> = {
     coreMemoryTokenBudget: 100,
     longTermTokenBudget: 200,
 };
-const MEMORY_TOKEN_BUDGET_STEP: Record<MemoryBudgetKey, number> = {
-    shortTermTokenBudget: 5000,
-    coreMemoryTokenBudget: 1000,
-    longTermTokenBudget: 1000,
-};
 const MANUAL_MEMORY_CONTENT_LIMIT = 3000;
 // 详情页时间线最多解析渲染的条数：全量历史可能有几万条，
 // 一次性解析+渲染会把 iOS Safari 的单页内存顶爆（灰屏杀页）
@@ -169,14 +164,99 @@ function MemorySettingsSliderItem({
     );
 }
 
-/** 分应用截断量的一行：没单独配过时显示「默认 N」，拖一下滑块就变成单独配。 */
+/** 截断量的数字框：打字时不动，失焦或回车才收进范围、保存；清空 = onCommit(null)。 */
+function MemoryBudgetInput({
+    value,
+    min,
+    max,
+    placeholder,
+    label,
+    onCommit,
+}: {
+    value?: number;
+    min: number;
+    max: number;
+    placeholder?: string;
+    label: string;
+    onCommit: (value: number | null) => void;
+}) {
+    const shown = typeof value === "number" ? String(value) : "";
+    const [draft, setDraft] = useState(shown);
+    const [editing, setEditing] = useState(false);
+    useEffect(() => {
+        if (!editing) setDraft(shown);
+    }, [shown, editing]);
+    const commit = () => {
+        setEditing(false);
+        const digits = draft.replace(/[^\d]/g, "");
+        if (!digits) {
+            setDraft(shown);
+            onCommit(null);
+            return;
+        }
+        const next = Math.min(max, Math.max(min, parseInt(digits, 10)));
+        setDraft(String(next));
+        onCommit(next);
+    };
+    return (
+        <input
+            className="ui-input memory-budget-input"
+            type="text"
+            inputMode="numeric"
+            value={draft}
+            placeholder={placeholder}
+            onFocus={() => setEditing(true)}
+            onChange={e => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
+            aria-label={label}
+        />
+    );
+}
+
+/** 截断量一项：右边一个数字框，下面写能填的范围 */
+function MemorySettingsNumberItem({
+    icon,
+    color,
+    label,
+    desc,
+    value,
+    min,
+    max,
+    onChange,
+}: {
+    icon: LucideIcon;
+    color: string;
+    label: string;
+    desc: string;
+    value: number;
+    min: number;
+    max: number;
+    onChange: (value: number) => void;
+}) {
+    return (
+        <div className="menu-item memory-number-item">
+            <MemorySettingsIcon icon={icon} color={color} />
+            <div className="menu-label-group">
+                <span className="menu-label">{label}</span>
+                <span className="menu-desc">{desc}</span>
+            </div>
+            <div className="memory-budget-field">
+                {/* 清空了就当没改 */}
+                <MemoryBudgetInput value={value} min={min} max={max} label={label} onCommit={next => { if (next !== null) onChange(next); }} />
+                <span className="menu-desc memory-budget-range">{min}–{max}</span>
+            </div>
+        </div>
+    );
+}
+
+/** 分应用截断量的一行：没单独配过时框里是灰的「默认 N」，填了数字就变成单独配，清空回到跟随默认。 */
 function MemoryAppBudgetRow({
     label,
     override,
     fallback,
     min,
     max,
-    step,
     onChange,
     onReset,
 }: {
@@ -185,7 +265,6 @@ function MemoryAppBudgetRow({
     fallback: number;
     min: number;
     max: number;
-    step: number;
     onChange: (value: number) => void;
     onReset: () => void;
 }) {
@@ -197,18 +276,15 @@ function MemoryAppBudgetRow({
                 {isCustom ? (
                     <button type="button" className="memory-app-budget-reset" onClick={onReset}>跟随默认</button>
                 ) : null}
-                <span className="memory-app-budget-value">{isCustom ? override : `默认 ${fallback}`}</span>
+                <MemoryBudgetInput
+                    value={override}
+                    min={min}
+                    max={max}
+                    placeholder={`默认 ${fallback}`}
+                    label={`${label}短期记忆截断量`}
+                    onCommit={next => (next === null ? onReset() : onChange(next))}
+                />
             </div>
-            <input
-                type="range"
-                min={min}
-                max={max}
-                step={step}
-                value={isCustom ? override : fallback}
-                onChange={e => onChange(Number(e.target.value))}
-                className="ui-slider memory-app-budget-slider"
-                aria-label={`${label}短期记忆截断量`}
-            />
         </div>
     );
 }
@@ -1084,7 +1160,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                 {/* Token budget sliders */}
                 <p className="menu-group-desc mx-2">控制截断量</p>
                 <div className="menu-group">
-                    <MemorySettingsSliderItem
+                    <MemorySettingsNumberItem
                         icon={Users}
                         color={BINDING_ACCENTS.voice}
                         label="短期记忆+最近上下文"
@@ -1092,7 +1168,6 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                         value={config.shortTermTokenBudget}
                         min={MEMORY_TOKEN_BUDGET_MIN.shortTermTokenBudget}
                         max={MEMORY_TOKEN_BUDGET_MAX}
-                        step={MEMORY_TOKEN_BUDGET_STEP.shortTermTokenBudget}
                         onChange={value => saveBudget("shortTermTokenBudget", value)}
                     />
                     <button type="button" className="menu-item" onClick={() => setAppBudgetOpen(true)}>
@@ -1106,7 +1181,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                             <ChevronRight size={16} />
                         </div>
                     </button>
-                    <MemorySettingsSliderItem
+                    <MemorySettingsNumberItem
                         icon={Archive}
                         color={BINDING_ACCENTS.memory}
                         label="长期记忆"
@@ -1114,10 +1189,9 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                         value={config.longTermTokenBudget}
                         min={MEMORY_TOKEN_BUDGET_MIN.longTermTokenBudget}
                         max={MEMORY_TOKEN_BUDGET_MAX}
-                        step={MEMORY_TOKEN_BUDGET_STEP.longTermTokenBudget}
                         onChange={value => saveBudget("longTermTokenBudget", value)}
                     />
-                    <MemorySettingsSliderItem
+                    <MemorySettingsNumberItem
                         icon={Brain}
                         color={BINDING_ACCENTS.embedding}
                         label="核心记忆"
@@ -1125,7 +1199,6 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                         value={config.coreMemoryTokenBudget}
                         min={MEMORY_TOKEN_BUDGET_MIN.coreMemoryTokenBudget}
                         max={MEMORY_TOKEN_BUDGET_MAX}
-                        step={MEMORY_TOKEN_BUDGET_STEP.coreMemoryTokenBudget}
                         onChange={value => saveBudget("coreMemoryTokenBudget", value)}
                     />
                 </div>
@@ -1139,7 +1212,7 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                                 <button className="modal-header-btn modal-header-btn-muted" onClick={() => setAppBudgetOpen(false)}><X size={18} /></button>
                             </div>
                             <div className="modal-body" data-ui="modal-body">
-                                <p className="memory-app-budget-hint">拖动某一行就变成单独配置，点「跟随默认」再交回上面那个总开关。</p>
+                                <p className="memory-app-budget-hint">某一行填了数字就变成单独配置（{MEMORY_TOKEN_BUDGET_MIN.shortTermTokenBudget}–{MEMORY_TOKEN_BUDGET_MAX}），清空或点「跟随默认」再交回上面那个总设置。</p>
                                 <div className="memory-app-budget-list" style={{ "--chip-accent": BINDING_ACCENTS.voice } as CSSProperties}>
                                     {SHORT_TERM_BUDGET_APP_KEYS.map(key => (
                                         <MemoryAppBudgetRow
@@ -1149,7 +1222,6 @@ export function MemoryBankPage({ view, selectedCharId, onSelectChar, onNotice }:
                                             fallback={config.shortTermTokenBudget}
                                             min={MEMORY_TOKEN_BUDGET_MIN.shortTermTokenBudget}
                                             max={MEMORY_TOKEN_BUDGET_MAX}
-                                            step={MEMORY_TOKEN_BUDGET_STEP.shortTermTokenBudget}
                                             onChange={value => saveAppBudget(key, value)}
                                             onReset={() => saveAppBudget(key, null)}
                                         />
