@@ -1898,6 +1898,86 @@
     max-width: 280px;
 }
 
+/* 编辑歌曲：封面 / 歌名歌手 / 歌词 */
+.music-track-edit-dialog {
+    max-width: 340px;
+    max-height: 86%;
+}
+
+.music-track-edit-cover-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.music-track-edit-cover {
+    width: 84px;
+    height: 84px;
+    flex: 0 0 84px;
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--c-music-surface);
+    border: 1px solid var(--c-music-surface-solid);
+    color: var(--c-music-accent);
+}
+
+.music-track-edit-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.music-track-edit-cover-side {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.music-track-edit-hint {
+    opacity: 0.55;
+    font-size: calc(9.9px*var(--app-text-scale,1));
+}
+
+.music-settings-input.music-track-edit-lyrics {
+    height: 120px;
+    padding: 10px 14px;
+    resize: none;
+    line-height: 1.6;
+    font-family: ui-monospace, Menlo, monospace;
+}
+
+/* 歌词页没歌词时：「添加歌词」 */
+.mp-lyrics-add {
+    margin-top: 18px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.mp-lyrics-add button {
+    padding: 10px 22px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    font-size: calc(12.6px*var(--app-text-scale,1));
+    font-family: inherit;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    cursor: pointer;
+}
+
+.mp-lyrics-add span {
+    font-size: calc(10.3px*var(--app-text-scale,1));
+    color: rgba(255, 255, 255, 0.5);
+}
+
 .music-confirm-text {
     font-size: calc(11.7px*var(--app-text-scale,1));
     color: var(--c-music-text);

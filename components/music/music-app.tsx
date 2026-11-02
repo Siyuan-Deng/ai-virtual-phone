@@ -8,6 +8,8 @@ import {
     type MusicTrack,
 } from "@/lib/music-storage";
 import { useMusicControls, type MusicControlsValue } from "@/lib/music-context";
+import { applyTrackOverride, saveTrackOverride, useTrackOverridesRevision } from "@/lib/music-track-overrides";
+import TrackEditSheet from "./track-edit-sheet";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { NightSideTabs, useNightDraft } from "@/components/ui/night-side-tabs";
 import { nightSlotKeys } from "@/lib/night-mode";
@@ -180,6 +182,8 @@ export default function MusicApp({ onClose }: Props) {
     const handleDelete = async (trackId: string, e: React.MouseEvent) => {
         e.stopPropagation();
         await deleteTrack(trackId);
+        // 自己改的封面、歌词跟着歌一起删
+        saveTrackOverride(trackId, null);
         setTracks(prev => prev.filter(t => t.id !== trackId));
         if (player.currentTrack?.id === trackId) player.stop();
     };
@@ -1154,15 +1158,19 @@ function SongList({ tracks, player, formatTime, onDelete, onPlay }: {
     onPlay: (t: MusicTrack) => void;
 }) {
     const [deleteTarget, setDeleteTarget] = useState<MusicTrack | null>(null);
+    const [editTarget, setEditTarget] = useState<MusicTrack | null>(null);
+    // 列表显示叠上自己改的封面 / 歌名 / 歌手；点播放、编辑传的还是原样
+    useTrackOverridesRevision();
 
     return (
         <div className="music-list">
             {tracks.map((track, idx) => {
                 const isCurrent = player.currentTrack?.id === track.id;
+                const shown = applyTrackOverride(track);
                 return (
                     <div key={track.id} className="music-song" {...(isCurrent ? { "data-playing": "" } : {})} style={{ animationDelay: `${Math.min(idx * 0.04, 0.5)}s` }} onClick={() => onPlay(track)}>
                         <div className="music-song-cover">
-                            {track.coverUrl ? <img src={track.coverUrl} alt="" /> : (
+                            {shown.coverUrl ? <img src={shown.coverUrl} alt="" /> : (
                                 <div className="music-song-cover-placeholder">
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
                                 </div>
@@ -1174,11 +1182,16 @@ function SongList({ tracks, player, formatTime, onDelete, onPlay }: {
                             )}
                         </div>
                         <div className="music-song-info">
-                            <div className="music-song-title">{track.title}</div>
-                            <div className="music-song-artist">{track.artist}</div>
+                            <div className="music-song-title">{shown.title}</div>
+                            <div className="music-song-artist">{shown.artist}</div>
                         </div>
                         <div className="music-song-duration">{formatTime(track.duration)}</div>
                         <div className="music-song-actions">
+                            <button className="music-song-action-btn" aria-label="编辑歌曲" onClick={(e) => { e.stopPropagation(); setEditTarget(track); }}>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                                </svg>
+                            </button>
                             <button className="music-song-action-btn" data-danger="" onClick={(e) => { e.stopPropagation(); setDeleteTarget(track); }}>
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                                     <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
@@ -1188,6 +1201,10 @@ function SongList({ tracks, player, formatTime, onDelete, onPlay }: {
                     </div>
                 );
             })}
+
+            {editTarget && (
+                <TrackEditSheet key={editTarget.id} track={editTarget} onClose={() => setEditTarget(null)} />
+            )}
 
             {/* Delete confirm modal */}
             {deleteTarget && (
