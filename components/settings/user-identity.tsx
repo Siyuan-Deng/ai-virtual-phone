@@ -6,6 +6,7 @@ import { SettingsContext } from "../phone-settings-app";
 import { loadUserIdentities, saveUserIdentities } from "@/lib/settings-storage";
 import { Input } from "@/components/ui/form";
 import { ConfirmDialog } from "@/components/ui/modal";
+import { AvatarCropDialog } from "@/components/chat/avatar-crop-dialog";
 
 export type UserIdentity = {
     id: string;
@@ -39,25 +40,12 @@ const DEFAULT_IDENTITIES: UserIdentity[] = [
     }
 ];
 
-function fileToDataUrl(file: File, maxSize = 400, quality = 0.8): Promise<string> {
+function blobToDataUrl(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = () => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement("canvas");
-                const scale = Math.min(maxSize / img.width, maxSize / img.height, 1);
-                canvas.width = img.width * scale;
-                canvas.height = img.height * scale;
-                const ctx = canvas.getContext("2d")!;
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                resolve(canvas.toDataURL("image/webp", quality));
-            };
-            img.onerror = reject;
-            img.src = reader.result as string;
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("图片读取失败"));
+        reader.readAsDataURL(blob);
     });
 }
 
@@ -67,6 +55,8 @@ export function UserIdentitySettings() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [isNewIdentity, setIsNewIdentity] = useState(false);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+    // 选好的头像图先进圆形选取框（和聊天里换头像同一个），框里的部分才存成头像
+    const [avatarCrop, setAvatarCrop] = useState<{ identityId: string; file: File } | null>(null);
 
     useEffect(() => {
         const saved = loadUserIdentities();
@@ -227,13 +217,9 @@ export function UserIdentitySettings() {
                                                     const input = document.createElement("input");
                                                     input.type = "file";
                                                     input.accept = "image/*";
-                                                    input.onchange = async () => {
+                                                    input.onchange = () => {
                                                         const file = input.files?.[0];
-                                                        if (!file) return;
-                                                        try {
-                                                            const dataUrl = await fileToDataUrl(file);
-                                                            updateIdentity(identity.id, { avatarUrl: dataUrl });
-                                                        } catch { /* ignore */ }
+                                                        if (file) setAvatarCrop({ identityId: identity.id, file });
                                                     };
                                                     input.click();
                                                 }}
@@ -342,6 +328,24 @@ export function UserIdentitySettings() {
                     </div>
                 </div>
             )}
+
+            {avatarCrop && (() => {
+                const target = identities.find(i => i.id === avatarCrop.identityId);
+                return (
+                    <AvatarCropDialog
+                        title={`${target?.name || "我"}的头像`}
+                        currentUrl={target?.avatarUrl || null}
+                        canReset={false}
+                        initialFile={avatarCrop.file}
+                        onSave={async (blob) => {
+                            const dataUrl = await blobToDataUrl(blob);
+                            updateIdentity(avatarCrop.identityId, { avatarUrl: dataUrl });
+                            setAvatarCrop(null);
+                        }}
+                        onClose={() => setAvatarCrop(null)}
+                    />
+                );
+            })()}
 
             {confirmDeleteId && (
                 <ConfirmDialog

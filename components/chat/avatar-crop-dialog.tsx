@@ -2,6 +2,7 @@
 
 // 聊天里点头像换头像：先显示现在的头像，选图后在圆形选取框里拖动、双指（或滑条、滚轮）缩放，
 // 框里的部分就是新头像，不用先去相册裁好。输出 400×400 的正方形图。
+// 设置里的用户身份也用它：那边点头像先选图，带着 initialFile 打开，直接进选取框。
 
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import { ImagePlus, RotateCcw, User } from "lucide-react";
@@ -34,6 +35,7 @@ export function AvatarCropDialog({
     title,
     currentUrl,
     canReset,
+    initialFile,
     onSave,
     onReset,
     onClose,
@@ -43,8 +45,10 @@ export function AvatarCropDialog({
     currentUrl: string | null;
     /** 这个聊天里换过头像，才有「恢复默认」 */
     canReset: boolean;
+    /** 打开前已经选好的图：跳过「从相册选择」那一步 */
+    initialFile?: File;
     onSave: (blob: Blob) => Promise<void> | void;
-    onReset: () => void;
+    onReset?: () => void;
     onClose: () => void;
 }) {
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -82,6 +86,14 @@ export function AvatarCropDialog({
         };
         img.src = url;
     };
+
+    const initialFileTakenRef = useRef(false);
+    useEffect(() => {
+        if (!initialFile || initialFileTakenRef.current) return;
+        initialFileTakenRef.current = true;
+        handleFile(initialFile);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialFile]);
 
     /** 以舞台上 (cx, cy) 这一点为中心缩放 */
     const zoomAround = useCallback((nextZ: number, cx: number, cy: number) => {
@@ -219,7 +231,7 @@ export function AvatarCropDialog({
                             <button type="button" className="ui-btn ui-btn-primary w-full" onClick={pickFile}>
                                 <ImagePlus size={16} /> 从相册选择
                             </button>
-                            {canReset ? (
+                            {canReset && onReset ? (
                                 <button type="button" className="ui-btn ui-btn-outline w-full" onClick={onReset}>
                                     <RotateCcw size={16} /> 恢复默认头像
                                 </button>
