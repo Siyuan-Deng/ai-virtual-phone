@@ -59,6 +59,16 @@ function formatCount(value: number): string {
     return String(value);
 }
 
+/** 点在不在这一行的字上（不算右边空出来的那截），留几像素手指误差 */
+function pointHitsText(el: HTMLElement, x: number, y: number): boolean {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const pad = 6;
+    return Array.from(range.getClientRects()).some((rect) => (
+        x >= rect.left - pad && x <= rect.right + pad && y >= rect.top - pad && y <= rect.bottom + pad
+    ));
+}
+
 type PlayerStyle = "modern" | "vinyl";
 type BodyView = "cover" | "lyrics";
 
@@ -313,10 +323,12 @@ export default function MusicPlayer() {
         if (el) scrollElementWithinContainer(lyricsContainerRef.current, el, { behavior: "smooth", block: "center" });
     }, [activeLyricIdx, view]);
 
-    const handleLyricClick = useCallback((idx: number, e: React.MouseEvent) => {
-        e.stopPropagation();
+    // 点歌词的字跳进度；纯文字歌词没时间可跳、点在一行右边的空白上，都交给外层回封面
+    const handleLyricClick = useCallback((idx: number, e: React.MouseEvent<HTMLElement>) => {
         const line = parsedLyrics.current[idx];
-        if (line && line.time >= 0) player.seek(line.time);
+        if (!line || line.time < 0 || !pointHitsText(e.currentTarget, e.clientX, e.clientY)) return;
+        e.stopPropagation();
+        player.seek(line.time);
     }, [player]);
 
     const [liked, setLiked] = useState(false);
@@ -562,10 +574,6 @@ export default function MusicPlayer() {
             <div className="mp-body">
                 {view === "lyrics" ? (
                     <div className="mp-lyrics-wrap" onClick={() => setView("cover")}>
-                        <button className="mp-lyrics-back" onClick={(event) => { event.stopPropagation(); setView("cover"); }} aria-label="返回封面">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M15 19 8 12l7-7" /></svg>
-                            <span>{playerStyle === "vinyl" ? "唱片" : "封面"}</span>
-                        </button>
                         {hasLyrics ? (
                             <div className="mp-lyrics" ref={lyricsContainerRef}>
                                 {parsedLyrics.current.map((line, i) => {
