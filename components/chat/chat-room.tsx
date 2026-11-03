@@ -103,6 +103,9 @@ const CALL_SYS_RE = /\[我(?:向.+)?(?:发起了|挂断了|拒绝了|取消了)(
 function isCallSysMsg(msg: ChatMessage): boolean {
     return CALL_SYS_RE.test(msg.content);
 }
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 /** Returns the effective UI role: call messages render as "system" regardless of stored role */
 const ACTION_MEDIA_TYPES = new Set(["poke", "accept_red_packet", "decline_red_packet", "accept_transfer", "decline_transfer", "accept_payment_request", "decline_payment_request", "group_admin_notice"]);
 // 拍一拍/群管理通知/通话留痕渲染成灰色系统小字，没有 💭 面板入口——
@@ -3327,6 +3330,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     // Helper: transform stored system message to UI display text
     // Stored (prompt): [XX向YY发起了语音通话] / [我向XX发起了语音通话]
     // UI: XX向群聊发起了视频通话 / 你向XX发起了语音通话 / XX向你发起了语音通话
+    // 聊天信息里开了「系统提示显示备注」：灰色提示里对方的大名换成备注（只改显示）
+    const sysNoticeAlias = !session.isGroup && session.sysNoticeUseAlias ? session.alias?.trim() || "" : "";
+    const sysNoticeCharName = (name: string) => (sysNoticeAlias && name === character?.name ? sysNoticeAlias : name);
     const formatSysMsgForUI = (content: string, msg?: ChatMessage): string => {
         let text = content;
         const charN = character?.name || "对方";
@@ -3352,8 +3358,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         text = text.replace(/\[我拒绝了(.+?通话)\]/, `你拒绝了$1`);
         // Cancel: [我取消了XX通话]
         text = text.replace(/\[我取消了(.+?通话)\]/, `你取消了$1`);
-        // General user name → "你"
-        if (userN) text = text.replace(new RegExp(userN, "g"), "你");
+        // General user name → "你"，开了备注显示时对方的大名 → 备注。
+        // 两个名字一起换、长的先配：一个名字是另一个的一部分时不会被拆坏
+        const nameSwaps = new Map<string, string>();
+        if (userN) nameSwaps.set(userN, "你");
+        if (sysNoticeAlias && character?.name && !nameSwaps.has(character.name)) nameSwaps.set(character.name, sysNoticeAlias);
+        if (nameSwaps.size > 0) {
+            const pattern = [...nameSwaps.keys()].sort((a, b) => b.length - a.length).map(escapeRegExp).join("|");
+            text = text.replace(new RegExp(pattern, "g"), hit => nameSwaps.get(hit) ?? hit);
+        }
         // Friend add normalization
         text = text.replace(/^.+(?=已添加了)/, "你");
         text = text.replace(/^.+向(.+)发起了好友申请\n.+通过了好友申请$/, "你已添加了$1，现在可以开始聊天了。");
@@ -6231,8 +6244,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                     ? (() => {
                                                         const sender = msg.mediaData?.pokeSender || (msg.role === "user" ? "你" : (character?.name || "对方"));
                                                         const target = msg.mediaData?.pokeTarget || (msg.role === "user" ? (character?.name || "对方") : "你");
-                                                        const displaySender = sender === userIdentity?.name ? "你" : sender;
-                                                        const displayTarget = target === userIdentity?.name ? "你" : target;
+                                                        const displaySender = sender === userIdentity?.name ? "你" : sysNoticeCharName(sender);
+                                                        const displayTarget = target === userIdentity?.name ? "你" : sysNoticeCharName(target);
                                                         return `${displaySender} 拍了拍 ${displayTarget}`;
                                                     })()
                                                     : formatSysMsgForUI(msg.content, msg)}
@@ -6257,7 +6270,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                         className="chat-sys-msg mx-auto relative cursor-pointer"
                                         {...(activeMessageId === msg.id ? { "data-active": "" } : {})}
                                     >
-                                        {msg.role === "user" ? "你" : (character?.name || "对方")}撤回了一条消息
+                                        {msg.role === "user" ? "你" : (sysNoticeAlias || character?.name || "对方")}撤回了一条消息
                                         {activeMessageId === msg.id && renderDeleteOnlyContextMenu(() => handleDeleteMessage(getStoredActionMessageId(msg)), () => startMultiSelectFromMessage(msg))}
                                     </div>
                                 ) : (

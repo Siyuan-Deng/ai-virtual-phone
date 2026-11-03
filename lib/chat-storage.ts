@@ -59,6 +59,8 @@ export type ChatSession = {
     collapseBilingualTranslation?: boolean;
     /** 丢弃角色输出的无效表情包（名称不在角色表情包与内置表情中时直接滤除该消息） */
     discardInvalidStickers?: boolean;
+    /** 灰色系统提示（拍一拍、转账、改日历……）里对方的名字显示成备注；默认关 = 显示大名。只改显示，存的和进提示词的还是大名 */
+    sysNoticeUseAlias?: boolean;
     bilingualTranslationPrompt?: string;
     offlineBilingualTranslationPrompt?: string;
     nativeExpandedToolSourceIds?: string[];
