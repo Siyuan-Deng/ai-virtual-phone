@@ -711,6 +711,21 @@
   display: block;
   animation: none;
 }
+/* 整理桌面时有字的小组件左上角的 ✎：样子和右上角的 × 一样 */
+.widget-edit-text-btn {
+  justify-self: start;
+  margin-right: 0;
+  margin-left: 2px;
+}
+.edit-mode .widget-edit-text-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* 第一行的小组件：顶上的「添加」按钮会盖住它，往下让开 */
+.widget-edit-text-btn[data-first-row] {
+  margin-top: 24px;
+}
 
 .edit-mode-edit,
 .edit-mode-done {

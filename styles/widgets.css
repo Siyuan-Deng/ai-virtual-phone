@@ -1703,6 +1703,7 @@
   min-width: 0;
 }
 .kwmp-title {
+  display: block;
   font-size: calc(13px*var(--app-text-scale,1)); font-weight: 500;
   color: var(--c-home-text); letter-spacing: -0.1px;
   white-space: nowrap;
@@ -1712,6 +1713,9 @@
 .kwmp-sub {
   font-size: calc(9px*var(--app-text-scale,1)); color: var(--c-home-sub); margin-top: 3px;
   letter-spacing: 0.2px; opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .kwmp-eq {
   width: 16px; height: 11px;
@@ -2164,6 +2168,14 @@
   padding: 8px 14px;
 }
 
+/* 气泡文字可以改：太长只留三行，不把下面那排语音顶出去 */
+.wg-bubble-content {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
 .wg-hw-time {
   font-size: calc(12px*var(--app-text-scale,1));
   font-weight: 600;
@@ -2520,9 +2532,17 @@
 .wg-receipt-meta {
   display: flex;
   justify-content: space-between;
+  gap: 6px;
   font-size: calc(8px*var(--app-text-scale,1));
   color: #888;
   margin-bottom: 6px;
+  white-space: nowrap;
+}
+
+.wg-receipt-meta span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wg-receipt-logo {
@@ -2548,6 +2568,9 @@
   font-size: calc(14px*var(--app-text-scale,1));
   margin-bottom: 4px;
   letter-spacing: 0.1em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wg-receipt-divider {
@@ -2574,6 +2597,9 @@
 
 .wg-receipt-item-title {
   width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wg-receipt-item-row {
@@ -2587,9 +2613,17 @@
 .wg-receipt-total {
   display: flex;
   justify-content: space-between;
+  gap: 8px;
   font-weight: 800;
   font-size: calc(12px*var(--app-text-scale,1));
   margin-top: 4px;
+  white-space: nowrap;
+}
+
+.wg-receipt-total span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wg-receipt-barcode {
@@ -2630,6 +2664,7 @@
 
 .wg-ticket-main {
   flex: 1;
+  min-width: 0;
   padding: 12px 16px;
   display: flex;
   flex-direction: column;
@@ -2665,9 +2700,11 @@
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-width: 0;
 }
 
 .wg-ticket-poster {
+  flex-shrink: 0;
   width: 60px;
   height: 84px;
   border: 1px solid rgba(44,40,37,0.6); /* Crisp thin frame */
@@ -2700,6 +2737,10 @@
   letter-spacing: 0.02em;
   margin-bottom: 4px;
   text-transform: uppercase;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 .wg-ticket-sub {
   font-family: ui-monospace, SFMono-Regular, monospace;
@@ -2708,6 +2749,9 @@
   font-weight: 600;
   letter-spacing: 0.1em;
   margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wg-ticket-info-row {
@@ -2720,6 +2764,7 @@
 .wg-ticket-info-box {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 .wg-ticket-info-label {
   font-family: ui-monospace, SFMono-Regular, monospace;
@@ -2732,6 +2777,9 @@
   font-size: calc(14px*var(--app-text-scale,1));
   font-weight: bold;
   font-family: "Didot", "Playfair Display", ui-serif, Georgia, serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .wg-ticket-dots {
   margin-top: 6px;
