@@ -115,7 +115,7 @@ import {
   resolveActiveIconSkins,
   type ThemeProfile
 } from "@/lib/theme-types";
-import { GRID_COLS, GRID_ROWS, WIDGET_SIZE_CELLS, WIDGET_CATALOG, type WidgetInstance, type WidgetType } from "@/lib/widget-types";
+import { GRID_COLS, GRID_ROWS, WIDGET_SIZE_CELLS, WIDGET_CATALOG, WIDGET_EDIT_TEXT_EVENT, WIDGET_TEXT_EDIT_TYPES, type WidgetInstance, type WidgetType } from "@/lib/widget-types";
 import { buildOccupancyGrid, canPlaceWidget, placeWidget, createDefaultWidgets, loadWidgets, saveWidgets, loadDIYTemplates, saveDIYTemplates } from "@/lib/widget-storage";
 import {
   createDefaultDesktopIconLayout,
@@ -154,7 +154,7 @@ import { WeixinSyncToast } from "@/components/weixin-sync-toast";
 import { sendBrowserNotification } from "@/lib/browser-notification";
 import type { ChatSharePayload } from "@/lib/chat-share";
 import { completePendingMcpOAuthCallback } from "@/lib/tool-executor";
-import { LayoutGrid, LoaderCircle, RefreshCw } from "lucide-react";
+import { LayoutGrid, LoaderCircle, Pencil, RefreshCw } from "lucide-react";
 
 const EMOJI_FONTS = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla"';
 
@@ -4755,6 +4755,22 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
                                       aria-label="删除组件"
                                     >
                                       ×
+                                    </button>
+                                  )}
+                                  {editMode && !wDragging && WIDGET_TEXT_EDIT_TYPES.has(widget.type) && (
+                                    <button
+                                      type="button"
+                                      className="widget-delete-btn widget-edit-text-btn"
+                                      style={{ gridRow: widget.row, gridColumn: widget.col }}
+                                      data-first-row={widget.row === 1 ? "" : undefined}
+                                      onPointerDown={(e) => e.stopPropagation()}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        window.dispatchEvent(new CustomEvent(WIDGET_EDIT_TEXT_EVENT, { detail: widget.id }));
+                                      }}
+                                      aria-label="编辑文字"
+                                    >
+                                      <Pencil size={12} strokeWidth={2.4} />
                                     </button>
                                   )}
                                 </div>

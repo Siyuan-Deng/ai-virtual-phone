@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { WidgetInstance, WidgetType } from "@/lib/widget-types";
-import { WIDGET_SIZE_CELLS, WIDGET_CATALOG } from "@/lib/widget-types";
+import { WIDGET_SIZE_CELLS, WIDGET_CATALOG, WIDGET_EDIT_TEXT_EVENT } from "@/lib/widget-types";
 import { useMusicPlayerOptional } from "@/lib/music-context";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { ContentDialog } from "@/components/ui/modal";
@@ -564,6 +564,95 @@ function FreestyleFrame90Widget({ config, widgetId, onConfigChange, preview }: a
 }
 
 // ----------------------------------------------------
+//   改字：整理桌面时点小组件左上角的 ✎，桌面发事件，小组件打开自己的改字弹窗
+// ----------------------------------------------------
+function useWidgetTextEdit(widgetId: string, open: () => void) {
+  const openRef = useRef(open);
+  openRef.current = open;
+  useEffect(() => {
+    const handler = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === widgetId) openRef.current();
+    };
+    window.addEventListener(WIDGET_EDIT_TEXT_EVENT, handler);
+    return () => window.removeEventListener(WIDGET_EDIT_TEXT_EVENT, handler);
+  }, [widgetId]);
+}
+
+const editFieldLabel = {
+  fontSize: "calc(13px*var(--app-text-scale,1))",
+  color: "var(--c-text)",
+  margin: "10px 0 4px",
+  display: "block",
+} as React.CSSProperties;
+
+type WidgetTextField = { key: string; label?: string; fallback: string; width?: string };
+/** 一行放几个框的，比如小票的「名称 / 数量 / 价格」 */
+type WidgetTextGroup = { label: string; rows: WidgetTextField[][] };
+type WidgetTextEntry = WidgetTextField | WidgetTextGroup;
+
+/** 写死的字换成能改的：text 是现在该显示的字，dialog 放进组件里；清空的项回到 fallback */
+function useWidgetTextFields(
+  widgetId: string,
+  config: Record<string, unknown> | undefined,
+  onConfigChange: ((widgetId: string, config: Record<string, unknown>) => void) | undefined,
+  title: string,
+  entries: WidgetTextEntry[],
+) {
+  const fields = entries.flatMap((entry) => ("rows" in entry ? entry.rows.flat() : [entry]));
+  const text: Record<string, string> = {};
+  for (const field of fields) {
+    const value = config?.[field.key];
+    text[field.key] = typeof value === "string" && value ? value : field.fallback;
+  }
+
+  const [draft, setDraft] = useState<Record<string, string> | null>(null);
+  useWidgetTextEdit(widgetId, () => setDraft(text));
+
+  function handleSave() {
+    if (!draft) return;
+    const next: Record<string, string> = {};
+    for (const field of fields) next[field.key] = (draft[field.key] ?? "").trim();
+    onConfigChange?.(widgetId, next);
+    setDraft(null);
+  }
+
+  function renderInput(field: WidgetTextField) {
+    return (
+      <input
+        key={field.key}
+        className="ui-input"
+        value={draft?.[field.key] ?? ""}
+        onChange={(e) => setDraft({ ...draft, [field.key]: e.target.value })}
+        placeholder={field.fallback}
+        style={{ width: field.width ?? "100%", minWidth: 0 }}
+      />
+    );
+  }
+
+  const dialog = draft ? createPortal(
+    <ContentDialog title={title} onConfirm={handleSave} onCancel={() => setDraft(null)}>
+      {entries.map((entry, index) => {
+        const label = <label style={index === 0 ? { ...editFieldLabel, marginTop: 0 } : editFieldLabel}>{entry.label}</label>;
+        if (!("rows" in entry)) return <div key={entry.key}>{label}{renderInput(entry)}</div>;
+        return (
+          <div key={entry.label}>
+            {label}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {entry.rows.map((row, rowIndex) => (
+                <div key={rowIndex} style={{ display: "flex", gap: 6 }}>{row.map(renderInput)}</div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </ContentDialog>,
+    document.querySelector(".phone-shell") ?? document.body,
+  ) : null;
+
+  return { text, dialog };
+}
+
+// ----------------------------------------------------
 //   Profile Card Widget (Freestyle 3x4 主页名片)
 // ----------------------------------------------------
 const PROFILE_CARD_DEFAULTS = {
@@ -596,6 +685,11 @@ function ProfileCardWidget({ config, widgetId, onConfigChange, preview }: any) {
     setShowEdit(true);
   }
 
+  useWidgetTextEdit(widgetId, () => {
+    setDraft({ name, handle, motto, location });
+    setShowEdit(true);
+  });
+
   function handleSave() {
     onConfigChange?.(widgetId, {
       name: draft.name.trim() || PROFILE_CARD_DEFAULTS.name,
@@ -605,13 +699,6 @@ function ProfileCardWidget({ config, widgetId, onConfigChange, preview }: any) {
     });
     setShowEdit(false);
   }
-
-  const editFieldLabel = {
-    fontSize: "calc(13px*var(--app-text-scale,1))",
-    color: "var(--c-text)",
-    margin: "10px 0 4px",
-    display: "block",
-  } as React.CSSProperties;
 
   return (
     <div className="wg-profile-card">
@@ -730,6 +817,11 @@ function MySpaceWidget({ config, widgetId, onConfigChange, preview }: any) {
     setShowEdit(true);
   }
 
+  useWidgetTextEdit(widgetId, () => {
+    setEditText(username);
+    setShowEdit(true);
+  });
+
   function handleSave() {
     onConfigChange?.(widgetId, { ...config, username: editText.trim() || "OLD ORANGE" });
     setShowEdit(false);
@@ -822,6 +914,11 @@ function SocialPostWidget({ config, widgetId, onConfigChange, preview }: any) {
     setEditText(username);
     setShowEdit(true);
   }
+
+  useWidgetTextEdit(widgetId, () => {
+    setEditText(username);
+    setShowEdit(true);
+  });
 
   function handleSave() {
     onConfigChange?.(widgetId, { ...config, username: editText.trim() || "YOUR NAME" });
@@ -997,6 +1094,12 @@ function MusicWidget({
     setEditArtist(customArtist);
     setShowEdit(true);
   }
+
+  useWidgetTextEdit(widgetId, () => {
+    setEditTitle(customTitle);
+    setEditArtist(customArtist);
+    setShowEdit(true);
+  });
 
   function handleSave() {
     onConfigChange?.(widgetId, {
@@ -1253,6 +1356,7 @@ function LoveNoteWidget({
   const [noteIdx] = useState(() => Math.floor(Math.random() * LOVE_NOTES_DEFAULT.length));
   const customText = typeof config?.text === "string" ? config.text : "";
   const noteText = customText || LOVE_NOTES_DEFAULT[noteIdx];
+  const customLabel = typeof config?.label === "string" ? config.label : "";
 
   const now = new Date();
   const month = now.getMonth() + 1;
@@ -1260,15 +1364,22 @@ function LoveNoteWidget({
 
   const [showEdit, setShowEdit] = useState(false);
   const [editText, setEditText] = useState(customText);
+  const [editLabel, setEditLabel] = useState(customLabel);
+
+  function openEdit() {
+    setEditText(customText);
+    setEditLabel(customLabel);
+    setShowEdit(true);
+  }
+  useWidgetTextEdit(widgetId, openEdit);
 
   function handleTextClick(e: React.MouseEvent) {
     e.stopPropagation();
-    setEditText(customText);
-    setShowEdit(true);
+    openEdit();
   }
 
   function handleSave() {
-    onConfigChange?.(widgetId, { ...config, text: editText.trim() });
+    onConfigChange?.(widgetId, { ...config, text: editText.trim(), label: editLabel.trim() });
     setShowEdit(false);
   }
 
@@ -1276,7 +1387,7 @@ function LoveNoteWidget({
     <>
       <div className="wg-lovenote">
         <div className="wg-lovenote-top">
-          <span className="wg-lovenote-eng">love note</span>
+          <span className="wg-lovenote-eng">{customLabel || "love note"}</span>
           <span className="wg-lovenote-date">{month}.{day}</span>
         </div>
         <div className="wg-lovenote-body" onClick={handleTextClick} role="button" tabIndex={0}>
@@ -1304,6 +1415,14 @@ function LoveNoteWidget({
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
             placeholder={LOVE_NOTES_DEFAULT[noteIdx]}
+            style={{ width: "100%" }}
+          />
+          <label style={editFieldLabel}>顶部小字</label>
+          <input
+            className="ui-input"
+            value={editLabel}
+            onChange={(e) => setEditLabel(e.target.value)}
+            placeholder="love note"
             style={{ width: "100%" }}
           />
         </ContentDialog>,
@@ -1431,6 +1550,11 @@ function KaomojiWidget({
     setEditGreeting(customGreeting);
     setShowEdit(true);
   }
+
+  useWidgetTextEdit(widgetId, () => {
+    setEditGreeting(customGreeting);
+    setShowEdit(true);
+  });
 
   function handleSave() {
     onConfigChange?.(widgetId, { ...config, greeting: editGreeting.trim() });
@@ -1655,21 +1779,35 @@ function MascotWidget() {
    🌸 KAWAII AESTHETIC SERIES 
    ══════════════════════════════════════════ */
 
+const KAWAII_MUSIC_TEXT: WidgetTextEntry[] = [
+  { key: "title", label: "歌名", fallback: "How I Wish You Were Her" },
+  { key: "sub", label: "下面一行小字", fallback: "(✿╹◡╹)ﾉ☆.。.:*°。" },
+  {
+    label: "进度条两边的时间",
+    rows: [[
+      { key: "timeLeft", fallback: "1:09", width: "50%" },
+      { key: "timeRight", fallback: "-3:52", width: "50%" },
+    ]],
+  },
+];
+
 function KawaiiMusicPlayerWidget({ config, widgetId, onConfigChange, preview }: any) {
   const albumUrl = typeof config?.albumUrl === "string" ? config.albumUrl : undefined;
   const { triggerUpload, input } = useImageUpload(widgetId, "albumUrl", onConfigChange);
+  const { text, dialog } = useWidgetTextFields(widgetId, config, onConfigChange, "编辑播放器文字", KAWAII_MUSIC_TEXT);
   return (
     <div className="wg-kw-music-player">
       {input}
+      {dialog}
       <div className="kwmp-header">
         <div className="kwmp-album-art" onClick={preview ? undefined : triggerUpload} role={preview ? undefined : "button"} tabIndex={preview ? undefined : 0}>
           {albumUrl ? <img src={albumUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:"inherit"}} /> : <span className="wg-upload-hint" style={{fontSize: "calc(8px*var(--app-text-scale,1))"}}>换图</span>}
         </div>
         <div className="kwmp-info">
           <div className="kwmp-info-top">
-             <span className="kwmp-title">How I Wish You Were Her</span>
+             <span className="kwmp-title">{text.title}</span>
           </div>
-          <span className="kwmp-sub">(✿╹◡╹)ﾉ☆.。.:*°。</span>
+          <span className="kwmp-sub">{text.sub}</span>
         </div>
         <div className="kwmp-eq">
            <svg viewBox="0 0 19.7 13.4" fill="currentColor">
@@ -1683,11 +1821,11 @@ function KawaiiMusicPlayerWidget({ config, widgetId, onConfigChange, preview }: 
       </div>
       
       <div className="kwmp-progress">
-        <span className="kwmp-time-left">1:09</span>
+        <span className="kwmp-time-left">{text.timeLeft}</span>
         <div className="kwmp-bar">
           <div className="kwmp-bar-fill"></div>
         </div>
-        <span className="kwmp-time-right">-3:52</span>
+        <span className="kwmp-time-right">{text.timeRight}</span>
       </div>
 
       <div className="kwmp-controls">
@@ -1804,9 +1942,15 @@ function IosMenuWidget() {
 //   Couple Chat Widget (2×4)
 // ----------------------------------------------------
 
+const COUPLE_CHAT_TEXT: WidgetTextEntry[] = [
+  { key: "bubbleText", label: "气泡文字", fallback: "我也很想你～明天见哦！" },
+  { key: "voiceTime", label: "语音时长", fallback: "0:12\"" },
+];
+
 function CoupleChatWidget({ config, widgetId, onConfigChange, preview }: any) {
   const { triggerUpload: triggerLeft, input: leftInput } = useImageUpload(widgetId, "leftAvatar", onConfigChange);
   const { triggerUpload: triggerRight, input: rightInput } = useImageUpload(widgetId, "rightAvatar", onConfigChange);
+  const { text, dialog } = useWidgetTextFields(widgetId, config, onConfigChange, "编辑悄悄话", COUPLE_CHAT_TEXT);
 
   const leftAvatar = typeof config?.leftAvatar === "string" ? config.leftAvatar : "";
   const rightAvatar = typeof config?.rightAvatar === "string" ? config.rightAvatar : "";
@@ -1847,6 +1991,7 @@ function CoupleChatWidget({ config, widgetId, onConfigChange, preview }: any) {
     <div className="wg-couple-chat">
       {leftInput}
       {rightInput}
+      {dialog}
       
       {/* Left Chat Row (Text) */}
       <div className="wg-chat-row left">
@@ -1859,7 +2004,7 @@ function CoupleChatWidget({ config, widgetId, onConfigChange, preview }: any) {
           {!leftAvatar && <span className="wg-chat-avatar-ph">AI</span>}
         </div>
         <div className="wg-chat-bubble wg-bubble-text">
-          <div className="wg-bubble-content">我也很想你～明天见哦！</div>
+          <div className="wg-bubble-content">{text.bubbleText}</div>
         </div>
       </div>
       
@@ -1879,7 +2024,7 @@ function CoupleChatWidget({ config, widgetId, onConfigChange, preview }: any) {
                ))}
              </svg>
            </div>
-           <span className="wg-hw-time">0:12"</span>
+           <span className="wg-hw-time">{text.voiceTime}</span>
         </div>
         <div 
           className="wg-chat-avatar" 
@@ -1910,6 +2055,11 @@ function MoodPillWidget({ config, widgetId, onConfigChange, preview }: any) {
     setEditText(text);
     setShowEdit(true);
   }
+
+  useWidgetTextEdit(widgetId, () => {
+    setEditText(text);
+    setShowEdit(true);
+  });
 
   function handleSave() {
     onConfigChange?.(widgetId, { ...config, text: editText.trim() || defaultText });
@@ -1968,24 +2118,46 @@ function VinylRecordWidget() {
 // ----------------------------------------------------
 //   Receipt Widget (2x4)
 // ----------------------------------------------------
+const RECEIPT_DEFAULT_ITEMS = [
+  { title: "MORNING COFFEE", qty: "1", price: "4.50" },
+  { title: "AFTERNOON NAP", qty: "1", price: "0.00" },
+  { title: "SUNSET WATCHING", qty: "1", price: "FREE" },
+];
+
+const RECEIPT_TEXT: WidgetTextEntry[] = [
+  { key: "store", label: "店名", fallback: "SOUL MART" },
+  { key: "storeNo", label: "左上角编号", fallback: "STORE #042" },
+  {
+    label: "商品（名称 / 数量 / 价格）",
+    rows: RECEIPT_DEFAULT_ITEMS.map((item, index) => [
+      { key: `item${index}Title`, fallback: item.title, width: "58%" },
+      { key: `item${index}Qty`, fallback: item.qty, width: "16%" },
+      { key: `item${index}Price`, fallback: item.price, width: "26%" },
+    ]),
+  },
+  { key: "total", label: "合计", fallback: "PRICELESS" },
+];
+
 function ReceiptWidget({ config, widgetId, onConfigChange, preview }: any) {
-  const defaultItems = [
-    { title: "MORNING COFFEE", qty: 1, price: "4.50" },
-    { title: "AFTERNOON NAP", qty: 1, price: "0.00" },
-    { title: "SUNSET WATCHING", qty: 1, price: "FREE" }
-  ];
-  
+  const { text, dialog } = useWidgetTextFields(widgetId, config, onConfigChange, "编辑小票文字", RECEIPT_TEXT);
+  const items = RECEIPT_DEFAULT_ITEMS.map((_, index) => ({
+    title: text[`item${index}Title`],
+    qty: text[`item${index}Qty`],
+    price: text[`item${index}Price`],
+  }));
+
   return (
     <div className="wg-receipt-wrapper">
+      {dialog}
       <div className="wg-receipt-paper">
         <div className="wg-receipt-meta">
-          <span>STORE #042</span>
+          <span>{text.storeNo}</span>
           <span>{new Date().toLocaleDateString('en-US', { day: '2-digit', month: 'short' })}</span>
         </div>
-        <div className="wg-receipt-header">SOUL MART</div>
+        <div className="wg-receipt-header">{text.store}</div>
         <div className="wg-receipt-divider" />
         <div className="wg-receipt-list">
-          {defaultItems.map((item, i) => (
+          {items.map((item, i) => (
             <div className="wg-receipt-item" key={i}>
               <div className="wg-receipt-item-title">{item.title}</div>
               <div className="wg-receipt-item-row">
@@ -1998,7 +2170,7 @@ function ReceiptWidget({ config, widgetId, onConfigChange, preview }: any) {
         <div className="wg-receipt-divider" />
         <div className="wg-receipt-total">
           <span>TOTAL</span>
-          <span>PRICELESS</span>
+          <span>{text.total}</span>
         </div>
         <div className="wg-receipt-barcode" />
       </div>
@@ -2009,30 +2181,45 @@ function ReceiptWidget({ config, widgetId, onConfigChange, preview }: any) {
 // ----------------------------------------------------
 //   Ticket Stub Widget (2x4)
 // ----------------------------------------------------
+const TICKET_TEXT: WidgetTextEntry[] = [
+  { key: "admit", label: "顶部小字", fallback: "ADMIT ONE" },
+  { key: "title", label: "片名", fallback: "MIDNIGHT EXPRESS" },
+  {
+    label: "日期 / 时间 / 座位",
+    rows: [[
+      { key: "date", fallback: "OCT 24", width: "36%" },
+      { key: "time", fallback: "23:59", width: "32%" },
+      { key: "seat", fallback: "F-13", width: "32%" },
+    ]],
+  },
+];
+
 function TicketStubWidget({ config, widgetId, onConfigChange, preview }: any) {
   const posterUrl = typeof config?.posterUrl === "string" ? config.posterUrl : "";
   const { triggerUpload, input } = useImageUpload(widgetId, "posterUrl", onConfigChange);
+  const { text, dialog } = useWidgetTextFields(widgetId, config, onConfigChange, "编辑票根文字", TICKET_TEXT);
 
   return (
     <div className="wg-ticket-paper">
       {input}
+      {dialog}
       <div className="wg-ticket-main">
         <div className="wg-ticket-content-wrapper">
           <div className="wg-ticket-text-col">
-            <div className="wg-ticket-sub">ADMIT ONE</div>
-            <div className="wg-ticket-title">MIDNIGHT EXPRESS</div>
+            <div className="wg-ticket-sub">{text.admit}</div>
+            <div className="wg-ticket-title">{text.title}</div>
             <div className="wg-ticket-info-row">
               <div className="wg-ticket-info-box">
                 <span className="wg-ticket-info-label">DATE</span>
-                <span className="wg-ticket-info-val">OCT 24</span>
+                <span className="wg-ticket-info-val">{text.date}</span>
               </div>
               <div className="wg-ticket-info-box">
                 <span className="wg-ticket-info-label">TIME</span>
-                <span className="wg-ticket-info-val">23:59</span>
+                <span className="wg-ticket-info-val">{text.time}</span>
               </div>
               <div className="wg-ticket-info-box">
                 <span className="wg-ticket-info-label">SEAT</span>
-                <span className="wg-ticket-info-val">F-13</span>
+                <span className="wg-ticket-info-val">{text.seat}</span>
               </div>
             </div>
             {/* Aesthetic bottom barcode/dots */}
@@ -2069,6 +2256,11 @@ function PostcardWidget({ config, widgetId, onConfigChange, preview }: any) {
   
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
+
+  useWidgetTextEdit(widgetId, () => {
+    setEditText(msg);
+    setShowEdit(true);
+  });
 
   return (
     <div 
