@@ -431,6 +431,7 @@ export function ChatSettingsPanel({
     const [offlineSummaryRetry, setOfflineSummaryRetry] = useState(session.offlineSummaryRetry !== false);
     const [collapseBilingualTranslation, setCollapseBilingualTranslation] = useState(session.collapseBilingualTranslation !== false);
     const [discardInvalidStickers, setDiscardInvalidStickers] = useState(session.discardInvalidStickers === true);
+    const [sysNoticeUseAlias, setSysNoticeUseAlias] = useState(session.sysNoticeUseAlias === true);
     // 流式生成：按会话区分（线上/线下），存 ChatSession 字段，默认关
     const [streamOnline, setStreamOnline] = useState(session.streamOnline === true);
     const [streamOffline, setStreamOffline] = useState(session.streamOffline === true);
@@ -1158,6 +1159,24 @@ export function ChatSettingsPanel({
                                 />
                             </div>
                         </div>
+                        {!session.isGroup && (
+                            <div className="menu-item">
+                                <ChatInfoIcon icon={MessageSquare} color={BINDING_ACCENTS.identity} />
+                                <div className="menu-label-group">
+                                    <span className="menu-label">系统提示显示备注</span>
+                                    <span className="menu-desc">拍一拍、转账等灰色提示里用备注；关闭用大名</span>
+                                </div>
+                                <div className="menu-right">
+                                    <Toggle
+                                        checked={sysNoticeUseAlias}
+                                        onChange={c => {
+                                            setSysNoticeUseAlias(c);
+                                            updateSession({ sysNoticeUseAlias: c });
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        )}
                         <div className="menu-item">
                             <ChatInfoIcon icon={Sparkles} color={BINDING_ACCENTS.api} />
                             <div className="menu-label-group">
