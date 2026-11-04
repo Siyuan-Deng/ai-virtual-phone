@@ -2,7 +2,7 @@
 
 // 开屏编辑器：编辑时屏幕就是开屏本身，字直接拖。右上「背景」「文字」打开设置，「重播」看整体效果。
 
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from "react";
 import { createPortal } from "react-dom";
 import { ArrowRight, ChevronLeft, ImageIcon, Play, Type } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/modal";
@@ -41,6 +41,8 @@ const BG_COLORS = ["#174BFF", "#ece6d9", "#101426", "#ffffff"];
 /** 拖到离中线这么近就吸上去 */
 const SNAP_X = 1.8;
 const SNAP_Y = 1.2;
+/** 面板往下拖这么多就收起 */
+const PANEL_CLOSE_DRAG = 70;
 
 type Tab = "bg" | "text";
 type Drag = { id: string; pointerId: number; x: number; y: number; originX: number; originY: number; moved: boolean };
@@ -232,6 +234,43 @@ export function SplashEditor({ config, isNew, poolSet, onClose, onNotice }: {
         if (drag.moved) change(draftRef.current, false);
     };
 
+    // 点开屏上没有字的地方：收起设置看整体
+    const onStageClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+        if (!(event.target as HTMLElement).closest(".splash-text")) setPanelOpen(false);
+    };
+
+    // 面板已经滑到顶还往下拖：跟手收起；滑条和横向那排动效的手势留给它们自己
+    const panelDragRef = useRef<{ y: number; active: boolean } | null>(null);
+    const onPanelTouchStart = (event: ReactTouchEvent<HTMLDivElement>) => {
+        const target = event.target as HTMLElement;
+        const fromGrab = Boolean(target.closest(".splash-edit-grab"));
+        const blocked = target.closest("input[type=range], textarea, .splash-chips.is-scroll");
+        panelDragRef.current = !blocked && (fromGrab || (panelRef.current?.scrollTop ?? 0) <= 0) ? { y: event.touches[0].clientY, active: false } : null;
+    };
+    const onPanelTouchMove = (event: ReactTouchEvent<HTMLDivElement>) => {
+        const drag = panelDragRef.current;
+        const panel = panelRef.current;
+        if (!drag || !panel) return;
+        const dy = event.touches[0].clientY - drag.y;
+        if (dy <= 0 || panel.scrollTop > 0) {
+            if (drag.active) panel.style.transform = "";
+            panelDragRef.current = null;
+            return;
+        }
+        drag.active = true;
+        panel.style.transition = "none";
+        panel.style.transform = `translateY(${dy}px)`;
+    };
+    const onPanelTouchEnd = (event: ReactTouchEvent<HTMLDivElement>) => {
+        const drag = panelDragRef.current;
+        const panel = panelRef.current;
+        panelDragRef.current = null;
+        if (!drag?.active || !panel) return;
+        panel.style.transition = "";
+        panel.style.transform = "";
+        if (event.changedTouches[0].clientY - drag.y > PANEL_CLOSE_DRAG) setPanelOpen(false);
+    };
+
     const togglePanel = (next: Tab) => {
         setPanelOpen((open) => !(open && tab === next));
         setTab(next);
@@ -306,7 +345,8 @@ export function SplashEditor({ config, isNew, poolSet, onClose, onNotice }: {
 
     if (!host) return null;
     return createPortal(
-        <div className="splash-editor">
+        // 挂在 .phone-shell 上，但 React 事件还会冒泡回桌面那一层，别让桌面的手势接管
+        <div className="splash-editor" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
             <div className="splash-edit-canvas" style={stageShift ? { transform: `translateY(${stageShift}px)` } : undefined}>
                 <div
                     ref={stageRef}
@@ -316,6 +356,7 @@ export function SplashEditor({ config, isNew, poolSet, onClose, onNotice }: {
                     onPointerMove={onPointerMove}
                     onPointerUp={onPointerEnd}
                     onPointerCancel={onPointerEnd}
+                    onClick={onStageClick}
                 />
                 {guides.x ? <i className="splash-guide splash-guide-x" aria-hidden="true" /> : null}
                 {guides.y ? <i className="splash-guide splash-guide-y" aria-hidden="true" /> : null}
@@ -333,10 +374,18 @@ export function SplashEditor({ config, isNew, poolSet, onClose, onNotice }: {
             <div className="splash-edit-tools">
                 <button type="button" aria-pressed={panelOpen && tab === "bg"} onClick={() => togglePanel("bg")}><ImageIcon size={18} />背景</button>
                 <button type="button" aria-pressed={panelOpen && tab === "text"} onClick={() => togglePanel("text")}><Type size={18} />文字</button>
-                <button type="button" onClick={play}><Play size={18} />重播</button>
+                <button type="button" onClick={() => { setPanelOpen(false); play(); }}><Play size={18} />重播</button>
             </div>
 
-            <div ref={panelRef} className="splash-edit-panel" data-open={panelOpen ? "true" : undefined}>
+            <div
+                ref={panelRef}
+                className="splash-edit-panel"
+                data-open={panelOpen ? "true" : undefined}
+                onTouchStart={onPanelTouchStart}
+                onTouchMove={onPanelTouchMove}
+                onTouchEnd={onPanelTouchEnd}
+                onTouchCancel={onPanelTouchEnd}
+            >
                 <button type="button" className="splash-edit-grab" aria-label="收起" onClick={() => setPanelOpen(false)}><i /></button>
                 <div className="splash-edit-tabs">
                     {(["bg", "text"] as const).map((item) => (

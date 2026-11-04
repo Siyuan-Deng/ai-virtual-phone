@@ -520,7 +520,9 @@
   z-index: 4;
   max-height: 50%;
   overflow-y: auto;
-  padding: 6px 14px calc(16px + env(safe-area-inset-bottom, 0px));
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 6px 14px calc(32px + env(safe-area-inset-bottom, 0px));
   border-radius: 20px 20px 0 0;
   background: var(--c-panel);
   box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.12);
@@ -534,11 +536,17 @@
   visibility: visible;
 }
 
+/* 全局滑条是 touch-action: none，一排滑条占了面板下半截，手指落上去就滑不动 */
+.splash-edit-panel .ui-slider {
+  touch-action: pan-y;
+}
+
 .splash-edit-grab {
   display: flex;
   justify-content: center;
   width: 100%;
-  padding: 4px 0 8px;
+  padding: 8px 0 12px;
+  touch-action: none;
   border: 0;
   background: none;
   cursor: pointer;
@@ -680,8 +688,20 @@
   padding: 0;
   border: 0;
   border-radius: 50%;
+  overflow: hidden;
   background: none;
+  -webkit-appearance: none;
+  appearance: none;
   cursor: pointer;
+}
+
+.splash-color::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.splash-color::-webkit-color-swatch {
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 50%;
 }
 
 .splash-edit-delete {

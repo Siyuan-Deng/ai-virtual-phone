@@ -13,7 +13,7 @@ import { SplashAnimation } from "./splash-animation";
 import { SplashBootStage } from "./splash/splash-boot-stage";
 import { MusicProvider } from "@/lib/music-context";
 import { hydrateKvDb, isKvHydrated } from "@/lib/kv-db";
-import { splashBootPlan, syncSplashMirror, type SplashBootPlan } from "@/lib/splash-store";
+import { loadSplashLibrary, splashBootPlan, syncSplashMirror, type SplashBootPlan } from "@/lib/splash-store";
 import { getThemeAssetMap, readThemeProfile } from "@/lib/theme-storage";
 import { resolveActiveIconSkins, type ThemeProfile } from "@/lib/theme-types";
 import { hasPendingMcpOAuthCallback } from "@/lib/tool-executor";
@@ -151,13 +151,22 @@ async function warmBuiltinFonts(shouldStop: () => boolean): Promise<void> {
   await Promise.all(BUILTIN_FONT_LOAD_SPECS.map((spec) => document.fonts.load(spec).catch(() => [])));
 }
 
+/** 动画没报告播完（比如后台被挂起过）也不能一直等 */
+const SPLASH_MAX_PLAY_MS = 20000;
+
 function SplashScreen({ ready = false, onEnter }: { ready?: boolean; onEnter?: () => void }) {
   // localStorage 服务端读不到，挂上之后才决定放哪一套
   const [plan, setPlan] = useState<SplashBootPlan | null>(null);
   const [played, setPlayed] = useState(false);
   useLayoutEffect(() => setPlan(splashBootPlan()), []);
   useEffect(() => {
-    if (plan?.autoEnter && played && ready) onEnter?.();
+    if (!plan) return;
+    const timer = window.setTimeout(() => setPlayed(true), SPLASH_MAX_PLAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [plan]);
+  useEffect(() => {
+    // 数据读出来以后再看一遍开关：刚打开时用的是 localStorage 那份，可能比数据库里的旧
+    if (played && ready && (plan?.autoEnter || loadSplashLibrary().autoEnter)) onEnter?.();
   }, [plan, played, ready, onEnter]);
   const custom = plan?.kind === "custom" ? plan : null;
 

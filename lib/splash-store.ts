@@ -5,7 +5,7 @@
 // 打开 App 时靠这份决定放哪一套。float 原版不是一条配置，是兜底：随机池里什么都没有时放它。
 
 import { useSyncExternalStore } from "react";
-import { kvGet, kvSet } from "./kv-db";
+import { kvGet, kvSet, kvSetAsync } from "./kv-db";
 import { DAY_SET_ID, lookSetAtBoot } from "./night-mode";
 import { deleteThemeAsset, getThemeAssetDataUrl } from "./theme-storage";
 import { splashUploadedFamily, type SplashMotion, type SplashStageConfig, type SplashTextLayer } from "./splash-effects";
@@ -13,6 +13,8 @@ import { splashUploadedFamily, type SplashMotion, type SplashStageConfig, type S
 const LIBRARY_KEY = "ai_phone_splash_library_v1";
 const MIRROR_KEY = "ai_phone_splash_library_mirror_v1";
 const LAST_PICK_KEY = "ai_phone_splash_last_pick_v1";
+/** 存了但还没确认写进 IndexedDB：这时候 App 被杀，下次以 localStorage 那份为准 */
+const PENDING_KEY = "ai_phone_splash_library_pending_v1";
 
 export const SPLASH_FLOAT_ID = "float";
 export const SPLASH_MAX_TEXTS = 3;
@@ -124,6 +126,23 @@ function writeMirror(json: string | null): void {
     }
 }
 
+function setPending(pending: boolean): void {
+    try {
+        if (pending) window.localStorage.setItem(PENDING_KEY, "1");
+        else window.localStorage.removeItem(PENDING_KEY);
+    } catch {
+        // 记不下来也没关系，只是最后一次保存可能丢
+    }
+}
+
+function isPending(): boolean {
+    try {
+        return window.localStorage.getItem(PENDING_KEY) === "1";
+    } catch {
+        return false;
+    }
+}
+
 export function loadSplashLibrary(): SplashLibrary {
     if (typeof window === "undefined") return emptyLibrary();
     return parseLibrary(kvGet(LIBRARY_KEY) || readMirror());
@@ -134,15 +153,27 @@ const listeners = new Set<() => void>();
 
 function saveLibrary(library: SplashLibrary): void {
     const json = JSON.stringify(library);
-    kvSet(LIBRARY_KEY, json);
+    setPending(true);
     writeMirror(json);
+    void kvSetAsync(LIBRARY_KEY, json).then(() => {
+        if (readMirror() === json) setPending(false);
+    }).catch((error) => console.warn("[Splash] 保存失败", error));
     revision += 1;
     listeners.forEach((listener) => listener());
 }
 
-/** 在 IndexedDB 读出来以后调一次：换设备恢复备份后，下次打开就能按备份里的放 */
+/** 在 IndexedDB 读出来以后调一次。平时以 IndexedDB 为准（恢复备份后下次打开就按备份放）；
+ *  上次没写完就被杀了的话，localStorage 那份才是新的，补写回去，不能拿旧的把它盖掉 */
 export function syncSplashMirror(): void {
-    writeMirror(kvGet(LIBRARY_KEY));
+    const stored = kvGet(LIBRARY_KEY);
+    const mirror = readMirror();
+    if ((isPending() || !stored) && mirror) {
+        if (mirror !== stored) kvSet(LIBRARY_KEY, mirror);
+        setPending(false);
+        revision += 1;
+        return;
+    }
+    writeMirror(stored);
 }
 
 function subscribe(listener: () => void): () => void {
@@ -300,8 +331,9 @@ export function ensureSplashFonts(fonts: SplashFontFile[]): Promise<void> {
         const loading = (async () => {
             const url = await getThemeAssetDataUrl(font.assetId);
             if (!url) return;
-            const face = new FontFace(splashUploadedFamily(font.id), `url("${url}")`);
-            document.fonts.add(await face.load());
+            // 字体文件常有十几 MB，整段 dataURL 塞进 CSS 的 url() 里解析很慢，转成二进制给它
+            const buffer = await (await fetch(url)).arrayBuffer();
+            document.fonts.add(await new FontFace(splashUploadedFamily(font.id), buffer).load());
         })().catch((error) => console.warn("[Splash] 字体读取失败", error));
         loadedFonts.set(font.id, loading);
         return loading;
