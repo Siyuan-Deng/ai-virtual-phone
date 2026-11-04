@@ -13,6 +13,8 @@ const AUTO_HIDE = true;
 const LINE = 1 / 3;
 /** 滚动位置差几像素以内算「已经在这一轮」 */
 const SLACK = 4;
+/** 手指移动超过这么多才算滑动：只是点一下不叫出键，不然会挡住「保存」 */
+const SWIPE = 8;
 
 type Props = {
   scrollRef: RefObject<HTMLDivElement | null>;
@@ -162,17 +164,27 @@ export function StoryRoundJump({ scrollRef, revision, hiddenHasRound, onLoadMore
       userScrollUntilRef.current = performance.now() + 1000;
       wake();
     };
+    let touchStartY: number | null = null;
+    const onTouchStart = (event: TouchEvent) => {
+      headingRef.current = null;
+      touchStartY = event.touches[0]?.clientY ?? null;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const y = event.touches[0]?.clientY;
+      if (y === undefined || touchStartY === null || Math.abs(y - touchStartY) < SWIPE) return;
+      takeOver();
+    };
     stage.addEventListener("scroll", onScroll, { passive: true });
-    stage.addEventListener("touchstart", takeOver, { passive: true });
-    stage.addEventListener("touchmove", takeOver, { passive: true });
+    stage.addEventListener("touchstart", onTouchStart, { passive: true });
+    stage.addEventListener("touchmove", onTouchMove, { passive: true });
     stage.addEventListener("wheel", takeOver, { passive: true });
     // 生成中、展开折叠、图片加载完，内容高度会变（只重算能不能点，不叫出键）
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(scheduleRefresh) : null;
     if (stage.firstElementChild) observer?.observe(stage.firstElementChild);
     return () => {
       stage.removeEventListener("scroll", onScroll);
-      stage.removeEventListener("touchstart", takeOver);
-      stage.removeEventListener("touchmove", takeOver);
+      stage.removeEventListener("touchstart", onTouchStart);
+      stage.removeEventListener("touchmove", onTouchMove);
       stage.removeEventListener("wheel", takeOver);
       observer?.disconnect();
       if (frame) cancelAnimationFrame(frame);
