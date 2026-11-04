@@ -12,6 +12,7 @@ import { ContactCardGenerateFlow } from "@/components/chat/contact-card-generate
 import { MediaPreviewOverlay } from "@/components/chat/media-preview-overlay";
 import { findStickerByName } from "@/lib/sticker-data";
 import { splitBilingualText } from "@/lib/bilingual-text";
+import { hasChatMath, normalizeChatMath, useChatMathPlugins } from "@/lib/chat-math";
 import { isInvisibleOrWhitespaceOnly } from "@/lib/rich-message-parser";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -483,6 +484,20 @@ const MARKDOWN_COMPONENTS = {
     content: ({ node, ...props }: any) => <div className="rm-content" {...props} />
 } as any;
 
+function ChatMarkdown({ text }: { text: string }) {
+    const markdown = useMemo(() => normalizeChatMath(text), [text]);
+    const math = useChatMathPlugins(useMemo(() => hasChatMath(markdown), [markdown]));
+    return (
+        <ReactMarkdown
+            remarkPlugins={math ? [remarkGfm, math.remarkMath, remarkBreaks, remarkCjkFriendly] : [remarkGfm, remarkBreaks, remarkCjkFriendly]}
+            rehypePlugins={math ? [rehypeRaw, math.rehypeKatex] : [rehypeRaw]}
+            components={MARKDOWN_COMPONENTS}
+        >
+            {markdown}
+        </ReactMarkdown>
+    );
+}
+
 function MarkdownTextContent({
     content,
     onActionSelect,
@@ -540,9 +555,7 @@ function MarkdownTextContent({
             <div className="chat-markdown hide-scrollbar break-words" ref={containerRef}>
                 {styles && <style dangerouslySetInnerHTML={{ __html: styles }} />}
                 {mdCleaned && (
-                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks, remarkCjkFriendly]} rehypePlugins={[rehypeRaw]} components={MARKDOWN_COMPONENTS}>
-                        {mdCleaned}
-                    </ReactMarkdown>
+                    <ChatMarkdown text={mdCleaned} />
                 )}
                 {payUrls.map((u, i) => <ScanPayCard key={`pay-${i}`} url={u} />)}
             </div>
@@ -563,9 +576,7 @@ function MarkdownTextContent({
                     <div key={`md-${i}`}>
                         {styles && <style dangerouslySetInnerHTML={{ __html: styles }} />}
                         {mdContent && (
-                            <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks, remarkCjkFriendly]} rehypePlugins={[rehypeRaw]} components={MARKDOWN_COMPONENTS}>
-                                {mdContent}
-                            </ReactMarkdown>
+                            <ChatMarkdown text={mdContent} />
                         )}
                     </div>
                 );

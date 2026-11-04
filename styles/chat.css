@@ -3160,6 +3160,22 @@
 .chat-markdown-paragraph + .chat-markdown-paragraph {
   margin-top: 6px;
 }
+/* 公式：长的块级公式在气泡里横向滑动，别撑破气泡 */
+.chat-markdown .katex {
+  font-size: 1.05em;
+}
+
+.chat-markdown .katex-display {
+  margin: 0.4em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.chat-markdown .katex-display::-webkit-scrollbar {
+  display: none;
+}
+
 .chat-markdown-link {
   color: inherit;
   text-decoration: underline;
