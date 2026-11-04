@@ -20,6 +20,7 @@ import { loadReadingCustomCss } from "@/lib/reading-custom-css";
 import { readThemeProfile } from "@/lib/theme-storage";
 import { CALENDAR_THEMES } from "@/lib/calendar-storage";
 import { kvGet } from "@/lib/kv-db";
+import { splashPoolSummary, useSplashLibrary } from "@/lib/splash-store";
 
 /**
  * css / status：跟随日间 · 存过的方案 · 单独一份（这里就能写）
@@ -176,7 +177,7 @@ function entityConfigured(entity: NightEntity, set: Record<string, NightBinding>
     return entity.sections.some((section) => section.rows.some((row) => set[row.key]));
 }
 
-function SlotRows({ setId, rows, onOpen }: { setId: string; rows: SlotRow[]; onOpen: (row: SlotRow) => void }) {
+function SlotRows({ setId, rows, onOpen, children }: { setId: string; rows: SlotRow[]; onOpen: (row: SlotRow) => void; children?: ReactNode }) {
     const set = loadNightSet(setId);
     return (
         <div className="menu-group">
@@ -189,6 +190,7 @@ function SlotRows({ setId, rows, onOpen }: { setId: string; rows: SlotRow[]; onO
                     </span>
                 </button>
             ))}
+            {children}
         </div>
     );
 }
@@ -200,8 +202,9 @@ function useSheetHost(): HTMLElement | null {
 }
 
 /** 外观 → 某套搭配 */
-export function NightSetPage({ setId, onOpenEntity }: { setId: string; onOpenEntity: (entity: NightEntity) => void }) {
+export function NightSetPage({ setId, onOpenEntity, onOpenSplash }: { setId: string; onOpenEntity: (entity: NightEntity) => void; onOpenSplash: () => void }) {
     useNightRevision();
+    const splashLibrary = useSplashLibrary();
     const host = useSheetHost();
     const [sheet, setSheet] = useState<SlotRow | null>(null);
     const [batchOpen, setBatchOpen] = useState(false);
@@ -217,10 +220,20 @@ export function NightSetPage({ setId, onOpenEntity }: { setId: string; onOpenEnt
 
     return (
         <div className="night-page">
-            {appSections.map((section) => (
+            {appSections.map((section, index) => (
                 <section key={section.title} className="night-set-group">
                     <h3 className="appearance-menu-section-title">{section.title}</h3>
-                    <SlotRows setId={setId} rows={section.rows} onOpen={setSheet} />
+                    <SlotRows setId={setId} rows={section.rows} onOpen={setSheet}>
+                        {index === 0 ? (
+                            <button type="button" className="menu-item night-card-row" onClick={onOpenSplash}>
+                                <span className="menu-label night-set-label">开屏动画</span>
+                                <span className="menu-right">
+                                    <span className="menu-desc night-set-value">{splashPoolSummary(splashLibrary, setId)}</span>
+                                    <ChevronRight size={16} aria-hidden="true" />
+                                </span>
+                            </button>
+                        ) : null}
+                    </SlotRows>
                 </section>
             ))}
 

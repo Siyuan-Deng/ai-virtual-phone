@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
 
 import { AccountGate } from "@/components/auth/account-gate";
@@ -10,8 +10,10 @@ import { MediaMaintenanceScheduler } from "@/components/media-maintenance-schedu
 import { DesktopShell } from "./desktop-shell";
 import { OfflinePushRevampAnnouncement } from "./offline-push-revamp-announcement";
 import { SplashAnimation } from "./splash-animation";
+import { SplashBootStage } from "./splash/splash-boot-stage";
 import { MusicProvider } from "@/lib/music-context";
 import { hydrateKvDb, isKvHydrated } from "@/lib/kv-db";
+import { splashBootPlan, syncSplashMirror, type SplashBootPlan } from "@/lib/splash-store";
 import { getThemeAssetMap, readThemeProfile } from "@/lib/theme-storage";
 import { resolveActiveIconSkins, type ThemeProfile } from "@/lib/theme-types";
 import { hasPendingMcpOAuthCallback } from "@/lib/tool-executor";
@@ -150,6 +152,15 @@ async function warmBuiltinFonts(shouldStop: () => boolean): Promise<void> {
 }
 
 function SplashScreen({ ready = false, onEnter }: { ready?: boolean; onEnter?: () => void }) {
+  // localStorage 服务端读不到，挂上之后才决定放哪一套
+  const [plan, setPlan] = useState<SplashBootPlan | null>(null);
+  const [played, setPlayed] = useState(false);
+  useLayoutEffect(() => setPlan(splashBootPlan()), []);
+  useEffect(() => {
+    if (plan?.autoEnter && played && ready) onEnter?.();
+  }, [plan, played, ready, onEnter]);
+  const custom = plan?.kind === "custom" ? plan : null;
+
   return (
     <main className="app-root splash-root">
       <section
@@ -159,10 +170,12 @@ function SplashScreen({ ready = false, onEnter }: { ready?: boolean; onEnter?: (
         <div className="phone-case">
           <div className="phone-frame">
             <div className="phone-shell splash-phone-screen">
-              <SplashAnimation />
+              {custom ? <SplashBootStage plan={custom} onDone={() => setPlayed(true)} /> : null}
+              {plan?.kind === "float" ? <SplashAnimation onDone={() => setPlayed(true)} /> : null}
               <button
                 type="button"
                 className={ready ? "splash-enter-button splash-enter-button-show" : "splash-enter-button"}
+                style={custom?.config.texts[0] ? { color: custom.config.texts[0].color } : undefined}
                 onClick={onEnter}
                 disabled={!ready}
                 aria-label="Enter"
@@ -250,6 +263,7 @@ export function MainApp() {
         return;
       }
       setKvHydrateFailed(false);
+      syncSplashMirror();
 
       let nextPreparedTheme: PreparedDesktopTheme | null = null;
       try {

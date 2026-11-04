@@ -295,13 +295,17 @@ export function sortPoints(points: AutoPoint[]): AutoPoint[] {
 }
 
 /** 按时间点，现在该用哪套：今天最后一个已经过了的点；一个都还没到就是昨天最后那个 */
-function setAt(now: Date, points: AutoPoint[]): string {
+function pointAt(now: Date, points: AutoPoint[]): string {
     const sorted = sortPoints(points);
     if (!sorted.length) return DAY_SET_ID;
     const m = now.getHours() * 60 + now.getMinutes();
     let current = sorted[sorted.length - 1].set;
     for (const point of sorted) if (minutesOf(point.time) <= m) current = point.set;
-    return existingSet(current);
+    return current;
+}
+
+function setAt(now: Date, points: AutoPoint[]): string {
+    return existingSet(pointAt(now, points));
 }
 
 /** 下一个时间点的时间戳 */
@@ -359,6 +363,27 @@ export function updateNightAuto(patch: Partial<Pick<NightModeState, "auto" | "po
         window.dispatchEvent(new CustomEvent(NIGHT_MODE_CHANGED_EVENT, { detail: { night: next.active !== DAY_SET_ID, set: next.active, source: "settings" } }));
     }
     tickNightAuto();
+}
+
+/** 开屏用：刚打开 App 这一刻该用哪套。只算不存；这时自建搭配的列表还没读出来，所以存的是哪套就信哪套 */
+export function lookSetAtBoot(now: Date = new Date()): string {
+    if (typeof window === "undefined") return DAY_SET_ID;
+    try {
+        const raw = JSON.parse(kvGet(STATE_KEY) || readMirror() || "{}") as Partial<NightModeState>;
+        const active = typeof raw.active === "string" ? raw.active : DAY_SET_ID;
+        if (raw.auto === "time" && Array.isArray(raw.points) && raw.points.length) {
+            if (typeof raw.manualUntil === "number" && now.getTime() < raw.manualUntil) return active;
+            return pointAt(now, raw.points);
+        }
+        if (raw.auto === "system") {
+            const dark = systemPrefersDark();
+            if (dark === null || raw.manualSystemDark === dark) return active;
+            return (dark ? raw.systemDark : raw.systemLight) || active;
+        }
+        return active;
+    } catch {
+        return DAY_SET_ID;
+    }
 }
 
 /** 自动切换对一次表：桌面每半分钟、回到前台、系统深浅色变了都调 */

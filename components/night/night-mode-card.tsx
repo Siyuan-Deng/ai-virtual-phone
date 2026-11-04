@@ -21,7 +21,7 @@ import {
 import { SwipeActionRow, useSwipeActions } from "@/components/ui/swipe-actions";
 import { LookSetEditSheet, LookSetPickSheet, LookSetThumb } from "./look-set-sheets";
 
-function Switch({ on, onChange, label }: { on: boolean; onChange: (on: boolean) => void; label: string }) {
+export function Switch({ on, onChange, label }: { on: boolean; onChange: (on: boolean) => void; label: string }) {
     return (
         <button
             type="button"
