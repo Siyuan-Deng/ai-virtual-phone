@@ -515,6 +515,12 @@ export function buildSplashStage(root: HTMLElement, config: SplashStageConfig, i
     });
 }
 
+/** 图片比开屏开始得晚：到了再铺上去 */
+export function applySplashImage(root: HTMLElement, imageUrl: string): void {
+    const bg = root.querySelector<HTMLElement>(".splash-stage-bg");
+    if (bg) bg.style.backgroundImage = `url("${imageUrl}")`;
+}
+
 function hostOf(root: HTMLElement, layerId: string): HTMLElement | null {
     return root.querySelector<HTMLElement>(`[data-text-id="${CSS.escape(layerId)}"]`);
 }
