@@ -20,6 +20,7 @@ import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { NightModeCard } from "@/components/night/night-mode-card";
 import { DAY_SET_ID, NIGHT_SET_ID, findLookSet, isNightActive, lookSetName, useActiveLookSet, useNightRevision } from "@/lib/night-mode";
 import { NightEntityPage, NightSetPage, type NightEntity } from "@/components/night/night-set-page";
+import { SplashLibraryPage } from "@/components/splash/splash-library-page";
 import { LookSetManagePage } from "@/components/night/look-set-manage-page";
 import { LookSetEditSheet } from "@/components/night/look-set-sheets";
 import { GlassIcon } from "@/components/ui/glass-icon";
@@ -76,9 +77,10 @@ type ThemeSection =
   | "css"
   | "nightSet"
   | "nightEntity"
-  | "lookSets";
+  | "lookSets"
+  | "splash";
 
-type ThemeMenuItemSection = Exclude<ThemeSection, "menu" | "nightSet" | "nightEntity" | "lookSets"> | "transfer" | "reset";
+type ThemeMenuItemSection = Exclude<ThemeSection, "menu" | "nightSet" | "nightEntity" | "lookSets" | "splash"> | "transfer" | "reset";
 type WallpaperSliderField = "wallpaperOpacity" | "wallpaperBlur" | "wallpaperScale" | "wallpaperX" | "wallpaperY";
 
 type PhoneThemeAppProps = {
@@ -180,6 +182,7 @@ const SECTION_TITLES: Record<Exclude<ThemeSection, "menu">, string> = {
   nightSet: "搭配",
   nightEntity: "搭配",
   lookSets: "管理搭配",
+  splash: "开屏动画",
 };
 
 const THEME_SECTIONS = new Set<string>(["menu", "palette", "wallpaper", "icons", "widgets", "case", "text", "css", "nightSet", "lookSets"]);
@@ -286,6 +289,8 @@ export function PhoneThemeApp({
   const [lookSetId, setLookSetId] = useState(NIGHT_SET_ID);
   const [lookSetBack, setLookSetBack] = useState<"menu" | "lookSets">("menu");
   const [nightEntity, setNightEntity] = useState<NightEntity | null>(null);
+  const [splashSet, setSplashSet] = useState(DAY_SET_ID);
+  const [splashBack, setSplashBack] = useState<"menu" | "nightSet">("menu");
   const [editingLookSet, setEditingLookSet] = useState(false);
   const openLookSet = (setId: string, from: "menu" | "lookSets") => {
     setLookSetId(setId);
@@ -293,9 +298,17 @@ export function PhoneThemeApp({
     setSection("nightSet");
   };
 
+  const openSplash = (setId: string, from: "menu" | "nightSet") => {
+    setSplashSet(setId);
+    setSplashBack(from);
+    setSection("splash");
+  };
+
   function handleBack() {
     if (section === "menu") {
       onClose();
+    } else if (section === "splash") {
+      setSection(splashBack);
     } else if (section === "nightEntity") {
       setSection("nightSet");
     } else if (section === "nightSet") {
@@ -423,6 +436,15 @@ export function PhoneThemeApp({
                     </span>
                   </button>
                 ))}
+                <button className="menu-item" type="button" onClick={() => openSplash(activeSet, "menu")}>
+                  <span className="card-icon card-icon-glass">
+                    <GlassIcon name="quick-action" />
+                  </span>
+                  <span className="menu-label appearance-menu-item-label">开屏动画</span>
+                  <span className="menu-right">
+                    <IconChevronRight />
+                  </span>
+                </button>
               </div>
             </div>
 
@@ -481,11 +503,13 @@ export function PhoneThemeApp({
             </div>
           </div>
         ) : section === "nightSet" ? (
-          <NightSetPage setId={lookSetId} onOpenEntity={(entity) => { setNightEntity(entity); setSection("nightEntity"); }} />
+          <NightSetPage setId={lookSetId} onOpenEntity={(entity) => { setNightEntity(entity); setSection("nightEntity"); }} onOpenSplash={() => openSplash(lookSetId, "nightSet")} />
         ) : section === "nightEntity" && nightEntity ? (
           <NightEntityPage setId={lookSetId} entityId={nightEntity.id} />
         ) : section === "lookSets" ? (
           <LookSetManagePage onOpenSet={(setId) => openLookSet(setId, "lookSets")} />
+        ) : section === "splash" ? (
+          <SplashLibraryPage initialSet={splashSet} onNotice={onNotice} />
         ) : section === "wallpaper" ? (
           <WallpaperPage
             draft={draft}

@@ -73,9 +73,14 @@ function drawBalloonPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, 
   ctx.closePath();
 }
 
-export function SplashAnimation() {
+/** 口号淡入完再停一下，算播完 */
+const DONE_AT = T.tagline + 1500;
+
+export function SplashAnimation({ onDone }: { onDone?: () => void }) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
 
   useLayoutEffect(() => {
     const stageEl = stageRef.current;
@@ -515,6 +520,7 @@ export function SplashAnimation() {
           xx += ws[i] + ls;
         }
       }
+      if (t > DONE_AT) onDoneRef.current?.();
       raf = requestAnimationFrame(frame);
     }
 

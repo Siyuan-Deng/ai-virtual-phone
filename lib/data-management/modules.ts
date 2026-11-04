@@ -161,6 +161,7 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
           "ai_phone_night_mode_v1",
           "ai_phone_night_set_v1",
           "ai_phone_look_sets_v1",
+          "ai_phone_splash_library_v1",
           "chat-app-custom-css",
           "music-custom-css",
           "calendar-custom-css",
