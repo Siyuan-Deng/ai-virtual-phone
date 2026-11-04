@@ -896,7 +896,8 @@ export function StoryApp({ onClose, onNotice }: StoryAppProps) {
     const place = (selectionCenterY?: number) => {
       const shell = shellInnerRef.current;
       const headerRect = shell?.querySelector(".story-header")?.getBoundingClientRect();
-      const composerRect = shell?.querySelector(".story-composer")?.getBoundingClientRect();
+      // 输入栏和 story-shell-inner 同级，不在它里面
+      const composerRect = shell?.parentElement?.querySelector(".story-composer")?.getBoundingClientRect();
       const viewportHeight = window.innerHeight;
       return {
         atTop: selectionCenterY !== undefined && selectionCenterY > viewportHeight / 2,
