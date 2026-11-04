@@ -1,11 +1,11 @@
 "use client";
 
-// 打开 App 时放的自定义开屏。背景色先铺上，图片读到（或等够了）再开始播。
+// 打开 App 时放的自定义开屏。有图的先铺小预览图（存在 localStorage，马上就有），原图读到（或等够了）再开始播。
 // 图片和字体分开等：字体文件大、解析慢，不能拖累图片；到得晚的图片、字体播的时候补上，不会丢。
 
 import { useEffect, useRef } from "react";
 import { applySplashImage, buildSplashStage, playSplashStage, type SplashPlayback } from "@/lib/splash-effects";
-import { ensureSplashFonts, type SplashBootPlan } from "@/lib/splash-store";
+import { backfillSplashPreview, ensureSplashFonts, type SplashBootPlan } from "@/lib/splash-store";
 import { getThemeAssetDataUrl } from "@/lib/theme-storage";
 
 /** 最多等图片这么久，再久先把字播起来 */
@@ -48,9 +48,11 @@ export function SplashBootStage({ plan, onDone }: { plan: Extract<SplashBootPlan
                 const imageUrl = await within(image, IMAGE_WAIT_MS);
                 await within(fonts, FONT_WAIT_MS);
                 if (cancelled) return;
-                buildSplashStage(root, plan.config, imageUrl);
-                playback = playSplashStage(root, plan.config);
-                if (!imageUrl) void image.then((url) => { if (url && !cancelled) applySplashImage(root, url); });
+                const { config } = plan;
+                buildSplashStage(root, config, imageUrl, Boolean(config.imageAssetId));
+                playback = playSplashStage(root, config);
+                if (config.imageAssetId && !imageUrl) void image.then((url) => { if (!cancelled) applySplashImage(root, url, config.bgColor); });
+                if (config.imageAssetId && !config.imagePreview) void image.then((url) => (url ? backfillSplashPreview(config.id, url) : undefined));
                 timer = window.setTimeout(() => onDoneRef.current(), playback.endMs + HOLD_MS);
             } catch (error) {
                 // 哪一步出错都不能让人卡在开屏上
@@ -65,5 +67,7 @@ export function SplashBootStage({ plan, onDone }: { plan: Extract<SplashBootPlan
         };
     }, [plan]);
 
-    return <div ref={rootRef} className="splash-stage" style={{ backgroundColor: plan.config.bgColor }} aria-hidden="true" />;
+    const { imageAssetId, imagePreview, bgColor } = plan.config;
+    const style = imageAssetId ? (imagePreview ? { backgroundImage: `url("${imagePreview}")` } : undefined) : { backgroundColor: bgColor };
+    return <div ref={rootRef} className="splash-stage" style={style} aria-hidden="true" />;
 }

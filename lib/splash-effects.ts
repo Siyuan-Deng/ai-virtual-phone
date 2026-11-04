@@ -497,12 +497,13 @@ function makeInner(layer: SplashTextLayer, k: number): HTMLElement {
     return inner;
 }
 
-/** 搭好舞台：背景、压暗、每段文字的空壳（data-text-id）。文字内容由 play / still 填 */
-export function buildSplashStage(root: HTMLElement, config: SplashStageConfig, imageUrl: string | null): void {
+/** 搭好舞台：背景、压暗、每段文字的空壳（data-text-id）。文字内容由 play / still 填。
+ *  有图的开屏不铺背景色：imagePending 表示图还在读，先露出底下的小预览图，别闪一下纯色 */
+export function buildSplashStage(root: HTMLElement, config: SplashStageConfig, imageUrl: string | null, imagePending = false): void {
     root.textContent = "";
     const bg = el("div", "splash-stage-bg");
-    bg.style.backgroundColor = config.bgColor;
     if (imageUrl) bg.style.backgroundImage = `url("${imageUrl}")`;
+    else if (!imagePending) bg.style.backgroundColor = config.bgColor;
     const shade = el("div", "splash-stage-shade");
     shade.style.opacity = String(config.shade / 100);
     root.append(bg, shade);
@@ -515,10 +516,12 @@ export function buildSplashStage(root: HTMLElement, config: SplashStageConfig, i
     });
 }
 
-/** 图片比开屏开始得晚：到了再铺上去 */
-export function applySplashImage(root: HTMLElement, imageUrl: string): void {
+/** 图片比开屏开始得晚：到了再铺上去；读不出来就用背景色 */
+export function applySplashImage(root: HTMLElement, imageUrl: string | null, bgColor: string): void {
     const bg = root.querySelector<HTMLElement>(".splash-stage-bg");
-    if (bg) bg.style.backgroundImage = `url("${imageUrl}")`;
+    if (!bg) return;
+    if (imageUrl) bg.style.backgroundImage = `url("${imageUrl}")`;
+    else bg.style.backgroundColor = bgColor;
 }
 
 function hostOf(root: HTMLElement, layerId: string): HTMLElement | null {
