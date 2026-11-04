@@ -1774,8 +1774,9 @@
 .calendar-add-rows,
 .calendar-app-shell .caltool-add-rows {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, max-content));
-  gap: 0 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .calendar-add-row {
@@ -1786,7 +1787,11 @@
   font: inherit;
   font-size: 12px;
   font-weight: 650;
-  padding: 8px 2px;
+  padding: 9px 4px;
+  border-radius: 10px;
+  background: var(--c-calendar-surface);
+  text-align: center;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -1917,7 +1922,6 @@
 
 .calendar-todo-lead {
   justify-self: center;
-  width: 34px;
 }
 
 .calendar-todo-square b,
@@ -1928,6 +1932,11 @@
   line-height: 1;
 }
 
+.calendar-todo-lead b {
+  font-size: 9.5px;
+  letter-spacing: -0.02em;
+}
+
 .calendar-todo-frame {
   position: absolute;
   inset: 0;
@@ -1936,7 +1945,7 @@
 }
 
 .calendar-todo-frame-track {
-  stroke: color-mix(in srgb, currentColor 28%, transparent);
+  stroke: color-mix(in srgb, var(--ev-fg, currentColor) 32%, transparent);
 }
 
 .calendar-todo-frame-bar {
@@ -2195,14 +2204,16 @@
 }
 
 .calendar-app-shell .caltool-add-row {
-  align-self: flex-start;
   border: 0;
-  background: none;
+  background: var(--c-calendar-surface);
   color: var(--c-calendar-ink);
   font: inherit;
   font-size: 12px;
   font-weight: 650;
-  padding: 8px 2px;
+  padding: 9px 4px;
+  border-radius: 10px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .calendar-app-shell .caltool-memo-list {

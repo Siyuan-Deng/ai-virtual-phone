@@ -4,7 +4,7 @@ import { Check, ChevronLeft, Trash2 } from "lucide-react";
 import { Input } from "../ui/form";
 import type { CalendarColorKey } from "@/lib/calendar-types";
 import type { CalendarRecurrenceFrequency, CalendarTodo } from "@/lib/calendar-extras";
-import { CALENDAR_COLOR_KEYS } from "@/lib/calendar-utils";
+import { CALENDAR_COLOR_KEYS, pickScheduleColorKey } from "@/lib/calendar-utils";
 import { addDaysIso } from "@/lib/calendar-recurrence";
 import { TodoAddButtons, TodoLead, TodoProgressFields, isProgressTodo } from "./todo-progress";
 
@@ -374,7 +374,7 @@ export function CalendarEventEditModal({
                         {todo.bullet ? (
                           <span className="calendar-bullet-mark" aria-hidden="true">•</span>
                         ) : isProgressTodo(todo) ? (
-                          <TodoLead todo={todo} />
+                          <TodoLead todo={todo} color={draft.colorKey ?? pickScheduleColorKey(draft.startTime || "")} />
                         ) : (
                           <input
                             type="checkbox"

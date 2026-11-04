@@ -96,15 +96,17 @@ export function TodoStepChecks({ todo, onChange, className }: { todo: CalendarTo
     );
 }
 
-/** 编辑框里占勾选框那一格：已完成 / 总数 */
-export function TodoLead({ todo }: { todo: CalendarTodo }) {
+/** 编辑框里占勾选框那一格：和横幅同一个方框，写已完成 / 总数；数字长了才加宽 */
+export function TodoLead({ todo, color }: { todo: CalendarTodo; color: string }) {
     const progress = todo.target
         ? { done: todo.count ?? 0, total: todo.target }
         : { done: (todo.steps ?? []).filter((step) => step.done).length, total: todo.steps?.length ?? 0 };
+    const text = `${progress.done}/${progress.total}`;
+    const width = text.length <= 3 ? 22 : text.length === 4 ? 28 : 34;
     return (
-        <span className="calendar-todo-lead">
-            <ProgressFrame width={34} height={22} ratio={progress.total ? progress.done / progress.total : 0} />
-            <b>{progress.done}/{progress.total}</b>
+        <span className="calendar-todo-lead" data-color={color} style={{ width }}>
+            <ProgressFrame width={width} height={22} ratio={progress.total ? progress.done / progress.total : 0} />
+            <b>{text}</b>
         </span>
     );
 }

@@ -19,6 +19,7 @@ import {
     type CalendarTodo,
 } from "@/lib/calendar-extras";
 import { formatIsoDate } from "@/lib/calendar-utils";
+import { memoColor } from "./schedule-banners";
 import { TodoAddButtons, TodoCountButton, TodoLead, TodoProgressFields, TodoSquare, TodoStepChecks, isProgressTodo } from "./todo-progress";
 
 /** 备忘录待办横幅颜色：插件里的 MEMO_BANNER_COLORS，顺序和文字都一样 */
@@ -153,10 +154,13 @@ export function TodoListEditor({
     todos,
     onChange,
     allowDeadline,
+    bannerColor,
 }: {
     todos: CalendarTodo[];
     onChange: (todos: CalendarTodo[]) => void;
     allowDeadline: boolean;
+    /** 备忘录的横幅颜色：方框和横幅里一个颜色 */
+    bannerColor: string;
 }) {
     const listRef = useRef<HTMLDivElement>(null);
     const focusNewRef = useRef(false);
@@ -179,7 +183,7 @@ export function TodoListEditor({
                         {todo.bullet ? (
                             <span className="caltool-bullet-mark" aria-hidden="true">•</span>
                         ) : isProgressTodo(todo) ? (
-                            <TodoLead todo={todo} />
+                            <TodoLead todo={todo} color={memoColor(bannerColor, todo)} />
                         ) : (
                             <input
                                 type="checkbox"
@@ -453,7 +457,7 @@ function MemoEditor({ memoId, nav, close }: { memoId: string | null; nav: Calend
             <section className="caltool-section">
                 <label className="menu-desc">清单</label>
                 <div>
-                    <TodoListEditor todos={checklist} onChange={setChecklist} allowDeadline />
+                    <TodoListEditor todos={checklist} onChange={setChecklist} allowDeadline bannerColor={bannerColor} />
                 </div>
             </section>
             {source ? (
