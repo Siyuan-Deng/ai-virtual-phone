@@ -169,6 +169,8 @@ function SplashScreen({ ready = false, onEnter }: { ready?: boolean; onEnter?: (
     if (played && ready && (plan?.autoEnter || loadSplashLibrary().autoEnter)) onEnter?.();
   }, [plan, played, ready, onEnter]);
   const custom = plan?.kind === "custom" ? plan : null;
+  // 开了「播完自动进入」就不用箭头了
+  const showEnter = plan !== null && !plan.autoEnter && !(ready && loadSplashLibrary().autoEnter);
 
   return (
     <main className="app-root splash-root">
@@ -181,16 +183,18 @@ function SplashScreen({ ready = false, onEnter }: { ready?: boolean; onEnter?: (
             <div className="phone-shell splash-phone-screen">
               {custom ? <SplashBootStage plan={custom} onDone={() => setPlayed(true)} /> : null}
               {plan?.kind === "float" ? <SplashAnimation onDone={() => setPlayed(true)} /> : null}
-              <button
-                type="button"
-                className={ready ? "splash-enter-button splash-enter-button-show" : "splash-enter-button"}
-                style={custom?.config.texts[0] ? { color: custom.config.texts[0].color } : undefined}
-                onClick={onEnter}
-                disabled={!ready}
-                aria-label="Enter"
-              >
-                <ArrowRight size={18} strokeWidth={1.8} />
-              </button>
+              {showEnter ? (
+                <button
+                  type="button"
+                  className={ready ? "splash-enter-button splash-enter-button-show" : "splash-enter-button"}
+                  style={custom?.config.texts[0] ? { color: custom.config.texts[0].color } : undefined}
+                  onClick={onEnter}
+                  disabled={!ready}
+                  aria-label="Enter"
+                >
+                  <ArrowRight size={18} strokeWidth={1.8} />
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
