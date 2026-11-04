@@ -20,7 +20,6 @@ import {
     SPLASH_MAX_TEXTS,
     addSplashFont,
     ensureSplashFonts,
-    makeSplashPreview,
     makeSplashTextLayer,
     releaseSplashImage,
     removeSplashFont,
@@ -302,10 +301,9 @@ export function SplashEditor({ config, isNew, poolSet, onClose, onNotice }: {
             const assetId = await saveThemeAssetFromBlob(file, "bg");
             uploadsRef.current.push(assetId);
             const url = await getThemeAssetDataUrl(assetId);
-            const imagePreview = url ? await makeSplashPreview(url) : null;
             imageUrlRef.current = url;
             setImageUrl(url);
-            change({ ...draftRef.current, imageAssetId: assetId, imagePreview });
+            change({ ...draftRef.current, imageAssetId: assetId });
         } catch (error) {
             onNotice(error instanceof AnimatedAssetTooLargeError ? "这张动图太大了，换一张小一点的" : "图片存不进去，换一张试试");
         }
@@ -314,7 +312,7 @@ export function SplashEditor({ config, isNew, poolSet, onClose, onNotice }: {
     const clearImage = (bgColor?: string) => {
         imageUrlRef.current = null;
         setImageUrl(null);
-        change({ ...draftRef.current, imageAssetId: null, imagePreview: null, ...(bgColor ? { bgColor } : {}) });
+        change({ ...draftRef.current, imageAssetId: null, ...(bgColor ? { bgColor } : {}) });
     };
 
     const onPickFont = async (event: ChangeEvent<HTMLInputElement>) => {
