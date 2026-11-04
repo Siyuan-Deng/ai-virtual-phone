@@ -1770,11 +1770,11 @@
   color: var(--c-calendar-ink);
 }
 
-/* 「＋ 添加待办」「＋ 添加要点」并排 */
+/* 添加待办的四个按钮，两列 */
 .calendar-add-rows,
 .calendar-app-shell .caltool-add-rows {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, max-content));
   gap: 0 16px;
 }
 
@@ -1869,6 +1869,216 @@
 .calendar-banner-spacer {
   width: 20px;
   height: 20px;
+}
+
+/* ── 计次、分步待办 ── */
+
+.calendar-todo-count,
+.calendar-todo-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-calendar-sub);
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.calendar-todo-expand svg {
+  flex: none;
+  transition: transform 0.15s;
+}
+
+.calendar-todo-expand[aria-expanded="true"] > svg {
+  transform: rotate(180deg);
+}
+
+.calendar-todo-square,
+.calendar-todo-lead {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  height: 22px;
+  color: var(--c-calendar-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.calendar-todo-square {
+  width: 22px;
+}
+
+.calendar-todo-lead {
+  justify-self: center;
+  width: 34px;
+}
+
+.calendar-todo-square b,
+.calendar-todo-lead b {
+  position: relative;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.calendar-todo-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.calendar-todo-frame-track {
+  stroke: color-mix(in srgb, currentColor 28%, transparent);
+}
+
+.calendar-todo-frame-bar {
+  stroke: var(--ev-fg, var(--c-calendar-sel-bg));
+}
+
+.calendar-todo-checked {
+  pointer-events: none;
+}
+
+.calendar-banner-item[data-steps="true"] {
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+}
+
+.calendar-todo-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.calendar-banner-steps {
+  grid-column: 2 / -1;
+  padding: 2px 0 3px;
+}
+
+.calendar-todo-steps label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-calendar-ink);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.calendar-todo-steps input,
+.calendar-banner-item .calendar-todo-steps input {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--ev-fg, var(--c-calendar-sel-bg));
+}
+
+.calendar-todo-steps label.is-done span {
+  text-decoration: line-through;
+  color: var(--c-calendar-faint);
+}
+
+.calendar-checklist[data-wide="true"] .calendar-check-row,
+.calendar-app-shell .caltool-checklist[data-wide="true"] .caltool-check-row {
+  grid-template-columns: 34px minmax(0, 1fr) 30px;
+}
+
+.calendar-checklist[data-wide="true"] .calendar-check-row > input[type="checkbox"],
+.calendar-app-shell .caltool-checklist[data-wide="true"] .caltool-check-row > input[type="checkbox"],
+.calendar-checklist[data-wide="true"] .calendar-bullet-mark,
+.calendar-app-shell .caltool-checklist[data-wide="true"] .caltool-bullet-mark {
+  justify-self: center;
+}
+
+.calendar-todo-fields {
+  grid-column: 2 / 4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  color: var(--c-calendar-sub);
+  font-size: 13px;
+}
+
+.calendar-todo-fields > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.calendar-todo-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.calendar-todo-stepper button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--c-calendar-surface);
+  color: var(--c-calendar-ink);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.calendar-todo-stepper button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.calendar-todo-stepper b {
+  min-width: 18px;
+  color: var(--c-calendar-ink);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.calendar-todo-step-edit {
+  grid-column: 2 / 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.calendar-todo-step-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 28px;
+  gap: 7px;
+  align-items: center;
+}
+
+.calendar-todo-step-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--c-calendar-sel-bg);
+}
+
+.calendar-todo-step-row .ui-input {
+  padding: 7px 10px;
+}
+
+.calendar-todo-step-row button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--c-calendar-surface);
+  color: var(--c-calendar-sub);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 /* ── 备忘录 / 一键清除 / 日历知情角色（照搬用户日历增强插件，ucal- → caltool-） ── */
@@ -2089,6 +2299,24 @@
 .calendar-app-shell .caltool-view-todo-content small {
   font-size: 10px;
   color: var(--c-calendar-sub);
+}
+
+.calendar-app-shell .caltool-view-todo .calendar-todo-count {
+  justify-self: start;
+}
+
+.calendar-app-shell .caltool-view-todo .calendar-todo-square {
+  margin-top: -1px;
+}
+
+.calendar-app-shell .caltool-view-todo .calendar-todo-steps {
+  padding-top: 3px;
+}
+
+.calendar-app-shell .caltool-view-todo .calendar-todo-steps input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
 }
 
 .calendar-app-shell .caltool-view-todo.is-done b {

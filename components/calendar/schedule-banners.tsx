@@ -4,12 +4,14 @@
 // 分组、排序、文案逐条照搬「用户日历与备忘录增强」插件的 groupBannerEntries /
 // bannerEntryText；外观沿用原生经期那一行（calendar-cycle-line）的版式。
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import type { CalendarColorKey, CalendarScheduleItem } from "@/lib/calendar-types";
 import type { CalendarConfig } from "@/lib/calendar-storage";
-import { activeCalendarMemos, isCheckableCalendarTodo, normalizeCalendarTodos, type CalendarExtras, type CalendarTodo } from "@/lib/calendar-extras";
+import { ChevronDown } from "lucide-react";
+import { activeCalendarMemos, isCheckableCalendarTodo, normalizeCalendarTodos, type CalendarExtras, type CalendarTodoChange, type CalendarTodo } from "@/lib/calendar-extras";
 import { DEFAULT_CHINA_HOLIDAY_COLOR, DEFAULT_ONTARIO_HOLIDAY_COLOR, holidaysForDate } from "@/lib/calendar-holidays";
 import { pickScheduleColorKey } from "@/lib/calendar-utils";
+import { TodoCountButton, TodoSquare, TodoStepChecks } from "./todo-progress";
 
 /** 插件里同色横幅的排列顺序；hex 颜色排在这些之后 */
 const BANNER_COLOR_ORDER: CalendarColorKey[] = ["blue", "green", "amber", "rose", "violet", "teal", "slate", "lilac"];
@@ -187,12 +189,17 @@ export function CalendarScheduleBanners({
     onOpenItem,
     onToggleEventTodo,
     onToggleMemoTodo,
+    onChangeEventTodo,
+    onChangeMemoTodo,
 }: {
     groups: BannerGroup[];
     onOpenItem: (item: CalendarScheduleItem) => void;
     onToggleEventTodo: (itemId: string, todoId: string, done: boolean) => void;
     onToggleMemoTodo: (memoId: string, todoId: string, done: boolean) => void;
+    onChangeEventTodo: (itemId: string, todoId: string, change: CalendarTodoChange) => void;
+    onChangeMemoTodo: (memoId: string, todoId: string, change: CalendarTodoChange) => void;
 }) {
+    const [openSteps, setOpenSteps] = useState<ReadonlySet<string>>(new Set());
     if (groups.length === 0) return null;
     return (
         <>
@@ -217,6 +224,13 @@ export function CalendarScheduleBanners({
                                 const done = entry.kind === "todo" && entry.todo.done;
                                 const linkedItem = entry.source === "event" ? entry.item : undefined;
                                 const text = bannerEntryText(entry);
+                                const todo = entry.kind === "todo" ? entry.todo : null;
+                                const stepsOpen = openSteps.has(entry.key);
+                                const changeTodo = (change: CalendarTodoChange) => {
+                                    if (!todo) return;
+                                    if (entry.source === "memo" && entry.memoId) onChangeMemoTodo(entry.memoId, todo.id, change);
+                                    else if (entry.item) onChangeEventTodo(entry.item.id, todo.id, change);
+                                };
                                 const body = (
                                     <>
                                         <i className="calendar-event-dot calendar-banner-dot" aria-hidden="true" />
@@ -227,6 +241,7 @@ export function CalendarScheduleBanners({
                                     <div
                                         key={entry.key}
                                         className={`calendar-banner-item${done ? " is-done" : ""}${linkedItem ? " is-event-link" : ""}`}
+                                        data-steps={todo?.steps ? "true" : undefined}
                                         role={linkedItem ? "button" : undefined}
                                         tabIndex={linkedItem ? 0 : undefined}
                                         aria-label={linkedItem ? `编辑日程：${oneLine(linkedItem.title) || "未命名事项"}` : undefined}
@@ -238,7 +253,27 @@ export function CalendarScheduleBanners({
                                         } : undefined}
                                     >
                                         {body}
-                                        {entry.kind === "todo" ? (
+                                        {todo?.target ? (
+                                            <TodoCountButton todo={todo} onChange={changeTodo} />
+                                        ) : todo?.steps ? (
+                                            <button
+                                                type="button"
+                                                className="calendar-todo-expand"
+                                                aria-expanded={stepsOpen}
+                                                aria-label={`${stepsOpen ? "收起" : "展开"}${todo.text}的步骤`}
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    setOpenSteps((current) => {
+                                                        const next = new Set(current);
+                                                        if (!next.delete(entry.key)) next.add(entry.key);
+                                                        return next;
+                                                    });
+                                                }}
+                                            >
+                                                <ChevronDown size={12} strokeWidth={2.5} aria-hidden="true" />
+                                                <TodoSquare todo={todo} />
+                                            </button>
+                                        ) : entry.kind === "todo" ? (
                                             <input
                                                 type="checkbox"
                                                 checked={entry.todo.done}
@@ -256,6 +291,7 @@ export function CalendarScheduleBanners({
                                         ) : (
                                             <span className="calendar-banner-spacer" aria-hidden="true" />
                                         )}
+                                        {todo?.steps && stepsOpen ? <TodoStepChecks todo={todo} onChange={changeTodo} className="calendar-banner-steps" /> : null}
                                     </div>
                                 );
                             })}

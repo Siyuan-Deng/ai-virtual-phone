@@ -53,6 +53,8 @@ import {
   activeCalendarMemos,
   normalizeCalendarTodos,
   reportEventTodosChanged,
+  changeEventTodo,
+  changeMemoTodo,
   setEventTodoDone,
   setMemoTodoDone,
   updateCalendarExtras,
@@ -748,6 +750,8 @@ export function PhoneCalendarApp({
                 onOpenItem={openEditItem}
                 onToggleEventTodo={setEventTodoDone}
                 onToggleMemoTodo={setMemoTodoDone}
+                onChangeEventTodo={changeEventTodo}
+                onChangeMemoTodo={changeMemoTodo}
               />
             )}
             weekStartDay={config.weekStartDay}
