@@ -6,6 +6,7 @@ import type { CalendarColorKey } from "@/lib/calendar-types";
 import type { CalendarRecurrenceFrequency, CalendarTodo } from "@/lib/calendar-extras";
 import { CALENDAR_COLOR_KEYS } from "@/lib/calendar-utils";
 import { addDaysIso } from "@/lib/calendar-recurrence";
+import { TodoAddButtons, TodoLead, TodoProgressFields, isProgressTodo } from "./todo-progress";
 
 export type CalendarRepeatFrequency = "none" | CalendarRecurrenceFrequency;
 
@@ -40,19 +41,6 @@ export type CalendarEventDraft = {
   /** 打开「最后一天」之前填的几号，关掉时还原 */
   rememberedMonthDay?: string;
 };
-
-/** bullet：要点（•），只是一条列表项，不能勾 */
-function newTodo(bullet = false): CalendarTodo {
-    return {
-        id: `todo_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-        text: "",
-        done: false,
-        dueDate: "",
-        dueTime: "",
-        createdAt: new Date().toISOString(),
-        ...(bullet ? { bullet: true } : {}),
-    };
-}
 
 function weekdayOf(iso: string): number {
   const date = new Date(`${iso}T00:00:00`);
@@ -380,11 +368,13 @@ export function CalendarEventEditModal({
               <div className="calendar-plugin-field">
                 <label className="menu-desc">待办清单</label>
                 <div>
-                  <div className="calendar-checklist">
+                  <div className="calendar-checklist" data-wide={(draft.todos || []).some(isProgressTodo) ? "true" : undefined}>
                     {(draft.todos || []).map((todo, index) => (
                       <div key={todo.id} className="calendar-check-row">
                         {todo.bullet ? (
                           <span className="calendar-bullet-mark" aria-hidden="true">•</span>
+                        ) : isProgressTodo(todo) ? (
+                          <TodoLead todo={todo} />
                         ) : (
                           <input
                             type="checkbox"
@@ -413,24 +403,21 @@ export function CalendarEventEditModal({
                         >
                           ×
                         </button>
+                        {isProgressTodo(todo) ? (
+                          <TodoProgressFields
+                            todo={todo}
+                            onChange={(next) => {
+                              const todos = [...(draft.todos || [])];
+                              todos[index] = next;
+                              onChange({ ...draft, todos });
+                            }}
+                          />
+                        ) : null}
                       </div>
                     ))}
                   </div>
                   <div className="calendar-add-rows">
-                    <button
-                      type="button"
-                      className="calendar-add-row"
-                      onClick={() => onChange({ ...draft, todos: [...(draft.todos || []), newTodo()] })}
-                    >
-                      ＋ 添加待办
-                    </button>
-                    <button
-                      type="button"
-                      className="calendar-add-row"
-                      onClick={() => onChange({ ...draft, todos: [...(draft.todos || []), newTodo(true)] })}
-                    >
-                      ＋ 添加要点
-                    </button>
+                    <TodoAddButtons className="calendar-add-row" onAdd={(todo) => onChange({ ...draft, todos: [...(draft.todos || []), todo] })} />
                   </div>
                 </div>
               </div>

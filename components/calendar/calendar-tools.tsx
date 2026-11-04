@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+    changeMemoTodo,
     clearCalendarMemos,
     clearUserCalendarEvents,
     deleteCalendarMemo,
@@ -18,6 +19,7 @@ import {
     type CalendarTodo,
 } from "@/lib/calendar-extras";
 import { formatIsoDate } from "@/lib/calendar-utils";
+import { TodoAddButtons, TodoCountButton, TodoLead, TodoProgressFields, TodoSquare, TodoStepChecks, isProgressTodo } from "./todo-progress";
 
 /** 备忘录待办横幅颜色：插件里的 MEMO_BANNER_COLORS，顺序和文字都一样 */
 export const MEMO_BANNER_COLORS: Array<{ key: string; label: string }> = [
@@ -171,11 +173,13 @@ export function TodoListEditor({
     };
     return (
         <>
-            <div className="caltool-checklist" ref={listRef}>
+            <div className="caltool-checklist" data-wide={todos.some(isProgressTodo) ? "true" : undefined} ref={listRef}>
                 {todos.map((todo, index) => (
                     <div key={todo.id} className="caltool-check-row">
                         {todo.bullet ? (
                             <span className="caltool-bullet-mark" aria-hidden="true">•</span>
+                        ) : isProgressTodo(todo) ? (
+                            <TodoLead todo={todo} />
                         ) : (
                             <input
                                 type="checkbox"
@@ -198,6 +202,9 @@ export function TodoListEditor({
                         >
                             ×
                         </button>
+                        {isProgressTodo(todo) ? (
+                            <TodoProgressFields todo={todo} onChange={(next) => onChange(todos.map((item, i) => (i === index ? next : item)))} />
+                        ) : null}
                         {allowDeadline && !todo.bullet ? (
                             <div className="caltool-deadline-editor">
                                 <span className="caltool-deadline-label">截止</span>
@@ -221,23 +228,13 @@ export function TodoListEditor({
                 ))}
             </div>
             <div className="caltool-add-rows">
-                {([false, true] as const).map((bullet) => (
-                    <button
-                        key={bullet ? "bullet" : "todo"}
-                        type="button"
-                        className="caltool-add-row"
-                        onClick={() => {
-                            focusNewRef.current = true;
-                            onChange([...todos, {
-                                id: makeId("todo"), text: "", done: false, dueDate: "", dueTime: "",
-                                createdAt: new Date().toISOString(),
-                                ...(bullet ? { bullet: true } : {}),
-                            }]);
-                        }}
-                    >
-                        {bullet ? "＋ 添加要点" : "＋ 添加待办"}
-                    </button>
-                ))}
+                <TodoAddButtons
+                    className="caltool-add-row"
+                    onAdd={(todo) => {
+                        focusNewRef.current = true;
+                        onChange([...todos, todo]);
+                    }}
+                />
             </div>
         </>
     );
@@ -363,6 +360,20 @@ function MemoViewer({ memoId, nav, close }: { memoId: string; nav: CalendarToolN
                             );
                         }
                         const deadline = formatTodoDeadline(todo);
+                        if (isProgressTodo(todo)) {
+                            return (
+                                <div key={todo.id} className={`caltool-view-todo${todo.done ? " is-done" : ""}`}>
+                                    {todo.target
+                                        ? <TodoCountButton todo={todo} onChange={(change) => changeMemoTodo(memo.id, todo.id, change)} />
+                                        : <TodoSquare todo={todo} />}
+                                    <span className="caltool-view-todo-content">
+                                        <b>{todo.text}</b>
+                                        {deadline ? <small>截止：{deadline}</small> : null}
+                                        {todo.steps ? <TodoStepChecks todo={todo} onChange={(change) => changeMemoTodo(memo.id, todo.id, change)} /> : null}
+                                    </span>
+                                </div>
+                            );
+                        }
                         return (
                             <label key={todo.id} className={`caltool-view-todo${todo.done ? " is-done" : ""}`}>
                                 <input

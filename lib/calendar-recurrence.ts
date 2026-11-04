@@ -28,6 +28,8 @@ import {
     type CalendarRecurrenceSeries,
     type CalendarTodo,
     withoutReminderTraces,
+    keepCalendarTodoProgress,
+    resetCalendarTodo,
 } from "./calendar-extras";
 
 const USER = { ownerType: "user", ownerId: "self" } as const;
@@ -200,11 +202,7 @@ function cloneDetails(details: DetailsDraft, seriesId: string, resetTodos: boole
     return {
         note: String(details.note || "").replace(/\r/g, "").trim().slice(0, 5000),
         allDay: details.allDay === true,
-        todos: normalizeCalendarTodos(details.todos).map((todo) => ({
-            ...todo,
-            id: resetTodos ? makeId("todo") : todo.id,
-            done: resetTodos ? false : todo.done,
-        })),
+        todos: normalizeCalendarTodos(details.todos).map((todo) => (resetTodos ? { ...resetCalendarTodo(todo), id: makeId("todo") } : todo)),
         seriesId,
         updatedAt: now,
     };
@@ -351,9 +349,8 @@ export function updateEntireSeries(input: {
                 // 按位置对上原来那一次的待办：保留它自己的 id 和勾选状态；
                 // 只有正在编辑的这一次用编辑框里的勾选状态
                 todos: edited.map((todo, index) => ({
-                    ...todo,
+                    ...(item.id === input.currentItemId ? todo : keepCalendarTodoProgress(todo, before[index])),
                     id: before[index]?.id || makeId("todo"),
-                    done: item.id === input.currentItemId ? todo.done : before[index]?.done === true,
                     createdAt: before[index]?.createdAt || todo.createdAt || now,
                 })),
             };

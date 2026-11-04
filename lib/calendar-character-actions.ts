@@ -17,6 +17,8 @@ import {
     type CalendarMemoPage,
     type CalendarRecurrenceFrequency,
     type CalendarTodo,
+    CALENDAR_TODO_STEPS_MAX,
+    CALENDAR_TODO_TARGET_MAX,
 } from "./calendar-extras";
 import { addDaysIso, createRecurringSeries, recurrenceDates, recurrenceRuleLabel, updateEntireSeries } from "./calendar-recurrence";
 import { resolveCalendarId } from "./calendar-ids";
@@ -90,6 +92,19 @@ function memoColor(value: unknown, fallback: string): string {
     return COLOR_KEYS.includes(key as CalendarColorKey) ? key : fallback;
 }
 
+/** 动作里带的 target / steps：计次或分步 */
+function actionTodoShape(args: Args): Pick<CalendarTodo, "target" | "count" | "steps"> {
+    const target = Math.floor(Number(args.target));
+    if (target >= 2) return { target: Math.min(CALENDAR_TODO_TARGET_MAX, target), count: 0 };
+    if (!Array.isArray(args.steps)) return {};
+    const steps = args.steps
+        .slice(0, CALENDAR_TODO_STEPS_MAX)
+        .map((raw) => oneLine(typeof raw === "string" ? raw : objectArg(raw).text, "", 240))
+        .filter(Boolean)
+        .map((text) => ({ id: makeId("step"), text, done: false }));
+    return steps.length ? { steps } : {};
+}
+
 function actionTodos(value: unknown, allowDeadline: boolean): CalendarTodo[] {
     if (!Array.isArray(value)) return [];
     return value.slice(0, 50).map((raw) => {
@@ -98,7 +113,7 @@ function actionTodos(value: unknown, allowDeadline: boolean): CalendarTodo[] {
         if (!text) return null;
         const dueDate = allowDeadline && todo.dueDate ? requireActionDate(todo.dueDate, "待办截止日期") : "";
         const dueTime = dueDate && todo.dueTime ? requireActionTime(todo.dueTime, "待办截止时间") : "";
-        return { id: makeId("todo"), text, done: false, dueDate, dueTime, createdAt: new Date().toISOString() };
+        return { id: makeId("todo"), text, done: false, dueDate, dueTime, createdAt: new Date().toISOString(), ...actionTodoShape(todo) };
     }).filter((todo): todo is CalendarTodo => todo !== null);
 }
 
@@ -394,7 +409,28 @@ function setTodoState(args: Args): string {
     const target = todoTarget(args);
     const todo = findTodo(target.todos, args.todoId);
     if (todo.bullet) throw new Error("这一条是要点，不是待办，不能勾");
+    if (args.stepId !== undefined && args.stepId !== "") {
+        const steps = todo.steps ?? [];
+        const stepId = resolveCalendarId(args.stepId, steps.map((step) => step.id));
+        const step = steps.find((item) => item.id === stepId);
+        if (!step) throw new Error("找不到目标步骤");
+        step.done = args.done === true;
+        todo.done = steps.every((item) => item.done);
+        saveTodoTarget(target);
+        return `${step.done ? "勾选" : "取消勾选"}待办“${todo.text}”的步骤“${step.text}”`;
+    }
+    if (args.count !== undefined) {
+        if (!todo.target) throw new Error("这条待办不是计次待办");
+        const count = Math.floor(Number(args.count));
+        if (!Number.isFinite(count) || count < 0) throw new Error("count 必须是已做次数");
+        todo.count = Math.min(count, todo.target);
+        todo.done = todo.count >= todo.target;
+        saveTodoTarget(target);
+        return `把待办“${todo.text}”更新至 ${todo.count}/${todo.target}`;
+    }
     todo.done = args.done === true;
+    if (todo.target) todo.count = todo.done ? todo.target : 0;
+    todo.steps?.forEach((step) => { step.done = todo.done; });
     saveTodoTarget(target);
     return `${todo.done ? "勾选完成" : "取消完成"}待办“${todo.text}”`;
 }
@@ -411,7 +447,7 @@ function seriesInstances(ownerId: string): { title: string; ids: string[]; detai
     return { title: oneLine(event.item.title, "未命名事项"), ids, details: extras.eventDetails };
 }
 
-function addTodoToSeries(ownerId: string, text: string): string {
+function addTodoToSeries(ownerId: string, text: string, args: Args): string {
     const { title, ids, details } = seriesInstances(ownerId);
     const createdAt = new Date().toISOString();
     const eventDetails = { ...details };
@@ -419,7 +455,7 @@ function addTodoToSeries(ownerId: string, text: string): string {
         const current = eventDetails[id];
         eventDetails[id] = {
             ...current,
-            todos: [...normalizeCalendarTodos(current.todos), { id: makeId("todo"), text, done: false, dueDate: "", dueTime: "", createdAt }],
+            todos: [...normalizeCalendarTodos(current.todos), { id: makeId("todo"), text, done: false, dueDate: "", dueTime: "", createdAt, ...actionTodoShape(args) }],
             updatedAt: createdAt,
         };
     }
@@ -458,11 +494,11 @@ function eventOwnerId(args: Args): string {
 function addTodo(args: Args): string {
     const text = oneLine(args.text, "", 240);
     if (!text) throw new Error("新增待办缺少内容");
-    if (args.source === "event" && args.scope === "series") return addTodoToSeries(eventOwnerId(args), text);
+    if (args.source === "event" && args.scope === "series") return addTodoToSeries(eventOwnerId(args), text, args);
     const target = todoTarget(args);
     const dueDate = target.source === "memo" && args.dueDate ? requireActionDate(args.dueDate, "待办截止日期") : "";
     const dueTime = dueDate && args.dueTime ? requireActionTime(args.dueTime, "待办截止时间") : "";
-    target.todos.push({ id: makeId("todo"), text, done: false, dueDate, dueTime, createdAt: new Date().toISOString() });
+    target.todos.push({ id: makeId("todo"), text, done: false, dueDate, dueTime, createdAt: new Date().toISOString(), ...actionTodoShape(args) });
     saveTodoTarget(target);
     return `在${target.source === "memo" ? "备忘录" : "日程"}中新增待办“${text}”`;
 }

@@ -20,9 +20,12 @@ registerKvMigration(EXTRAS_KEY);
 /** 插件把私有数据存在这个前缀下，一个插件一个桶。迁移时按内容找，不写死插件 id。 */
 const PLUGIN_DATA_PREFIX = "chat_plugin_data_v1:";
 
+export type CalendarTodoStep = { id: string; text: string; done: boolean };
+
 export type CalendarTodo = {
     id: string;
     text: string;
+    /** 计次、分步的待办：全做完才是 true，由 count / steps 算出来 */
     done: boolean;
     /** YYYY-MM-DD；空串表示跟随所属日程当天 */
     dueDate: string;
@@ -31,11 +34,74 @@ export type CalendarTodo = {
     createdAt: string;
     /** 要点：清单里只是一条列表项（•），不能勾、没有截止，不算待办 */
     bullet?: boolean;
+    /** 计次待办：一共要做几次（2–99） */
+    target?: number;
+    /** 计次待办：已经做了几次 */
+    count?: number;
+    /** 分步待办的步骤 */
+    steps?: CalendarTodoStep[];
 };
+
+export const CALENDAR_TODO_TARGET_MAX = 99;
+export const CALENDAR_TODO_STEPS_MAX = 12;
 
 /** 真正的待办（能勾的那些）；要点不算 */
 export function isCheckableCalendarTodo(todo: CalendarTodo): boolean {
     return todo.bullet !== true;
+}
+
+/** 计次、分步的进度；普通待办没有 */
+export function calendarTodoProgress(todo: CalendarTodo): { done: number; total: number } | null {
+    if (todo.target) return { done: todo.count ?? 0, total: todo.target };
+    if (todo.steps?.length) return { done: todo.steps.filter((step) => step.done).length, total: todo.steps.length };
+    return null;
+}
+
+function newTodoId(prefix: string): string {
+    return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function newCalendarTodoStep(): CalendarTodoStep {
+    return { id: newTodoId("step"), text: "", done: false };
+}
+
+export type CalendarTodoKind = "check" | "count" | "steps" | "bullet";
+
+export function newCalendarTodo(kind: CalendarTodoKind): CalendarTodo {
+    return {
+        id: newTodoId("todo"),
+        text: "",
+        done: false,
+        dueDate: "",
+        dueTime: "",
+        createdAt: new Date().toISOString(),
+        ...(kind === "bullet" ? { bullet: true } : {}),
+        ...(kind === "count" ? { target: 3, count: 0 } : {}),
+        ...(kind === "steps" ? { steps: [newCalendarTodoStep(), newCalendarTodoStep()] } : {}),
+    };
+}
+
+/** 重复日程新铺出来的一次：从头开始 */
+export function resetCalendarTodo(todo: CalendarTodo): CalendarTodo {
+    return {
+        ...todo,
+        done: false,
+        ...(todo.target ? { count: 0 } : {}),
+        ...(todo.steps ? { steps: todo.steps.map((step) => ({ ...step, done: false })) } : {}),
+    };
+}
+
+/** 改了整个重复日程的内容：其他几次用新内容，进度留它们自己的（步骤按位置对上） */
+export function keepCalendarTodoProgress(todo: CalendarTodo, before: CalendarTodo | undefined): CalendarTodo {
+    if (todo.target) {
+        const count = Math.min(before?.count ?? 0, todo.target);
+        return { ...todo, count, done: count >= todo.target };
+    }
+    if (todo.steps?.length) {
+        const steps = todo.steps.map((step, index) => ({ ...step, done: before?.steps?.[index]?.done === true }));
+        return { ...todo, steps, done: steps.every((step) => step.done) };
+    }
+    return { ...todo, done: before?.done === true };
 }
 
 /** 一条日程的附加信息，key 是日程条目的 id */
@@ -144,20 +210,38 @@ function oneLine(value: unknown, max: number): string {
     return text(value, max).replace(/\s+/g, " ").trim();
 }
 
+function normalizeTodoSteps(value: unknown): CalendarTodoStep[] {
+    if (!Array.isArray(value)) return [];
+    return value
+        .slice(0, CALENDAR_TODO_STEPS_MAX)
+        .map((raw) => {
+            const step = raw as Record<string, unknown>;
+            return { id: String(step?.id || newTodoId("step")), text: oneLine(step?.text, 240), done: step?.done === true };
+        })
+        .filter((step) => step.text);
+}
+
 export function normalizeCalendarTodos(value: unknown): CalendarTodo[] {
     if (!Array.isArray(value)) return [];
     return value
         .map((raw) => {
             const todo = raw as Record<string, unknown>;
             const bullet = todo?.bullet === true;
+            const target = bullet ? 0 : Math.min(CALENDAR_TODO_TARGET_MAX, Math.floor(Number(todo?.target)) || 0);
+            const counted = target >= 2;
+            const count = counted ? Math.min(target, Math.max(0, Math.floor(Number(todo?.count)) || 0)) : 0;
+            const steps = bullet || counted ? [] : normalizeTodoSteps(todo?.steps);
+            const done = counted ? count >= target : steps.length ? steps.every((step) => step.done) : !bullet && todo?.done === true;
             return {
                 id: String(todo?.id || `todo_${Math.random().toString(36).slice(2, 10)}`),
                 text: oneLine(todo?.text, 240),
-                done: !bullet && todo?.done === true,
+                done,
                 dueDate: !bullet && /^\d{4}-\d{2}-\d{2}$/.test(String(todo?.dueDate || "")) ? String(todo.dueDate) : "",
                 dueTime: !bullet && /^\d{2}:\d{2}$/.test(String(todo?.dueTime || "")) ? String(todo.dueTime) : "",
                 createdAt: typeof todo?.createdAt === "string" ? todo.createdAt : "",
                 ...(bullet ? { bullet: true } : {}),
+                ...(counted ? { target, count } : {}),
+                ...(steps.length ? { steps } : {}),
             };
         })
         .filter((todo) => todo.text);
@@ -479,11 +563,32 @@ export function reportMemoTodosChanged(memo: CalendarMemoPage, before: CalendarT
     }
 }
 
+/** 计次改到第几次，或者勾掉分步里的一步 */
+export type CalendarTodoChange = { count: number } | { stepId: string; done: boolean };
+
+function applyTodoChange(todo: CalendarTodo, change: CalendarTodoChange): CalendarTodo {
+    if ("count" in change) {
+        if (!todo.target) return todo;
+        const count = Math.min(todo.target, Math.max(0, change.count));
+        return { ...todo, count, done: count >= todo.target };
+    }
+    const steps = (todo.steps ?? []).map((step) => (step.id === change.stepId ? { ...step, done: change.done } : step));
+    return { ...todo, steps, done: steps.length > 0 && steps.every((step) => step.done) };
+}
+
 export function setEventTodoDone(itemId: string, todoId: string, done: boolean): void {
+    updateEventTodo(itemId, todoId, (todo) => ({ ...todo, done }));
+}
+
+export function changeEventTodo(itemId: string, todoId: string, change: CalendarTodoChange): void {
+    updateEventTodo(itemId, todoId, (todo) => applyTodoChange(todo, change));
+}
+
+function updateEventTodo(itemId: string, todoId: string, update: (todo: CalendarTodo) => CalendarTodo): void {
     const extras = loadCalendarExtras();
     const details = extras.eventDetails[itemId];
     if (!details) return;
-    const todos = details.todos.map((todo) => todo.id === todoId ? { ...todo, done } : todo);
+    const todos = details.todos.map((todo) => (todo.id === todoId ? update(todo) : todo));
     saveCalendarExtras({
         ...extras,
         eventDetails: {
@@ -495,12 +600,20 @@ export function setEventTodoDone(itemId: string, todoId: string, done: boolean):
 }
 
 export function setMemoTodoDone(memoId: string, todoId: string, done: boolean): void {
+    updateMemoTodo(memoId, todoId, (todo) => ({ ...todo, done }));
+}
+
+export function changeMemoTodo(memoId: string, todoId: string, change: CalendarTodoChange): void {
+    updateMemoTodo(memoId, todoId, (todo) => applyTodoChange(todo, change));
+}
+
+function updateMemoTodo(memoId: string, todoId: string, update: (todo: CalendarTodo) => CalendarTodo): void {
     const extras = loadCalendarExtras();
     const memo = extras.memos.find((item) => item.id === memoId);
     if (!memo) return;
     const next: CalendarMemoPage = {
         ...memo,
-        checklist: memo.checklist.map((todo) => todo.id === todoId ? { ...todo, done } : todo),
+        checklist: memo.checklist.map((todo) => (todo.id === todoId ? update(todo) : todo)),
         updatedAt: new Date().toISOString(),
     };
     saveCalendarExtras({ ...extras, memos: extras.memos.map((item) => (item.id === memoId ? next : item)) });
