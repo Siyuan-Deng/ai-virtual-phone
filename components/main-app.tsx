@@ -13,7 +13,7 @@ import { SplashAnimation } from "./splash-animation";
 import { SplashBootStage } from "./splash/splash-boot-stage";
 import { MusicProvider } from "@/lib/music-context";
 import { hydrateKvDb, isKvHydrated } from "@/lib/kv-db";
-import { loadSplashLibrary, splashBootPlan, syncSplashMirror, type SplashBootPlan } from "@/lib/splash-store";
+import { loadSplashLibrary, splashBootImage, splashBootPlan, syncSplashMirror, type SplashBootPlan } from "@/lib/splash-store";
 import { getThemeAssetMap, readThemeProfile } from "@/lib/theme-storage";
 import { resolveActiveIconSkins, type ThemeProfile } from "@/lib/theme-types";
 import { hasPendingMcpOAuthCallback } from "@/lib/tool-executor";
@@ -150,6 +150,9 @@ async function warmBuiltinFonts(shouldStop: () => boolean): Promise<void> {
   if (shouldStop() || !document.fonts) return;
   await Promise.all(BUILTIN_FONT_LOAD_SPECS.map((spec) => document.fonts.load(spec).catch(() => [])));
 }
+
+// 代码一加载就开始读开屏的原图，等开屏挂上时图通常已经好了
+if (typeof window !== "undefined") void splashBootImage();
 
 /** 动画没报告播完（比如后台被挂起过）也不能一直等 */
 const SPLASH_MAX_PLAY_MS = 20000;

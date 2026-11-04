@@ -4,8 +4,6 @@
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background-position: center;
-  background-size: cover;
   -webkit-user-select: none;
   user-select: none;
 }

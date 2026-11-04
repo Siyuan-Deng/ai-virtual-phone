@@ -543,21 +543,22 @@ export function stillSplashStage(root: HTMLElement, config: SplashStageConfig, i
 
 export type SplashPlayback = { endMs: number; stop: () => void };
 
-/** 舞台已经 build 好：播背景入场和每段文字的动效 */
-export function playSplashStage(root: HTMLElement, config: SplashStageConfig): SplashPlayback {
+/** 舞台已经 build 好：播背景入场和每段文字的动效。parts：开屏时背景先走，字体到了再播字 */
+export function playSplashStage(root: HTMLElement, config: SplashStageConfig, parts: "all" | "background" | "text" = "all"): SplashPlayback {
     const k = stageScale(root);
     const anims: Animation[] = [];
     const bg = root.querySelector<HTMLElement>(".splash-stage-bg");
     const push = (frames: Keyframe[], options: KeyframeAnimationOptions) => {
         if (bg) anims.push(bg.animate(frames, { fill: "both", ...options }));
     };
-    if (config.motion === "fade") push([{ opacity: 0 }, { opacity: 1 }], { duration: 1400, easing: "ease-out" });
-    if (config.motion === "zoom") push([{ transform: "scale(1)" }, { transform: "scale(1.09)" }], { duration: 9000, easing: "cubic-bezier(.2,.6,.3,1)" });
-    if (config.motion === "settle") push([{ transform: "scale(1.16)", opacity: 0 }, { transform: "scale(1)", opacity: 1 }], { duration: 2200, easing: EXPO });
-    if (config.motion === "bright") push([{ filter: "brightness(.25)" }, { filter: "brightness(1)" }], { duration: 2400, easing: "ease-in-out" });
+    const motion = parts === "text" ? "none" : config.motion;
+    if (motion === "fade") push([{ opacity: 0 }, { opacity: 1 }], { duration: 1400, easing: "ease-out" });
+    if (motion === "zoom") push([{ transform: "scale(1)" }, { transform: "scale(1.09)" }], { duration: 9000, easing: "cubic-bezier(.2,.6,.3,1)" });
+    if (motion === "settle") push([{ transform: "scale(1.16)", opacity: 0 }, { transform: "scale(1)", opacity: 1 }], { duration: 2200, easing: EXPO });
+    if (motion === "bright") push([{ filter: "brightness(.25)" }, { filter: "brightness(1)" }], { duration: 2400, easing: "ease-in-out" });
 
-    let endMs = config.motion === "none" ? 0 : 1400;
-    config.texts.forEach((layer) => {
+    let endMs = motion === "none" ? 0 : 1400;
+    (parts === "background" ? [] : config.texts).forEach((layer) => {
         const host = hostOf(root, layer.id);
         if (!host || !layer.text.trim()) return;
         const effect = findSplashEffect(layer.effect);

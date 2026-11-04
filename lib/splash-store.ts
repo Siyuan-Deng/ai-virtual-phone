@@ -5,7 +5,7 @@
 // 打开 App 时靠这份决定放哪一套。float 原版不是一条配置，是兜底：随机池里什么都没有时放它。
 
 import { useSyncExternalStore } from "react";
-import { hydrateKvDb, isKvHydrated, kvGet, kvSet, kvSetAsync } from "./kv-db";
+import { kvGet, kvSet, kvSetAsync } from "./kv-db";
 import { DAY_SET_ID, lookSetAtBoot } from "./night-mode";
 import { deleteThemeAsset, getThemeAssetDataUrl } from "./theme-storage";
 import { splashUploadedFamily, type SplashMotion, type SplashStageConfig, type SplashTextLayer } from "./splash-effects";
@@ -23,8 +23,6 @@ export type SplashConfig = SplashStageConfig & {
     id: string;
     name: string;
     imageAssetId: string | null;
-    /** 很小的预览图：原图要从数据库读，读到之前先铺它，开屏不会闪一下纯色 */
-    imagePreview: string | null;
     updatedAt: string;
 };
 
@@ -80,7 +78,6 @@ function cleanSplash(raw: Partial<SplashConfig>, index: number): SplashConfig {
         id: str(raw.id, `splash_${index}`),
         name: str(raw.name, "开屏"),
         imageAssetId: typeof raw.imageAssetId === "string" && raw.imageAssetId ? raw.imageAssetId : null,
-        imagePreview: typeof raw.imagePreview === "string" && raw.imagePreview.startsWith("data:") ? raw.imagePreview : null,
         bgColor: str(raw.bgColor, "#174BFF"),
         motion: MOTIONS.includes(raw.motion as SplashMotion) ? raw.motion as SplashMotion : "fade",
         shade: clamp(raw.shade, 0, 70, 0),
@@ -247,7 +244,6 @@ export function makeSplashConfig(): SplashConfig {
         id: makeId("splash"),
         name: `开屏 ${count + 1}`,
         imageAssetId: null,
-        imagePreview: null,
         bgColor: "#174BFF",
         motion: "fade",
         shade: 0,
@@ -309,38 +305,6 @@ export function restoreFloatSplash(): void {
     saveLibrary({ ...loadSplashLibrary(), floatRemoved: false });
 }
 
-// ── 预览图 ──
-
-const PREVIEW_WIDTH = 48;
-
-export async function makeSplashPreview(imageUrl: string): Promise<string | null> {
-    try {
-        const image = new Image();
-        image.src = imageUrl;
-        await image.decode();
-        const canvas = document.createElement("canvas");
-        canvas.width = PREVIEW_WIDTH;
-        canvas.height = Math.max(1, Math.round((PREVIEW_WIDTH * image.naturalHeight) / image.naturalWidth));
-        const context = canvas.getContext("2d");
-        if (!context) return null;
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        return canvas.toDataURL("image/jpeg", 0.6);
-    } catch {
-        return null;
-    }
-}
-
-/** 以前存的开屏没有预览图：这次打开读到原图后补一张，下次就有了 */
-export async function backfillSplashPreview(id: string, imageUrl: string): Promise<void> {
-    const preview = await makeSplashPreview(imageUrl);
-    if (!preview) return;
-    await hydrateKvDb();
-    if (!isKvHydrated()) return;
-    const library = loadSplashLibrary();
-    if (library.splashes.find((splash) => splash.id === id)?.imagePreview !== null) return;
-    saveLibrary({ ...library, splashes: library.splashes.map((splash) => (splash.id === id ? { ...splash, imagePreview: preview } : splash)) });
-}
-
 // ── 上传字体 ──
 
 export function addSplashFont(font: Omit<SplashFontFile, "id">): SplashFontFile {
@@ -395,6 +359,7 @@ function writeLastPick(id: string): void {
 }
 
 let bootPlan: SplashBootPlan | null = null;
+let bootImage: Promise<string | null> | null = null;
 
 /** 一次启动只抽一次：开发模式下组件挂两遍也是同一套 */
 export function splashBootPlan(): SplashBootPlan {
@@ -410,4 +375,23 @@ export function splashBootPlan(): SplashBootPlan {
         ? { kind: "custom", autoEnter: library.autoEnter, config, fonts: library.fonts.filter((font) => config.texts.some((text) => text.font === font.id)) }
         : { kind: "float", autoEnter: library.autoEnter };
     return bootPlan;
+}
+
+async function readBootImage(assetId: string): Promise<string | null> {
+    const url = await getThemeAssetDataUrl(assetId).catch(() => null);
+    if (url) {
+        const image = new Image();
+        image.src = url;
+        await image.decode().catch(() => undefined);
+    }
+    return url;
+}
+
+/** 这次开屏的原图。第一次调的时候开始读，之后都是同一份 */
+export function splashBootImage(): Promise<string | null> {
+    if (bootImage) return bootImage;
+    const plan = splashBootPlan();
+    const assetId = plan.kind === "custom" ? plan.config.imageAssetId : null;
+    bootImage = assetId ? readBootImage(assetId) : Promise.resolve(null);
+    return bootImage;
 }
