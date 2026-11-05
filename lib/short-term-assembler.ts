@@ -25,6 +25,7 @@ import { loadBlackMarketTheaterProjectionEntries } from "./black-market-storage"
 import { loadInterviewMagazineProjectionEntries } from "./interview-magazine-memory";
 import { loadCoCreateProjectionEntries } from "./cocreate-memory";
 import { stripStateAndInnerForPrompt } from "./prompt-sanitizer";
+import { withSeenUserThought } from "./user-thought";
 import { renderUserNameMacro } from "./user-macro";
 import { loadChatOfflineProjectionEntries } from "./chat-offline-storage";
 import { loadCheckPhoneProjectionEntries } from "./checkphone-storage";
@@ -386,6 +387,7 @@ export function loadNativeTimeline(
                 }
             }
 
+            content = withSeenUserThought(msg, content);
             if (!content.trim()) continue;
 
             entries.push({

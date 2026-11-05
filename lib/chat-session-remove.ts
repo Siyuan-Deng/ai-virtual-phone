@@ -11,6 +11,7 @@ import { saveStatusRegionConfig } from "./chat-status-region";
 import { setSessionKeyboardAutoSendDebounce, setSessionKeyboardAutoSendEnabled } from "./keyboard-auto-send-config";
 import { PENDING_REPLY_PREFIX } from "./friend-request-engine";
 import { kvRemove } from "./kv-db";
+import { USER_THOUGHT_PEEK_PREFIX } from "./user-thought";
 
 // 与 chat-room.tsx 里的同名常量保持一致（备份模块 data-management/modules.ts 也在用同样的字面量）
 const GENERATING_PREFIX = "chat-generating:";
@@ -31,6 +32,7 @@ export function removeChatSessionCompletely(sessionId: string): void {
     kvRemove(GENERATING_PREFIX + sessionId);
     kvRemove(CHAT_OFFLINE_MODE_PREFIX + sessionId);
     kvRemove(CHAT_THEATER_MODE_PREFIX + sessionId);
+    kvRemove(USER_THOUGHT_PEEK_PREFIX + sessionId);
     kvRemove(PENDING_REPLY_PREFIX + sessionId);
 
     // 自定义状态栏：写回默认值即等于删掉该会话的条目

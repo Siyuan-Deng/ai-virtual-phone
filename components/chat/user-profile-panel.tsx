@@ -35,11 +35,13 @@ import { loadTimedWakeSchedules, makeTimedWakeId, removeTimedWakeSchedule, saveT
 import { IDLE_RECONNECT_MAX_CONSECUTIVE, loadIdleReconnectRules, removeIdleReconnectRule, upsertIdleReconnectRule, type IdleReconnectRule } from "@/lib/idle-reconnect-storage";
 import { addChatContact, createOrGetSession } from "@/lib/chat-storage";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
+import { USER_THOUGHT_PEEK_TAG, formatUserThought, loadUserThoughtPrompts, saveUserThoughtPrompts, userThoughtLabel } from "@/lib/user-thought";
 import { formatWalletAmount, getWalletBalance, loadWalletState, WALLET_UPDATED_EVENT } from "@/lib/wallet-storage";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
 import {
     Loader2,
     Bell,
+    Brain,
     CloudUpload,
     ChevronRight,
     Clock,
@@ -156,6 +158,7 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
     const [showStickerManager, setShowStickerManager] = useState(false);
     const [showPluginManager, setShowPluginManager] = useState(false);
     const [showCSSEditor, setShowCSSEditor] = useState(false);
+    const [showThoughtPrompts, setShowThoughtPrompts] = useState(false);
     const [showMomentsSettings, setShowMomentsSettings] = useState(false);
     const [showWalletPanel, setShowWalletPanel] = useState(false);
     const [identity, setIdentity] = useState<UserIdentity | null>(null);
@@ -271,6 +274,9 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
     }
     if (showCSSEditor) {
         return <ChatCSSEditor onBack={() => { setShowCSSEditor(false); }} />;
+    }
+    if (showThoughtPrompts) {
+        return <UserThoughtPromptEditor title={userThoughtLabel(identity?.name)} onBack={() => { setShowThoughtPrompts(false); }} />;
     }
     if (showStickerManager) {
         return <StickerManager onBack={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: false })); setShowStickerManager(false); }} />;
@@ -462,6 +468,14 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
                     {/* 高级工具 */}
                     <div className="mx-4 bg-[var(--c-card)] rounded-2xl px-4 py-1 flex flex-col"
                          style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.025)" }}>
+                        <button className="flex items-center gap-3 py-3.5 w-full border-b border-[color-mix(in_srgb,var(--c-card-border)_20%,transparent)]" onClick={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: true })); setShowThoughtPrompts(true); }}>
+                            <Brain size={18} className="text-[var(--c-icon)] opacity-70" strokeWidth={1.25}/>
+                            <div className="flex flex-col flex-1 text-left gap-0.5">
+                                <span className="ts-14 font-semibold text-[var(--c-text-title)]">{userThoughtLabel(identity?.name)}</span>
+                                <span className="ts-11 text-[var(--c-text)] opacity-70">自己写给模型的前缀和规则，留空就不发</span>
+                            </div>
+                            <ChevronRight size={16} className="text-[var(--c-icon)] opacity-50" />
+                        </button>
                         <button className="flex items-center gap-3 py-3.5 w-full border-b border-[color-mix(in_srgb,var(--c-card-border)_20%,transparent)]" onClick={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: true })); setShowPluginManager(true); }}>
                             <Puzzle size={18} className="text-[var(--c-icon)] opacity-70" strokeWidth={1.25}/>
                             <div className="flex flex-col flex-1 text-left gap-0.5">
@@ -483,6 +497,56 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
                 </div>
             </PageShell>
         </>
+    );
+}
+
+
+/* ══════════════════════════════════════════
+   {{user}}思维链的提示词 (sub-page)
+   ══════════════════════════════════════════ */
+function UserThoughtPromptEditor({ title, onBack }: { title: string; onBack: () => void }) {
+    const [prompts, setPrompts] = useState(loadUserThoughtPrompts);
+    const update = (patch: Partial<typeof prompts>) => {
+        const next = { ...prompts, ...patch };
+        setPrompts(next);
+        saveUserThoughtPrompts(next);
+    };
+
+    return (
+        <PageShell title={title} onBack={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: false })); onBack(); }}>
+            <div className="p-4 flex flex-col gap-3 flex-1">
+                <div className="ts-12 text-[var(--c-text)] opacity-70">
+                    两段都支持 {"{{user}}"}、{"{{char}}"}，改完自动保存。
+                </div>
+                <div className="ts-14 font-semibold text-[var(--c-text-title)]">前缀</div>
+                <div className="ts-12 text-[var(--c-text)] opacity-70">只在角色看的消息里发，放在思维链前面。</div>
+                <textarea
+                    value={prompts.prefix}
+                    onChange={(e) => update({ prefix: e.target.value })}
+                    aria-label="前缀"
+                    placeholder="留空就只有包裹，没有前缀"
+                    className="ui-textarea ts-13 leading-relaxed"
+                    style={{ minHeight: 110, resize: "none", scrollbarWidth: "none" }}
+                />
+                <div className="ts-14 font-semibold text-[var(--c-text-title)]">看不看的规则</div>
+                <div className="ts-12 text-[var(--c-text)] opacity-70">
+                    私聊每轮都发，留空时角色一直不看。回复里带 <code>{`<${USER_THOUGHT_PEEK_TAG}>yes</${USER_THOUGHT_PEEK_TAG}>`}</code> 是下一条看，yes 换成 no 是不看，这个标记不会显示出来。
+                </div>
+                <textarea
+                    value={prompts.decision}
+                    onChange={(e) => update({ decision: e.target.value })}
+                    aria-label="看不看的规则"
+                    placeholder="留空就不发"
+                    className="ui-textarea ts-13 leading-relaxed"
+                    style={{ minHeight: 110, resize: "none", scrollbarWidth: "none" }}
+                />
+                <div className="ts-14 font-semibold text-[var(--c-text-title)]">角色看的时候，模型收到的样子</div>
+                <pre className="ts-12 text-[var(--c-text)] opacity-70 whitespace-pre-wrap break-words m-0">
+                    {formatUserThought("（你写的思维链）", "（你发出去的消息）", prompts.prefix.trim())}
+                </pre>
+                <div className="ts-12 text-[var(--c-text)] opacity-70">角色不看的时候，模型只收到发出去的消息。</div>
+            </div>
+        </PageShell>
     );
 }
 
