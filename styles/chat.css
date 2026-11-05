@@ -6981,7 +6981,8 @@
 
 /* ── 思维链（Claude app 风格：触发条 + 底部弹窗） ── */
 
-.chat-reasoning-trigger {
+.chat-reasoning-trigger,
+.chat-user-thought-trigger {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -6997,7 +6998,8 @@
   line-height: 1.4;
   text-align: left;
 }
-.chat-reasoning-trigger:active {
+.chat-reasoning-trigger:active,
+.chat-user-thought-trigger:active {
   opacity: 0.65;
 }
 .chat-reasoning-trigger-icon {
@@ -7048,7 +7050,8 @@
   font-size: calc(12.5px * var(--app-text-scale, 1));
 }
 
-.chat-reasoning-sheet {
+.chat-reasoning-sheet,
+.chat-user-thought-sheet {
   height: min(72%, 640px);
   padding: 8px 0 calc(12px + env(safe-area-inset-bottom, 0px));
 }

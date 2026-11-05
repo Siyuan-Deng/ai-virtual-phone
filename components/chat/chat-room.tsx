@@ -6237,14 +6237,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                     </button>
                                 </div>
                             )}
-                            {/* {{user}}思维链：和角色的一样放在消息上面，眼睛表示角色看没看 */}
+                            {/* {{user}}思维链：和角色的一样放在消息上面，眼睛表示角色看没看。
+                                类名不和角色的共用：「隐藏思维链」只藏模型的思考，这行要留着 */}
                             {msg.role === "user" && msg.userThought && (
-                                <div className="chat-msg-wrapper" data-role="user" data-reasoning-row="" data-user-thought-row="" style={{ marginBottom: -8 }}>
+                                <div className="chat-msg-wrapper" data-role="user" data-user-thought-row="" style={{ marginBottom: -8 }}>
                                     {/* 两边都留头像那一格：美化主题把自己的消息放左边时也和气泡对齐 */}
                                     <div className="w-[40px] shrink-0" />
                                     <button
                                         type="button"
-                                        className="chat-reasoning-trigger"
+                                        className="chat-user-thought-trigger"
                                         onClick={(e) => { e.stopPropagation(); setUserThoughtSheet(msg); }}
                                         aria-label={`查看${thoughtLabel}，${msg.userThoughtSeen ? "角色看了" : "角色没看"}`}
                                     >
@@ -7022,7 +7023,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     aria-label={thoughtLabel}
                     onClick={() => setUserThoughtSheet(null)}
                 >
-                    <div className="modal-sheet chat-reasoning-sheet" onClick={(e) => e.stopPropagation()}>
+                    <div className="modal-sheet chat-user-thought-sheet" onClick={(e) => e.stopPropagation()}>
                         <div className="chat-reasoning-sheet-handle" />
                         <div className="chat-reasoning-sheet-header">
                             <div className="chat-reasoning-sheet-close-spacer" />
