@@ -38,10 +38,10 @@ import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
 import { USER_THOUGHT_PEEK_TAG, formatUserThought, loadUserThoughtPrompts, saveUserThoughtPrompts, userThoughtLabel } from "@/lib/user-thought";
 import { formatWalletAmount, getWalletBalance, loadWalletState, WALLET_UPDATED_EVENT } from "@/lib/wallet-storage";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
+import { ThoughtBubbleIcon } from "./thought-bubble-icon";
 import {
     Loader2,
     Bell,
-    Brain,
     CloudUpload,
     ChevronRight,
     Clock,
@@ -469,7 +469,7 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
                     <div className="mx-4 bg-[var(--c-card)] rounded-2xl px-4 py-1 flex flex-col"
                          style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.025)" }}>
                         <button className="flex items-center gap-3 py-3.5 w-full border-b border-[color-mix(in_srgb,var(--c-card-border)_20%,transparent)]" onClick={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: true })); setShowThoughtPrompts(true); }}>
-                            <Brain size={18} className="text-[var(--c-icon)] opacity-70" strokeWidth={1.25}/>
+                            <ThoughtBubbleIcon size={18} className="text-[var(--c-icon)] opacity-70" strokeWidth={1.25} />
                             <div className="flex flex-col flex-1 text-left gap-0.5">
                                 <span className="ts-14 font-semibold text-[var(--c-text-title)]">{userThoughtLabel(identity?.name)}</span>
                                 <span className="ts-11 text-[var(--c-text)] opacity-70">自己写给模型的前缀和规则，留空就不发</span>
@@ -530,7 +530,7 @@ function UserThoughtPromptEditor({ title, onBack }: { title: string; onBack: () 
                 />
                 <div className="ts-14 font-semibold text-[var(--c-text-title)]">看不看的规则</div>
                 <div className="ts-12 text-[var(--c-text)] opacity-70">
-                    私聊每轮都发，留空时角色一直不看。回复里带 <code>{`<${USER_THOUGHT_PEEK_TAG}>yes</${USER_THOUGHT_PEEK_TAG}>`}</code> 是下一条看，yes 换成 no 是不看，这个标记不会显示出来。
+                    私聊每轮都发，留空时角色一直不看。App 只认回复里的 <code>{`<${USER_THOUGHT_PEEK_TAG}>yes</${USER_THOUGHT_PEEK_TAG}>`}</code>（下一条看），yes 换成 no 是不看，这个标记不会显示出来。模型不会自己写这个标记，要在这里告诉它。
                 </div>
                 <textarea
                     value={prompts.decision}
