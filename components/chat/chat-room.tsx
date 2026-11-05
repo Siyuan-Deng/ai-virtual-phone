@@ -723,6 +723,11 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
         thoughtDraftRef.current = "";
         setThoughtOpen(false);
     };
+    const toggleThought = () => {
+        if (thoughtOpen) closeThought();
+        else setThoughtOpen(true);
+        onClosePanels();
+    };
     // 表情包搜索联想：ESC/失焦置 true 隐藏，输入变化重新开启
     const [suggestClosed, setSuggestClosed] = useState(false);
     // 围观群/被禁言：输入与富媒体入口全部锁定，只留线下切换和生成按钮
@@ -810,11 +815,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
             icon: <ThoughtBubbleIcon size={22} color={thoughtOpen ? "var(--c-icon-active)" : "var(--c-text)"} />,
             label: thoughtLabel,
             active: thoughtOpen,
-            onClick: () => {
-                if (thoughtOpen) closeThought();
-                else setThoughtOpen(true);
-                onClosePanels();
-            },
+            onClick: toggleThought,
         }]),
         ...customPlusActions.map(action => ({
             icon: action.appIconDataUrl
@@ -1005,7 +1006,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                     </button>
                 )}
             </div>
-            {/* 美化主题的「+」菜单开关，和「更多」里几项的快捷按钮（照片墙、文字图片、两个指令）：
+            {/* 美化主题的「+」菜单开关，和「更多」里几项的快捷按钮（照片墙、文字图片、两个指令、{{user}}思维链）：
                 默认 display:none，不改变任何人的默认样子；给美化主题用（比如收进主题自己画的加号菜单），不用先点开「更多」 */}
             <div className="chat-input-quick-actions">
                 {themeMenu.toggle}
@@ -1021,6 +1022,11 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                 <button type="button" disabled={inputLocked} aria-label="番外指令模式" title="番外指令模式" onClick={onToggleTheaterMode} {...(theaterMode ? { "data-active": "" } : {})}>
                     <Clapperboard size={22} strokeWidth={1.5} aria-hidden="true" />
                 </button>
+                {!isGroup && (
+                    <button type="button" className="chat-input-thought-toggle" disabled={inputLocked} aria-label={thoughtLabel} title={thoughtLabel} onClick={toggleThought} {...(thoughtOpen ? { "data-active": "" } : {})}>
+                        <ThoughtBubbleIcon size={22} />
+                    </button>
+                )}
             </div>
 
             {showPlusMenu && (
