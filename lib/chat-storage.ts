@@ -108,6 +108,8 @@ export type ChatMessage = {
     toolExecutionId?: string; // Links visible tool attachments to their persisted tool result
     editableResponseText?: string; // Processed text shown in the reply editor
     isRetracted?: boolean;
+    userThought?: string; // {{user}}思维链：这条消息没说出口的想法
+    userThoughtSeen?: boolean; // 角色看没看；没看的不进提示词和记忆
     mediaType?: "image" | "audio" | "video"
         | "red_packet" | "transfer" | "location"
         | "poke" | "sticker" | "quote" | "dice"

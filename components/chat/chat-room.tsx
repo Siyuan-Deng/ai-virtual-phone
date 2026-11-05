@@ -54,7 +54,7 @@ import { useKeyboardDismissAutoSend } from "@/components/chat/use-keyboard-dismi
 import { cancelBailoutKey } from "@/lib/push-bailout-client";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import type { UserIdentity } from "@/components/settings/user-identity";
-import { AlertCircle, Blocks, Bookmark, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, ImageDown, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
+import { AlertCircle, Blocks, Bookmark, Brain, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Eye, EyeOff, Gift, ImageDown, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
 import { setDebugChatState } from "@/lib/debug-store";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { nightSlotKeys, resolveNightRegexes, resolveNightStatusRender, useNightRevision, useNightText } from "@/lib/night-mode";
@@ -66,6 +66,7 @@ import type { MemoryWriteRequest, ToolResult } from "@/lib/tool-executor";
 import { formatChatMetaTime, formatChatUiTime } from "@/lib/chat-time";
 import { parseActionTags } from "@/lib/action-parser";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
+import { isUserThoughtPeeking, userThoughtLabel } from "@/lib/user-thought";
 import { creditWalletBalance, payWithWalletBalance } from "@/lib/wallet-storage";
 import { loadDeliveredShoppingGifts, type ShoppingGiftCandidate } from "@/lib/shopping-gift-utils";
 import { settleShoppingPaymentRequest } from "@/lib/shopping-payment-request";
@@ -645,6 +646,8 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     chatTitle?: string;
     characterId: string;
     stickerCharacterIds?: string[];
+    /** {{user}}思维链 */
+    thoughtLabel: string;
     isGroup: boolean;
     isSpectator: boolean;
     muteUntilMs: number;
@@ -668,7 +671,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     onOpenCustomPlusAction: (action: RegisteredCustomAppChatPlusAction) => void;
     onStartVideoCall: () => void;
     onStartVoiceCall: () => void;
-    onSendText: (text: string, options?: { autoReply?: boolean }) => boolean;
+    onSendText: (text: string, options?: { autoReply?: boolean; thought?: string }) => boolean;
     onStopGeneration: () => void;
     onTriggerAIResponse: () => void;
 	onSendSticker: (name: string, url?: string) => void;
@@ -677,6 +680,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     chatTitle,
     characterId,
     stickerCharacterIds,
+    thoughtLabel,
     isGroup,
     isSpectator,
     muteUntilMs,
@@ -711,6 +715,13 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     const inputTextRef = useRef("");
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const themeMenu = useThemeInputMenu();
+    // {{user}}思维链：从「更多」里展开，跟下一条消息一起发；收起就是不写了
+    const [thoughtOpen, setThoughtOpen] = useState(false);
+    const thoughtDraftRef = useRef("");
+    const closeThought = () => {
+        thoughtDraftRef.current = "";
+        setThoughtOpen(false);
+    };
     // 表情包搜索联想：ESC/失焦置 true 隐藏，输入变化重新开启
     const [suggestClosed, setSuggestClosed] = useState(false);
     // 围观群/被禁言：输入与富媒体入口全部锁定，只留线下切换和生成按钮
@@ -763,7 +774,8 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
         const ta = textareaRef.current;
         const trimmed = (ta ? ta.value : inputTextRef.current).trim();
         if (!trimmed) return;
-        if (!onSendText(trimmed)) return;
+        if (!onSendText(trimmed, { thought: thoughtDraftRef.current.trim() })) return;
+        closeThought();
         if (ta) ta.value = "";
         inputTextRef.current = "";
         setInputText("");
@@ -793,6 +805,16 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
         { icon: <Gift size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "礼物", onClick: () => onOpenRichModal("gift") },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>, label: "位置", onClick: () => onOpenRichModal("location") },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /><line x1="8" y1="22" x2="16" y2="22" /></svg>, label: "语音条", onClick: () => onOpenRichModal("voice_msg") },
+        ...(isGroup ? [] : [{
+            icon: <Brain size={22} strokeWidth={1.5} color={thoughtOpen ? "var(--c-icon-active)" : "var(--c-text)"} />,
+            label: thoughtLabel,
+            active: thoughtOpen,
+            onClick: () => {
+                if (thoughtOpen) closeThought();
+                else setThoughtOpen(true);
+                onClosePanels();
+            },
+        }]),
         ...customPlusActions.map(action => ({
             icon: action.appIconDataUrl
                 ? <span className="chat-plus-custom-app-icon" style={{ backgroundImage: `url(${action.appIconDataUrl})` }} aria-hidden="true" />
@@ -827,6 +849,25 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                         引用 {quotingMessage.role === "user" ? "你" : characterName}: {quotingMessage.content.slice(0, 40)}
                     </div>
                     <button onClick={onClearQuote} className="ui-bare-btn text-[var(--c-icon)] ts-16 leading-none p-[2px]">✕</button>
+                </div>
+            )}
+            {thoughtOpen && (
+                <div className="chat-user-thought-strip">
+                    <textarea
+                        rows={1}
+                        autoFocus
+                        defaultValue=""
+                        className="chat-user-thought-input"
+                        aria-label={thoughtLabel}
+                        placeholder={`写下${thoughtLabel}...`}
+                        onChange={e => {
+                            const target = e.target;
+                            thoughtDraftRef.current = target.value;
+                            target.style.height = "auto";
+                            target.style.height = target.scrollHeight + "px";
+                        }}
+                    />
+                    <button type="button" onClick={closeThought} aria-label={`收起${thoughtLabel}`} className="ui-bare-btn text-[var(--c-icon)] ts-16 leading-none p-[2px]">✕</button>
                 </div>
             )}
 
@@ -944,7 +985,8 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                             // 输入框已有文字：发送输入框内容并立即触发模型回复（一次按键完成），
                             // 避免「打完字却忘记发送」；没文字时才只触发 AI 主动回复
                             if (!inputLocked && trimmed) {
-                                if (!onSendText(trimmed, { autoReply: true })) return;
+                                if (!onSendText(trimmed, { autoReply: true, thought: thoughtDraftRef.current.trim() })) return;
+                                closeThought();
                                 if (ta) ta.value = "";
                                 inputTextRef.current = "";
                                 setInputText("");
@@ -1252,6 +1294,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     }, [session.id]);
     const charAvatarUrl = (target: Character | null | undefined): string | null => (target ? avatarUrls[target.id] || target.avatar || null : null);
     const userAvatarUrl = avatarUrls.self || userIdentity?.avatarUrl || null;
+    const thoughtLabel = userThoughtLabel(userIdentity?.name);
     // 通话界面也用这个聊天里的头像
     const displayCharacter = useMemo(
         () => (character && avatarUrls[character.id] ? { ...character, avatar: avatarUrls[character.id] } : character),
@@ -1421,6 +1464,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [expandedMonologueId, setExpandedThinkingId] = useState<string | null>(null);
     // 思维链底部弹窗：存当前查看的 reasoning 文本，null = 关闭
     const [reasoningSheetText, setReasoningSheetText] = useState<string | null>(null);
+    const [userThoughtSheet, setUserThoughtSheet] = useState<ChatMessage | null>(null);
     // 思维链翻译（弹窗内点击翻译按钮生成，切换弹窗内容时重置）
     const [reasoningTranslation, setReasoningTranslation] = useState<string | null>(null);
     const [reasoningTranslating, setReasoningTranslating] = useState(false);
@@ -4126,7 +4170,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         return true;
     };
 
-    const handleSendText = (text: string, options?: { autoReply?: boolean }): boolean => {
+    const handleSendText = (text: string, options?: { autoReply?: boolean; thought?: string }): boolean => {
         if (!ensureGroupSpeakPermission()) return false;
         if (isGenerating) {
             showChatToast("请先等待对方回复");
@@ -4159,6 +4203,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 content: currentText,
                 mediaType: diceOnly ? "dice" : isQuoting ? "quote" : undefined,
                 mediaData: diceOnly ? { diceFace } : isQuoting ? quoteData : undefined,
+                ...(options?.thought ? { userThought: options.thought, userThoughtSeen: isUserThoughtPeeking(session.id) } : {}),
             });
 
             setMessages(prev => [...prev, newMsg]);
@@ -6191,6 +6236,24 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                     </button>
                                 </div>
                             )}
+                            {/* {{user}}思维链：和角色的一样放在消息上面，眼睛表示角色看没看 */}
+                            {msg.role === "user" && msg.userThought && (
+                                <div className="chat-msg-wrapper" data-role="user" data-reasoning-row="" data-user-thought-row="" style={{ marginBottom: -8 }}>
+                                    {/* 两边都留头像那一格：美化主题把自己的消息放左边时也和气泡对齐 */}
+                                    <div className="w-[40px] shrink-0" />
+                                    <button
+                                        type="button"
+                                        className="chat-reasoning-trigger"
+                                        onClick={(e) => { e.stopPropagation(); setUserThoughtSheet(msg); }}
+                                        aria-label={`查看${thoughtLabel}，${msg.userThoughtSeen ? "角色看了" : "角色没看"}`}
+                                    >
+                                        {msg.userThoughtSeen ? <Eye size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" /> : <EyeOff size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />}
+                                        <span className="chat-reasoning-trigger-text">{thoughtLabel}</span>
+                                        <ChevronRight size={14} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />
+                                    </button>
+                                    <div className="w-[40px] shrink-0" />
+                                </div>
+                            )}
                             <div
                                 id={`message-${msg.id}`}
                                 className="chat-msg-wrapper"
@@ -6646,6 +6709,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 onStartVideoCall={() => { cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVideoCall(true); }}
                 onStartVoiceCall={() => { cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVoiceCall(true); }}
                 onSendText={handleSendText}
+                thoughtLabel={thoughtLabel}
                 onStopGeneration={clearStuckGeneration}
                 onTriggerAIResponse={triggerAIResponse}
                 onSendSticker={(name, url) => { setShowStickerPanel(false); sendRichMessage("sticker", { label: name, stickerUrl: url }); }}
@@ -6942,6 +7006,41 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                             {(reasoningViewMode !== "zh" || !reasoningTranslation) && (
                                 <BilingualTextBlock text={reasoningSheetText} mode="markdown" defaultExpanded />
                             )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* {{user}}思维链底部弹窗 */}
+            {userThoughtSheet && (
+                <div
+                    className="modal-overlay modal-overlay-bottom"
+                    data-ui="modal"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label={thoughtLabel}
+                    onClick={() => setUserThoughtSheet(null)}
+                >
+                    <div className="modal-sheet chat-reasoning-sheet" onClick={(e) => e.stopPropagation()}>
+                        <div className="chat-reasoning-sheet-handle" />
+                        <div className="chat-reasoning-sheet-header">
+                            <div className="chat-reasoning-sheet-close-spacer" />
+                            <span className="chat-reasoning-sheet-title">{thoughtLabel}</span>
+                            <button
+                                type="button"
+                                className="chat-reasoning-sheet-close"
+                                onClick={() => setUserThoughtSheet(null)}
+                                aria-label="关闭"
+                            >
+                                <X size={18} strokeWidth={2} />
+                            </button>
+                        </div>
+                        <div className="chat-reasoning-sheet-body">
+                            <div className="chat-user-thought-state">
+                                {userThoughtSheet.userThoughtSeen ? <Eye size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" /> : <EyeOff size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />}
+                                {character?.name || "对方"}{userThoughtSheet.userThoughtSeen ? "看了这段" : "没看这段"}
+                            </div>
+                            <div className="whitespace-pre-wrap">{userThoughtSheet.userThought}</div>
                         </div>
                     </div>
                 </div>

@@ -7012,6 +7012,42 @@
   white-space: nowrap;
 }
 
+/* {{user}}思维链：展开的一行跟着输入框的样子走 */
+.chat-user-thought-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  margin: 0 0 8px;
+  padding: 8px 10px 8px 16px;
+  border: 0.5px solid var(--c-input-border);
+  border-radius: var(--ui-radius-card);
+  background: color-mix(in srgb, var(--c-card) 60%, transparent);
+}
+.chat-user-thought-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 84px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--c-text);
+  font-size: calc(14.4px*var(--app-text-scale,1));
+  line-height: 1.4;
+  scrollbar-width: none;
+}
+.chat-user-thought-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--c-icon);
+  font-size: calc(12.5px * var(--app-text-scale, 1));
+}
+
 .chat-reasoning-sheet {
   height: min(72%, 640px);
   padding: 8px 0 calc(12px + env(safe-area-inset-bottom, 0px));
