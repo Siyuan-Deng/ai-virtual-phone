@@ -23,7 +23,7 @@
 // 关掉配置开关后行为与原版完全一致。
 
 import { useCallback, useEffect, useRef, type RefObject } from "react";
-import { loadChatMessages } from "@/lib/chat-storage";
+import { loadChatMessages, type ChatMessage } from "@/lib/chat-storage";
 import { getKeyboardAutoSendDebounceMs, isKeyboardAutoSendEnabled } from "@/lib/keyboard-auto-send-config";
 
 const KEYBOARD_INSET_THRESHOLD = 80;
@@ -45,6 +45,20 @@ interface KeyboardDismissAutoSendOptions {
     /** 用于「最后一条是不是用户发的」校验 + 按会话防抖时长 */
     sessionId: string;
     onTrigger: () => void;
+}
+
+/**
+ * 这个聊天最后是谁在说话（跳过 system），一条消息都没有时是 null。
+ * 例外：系统指令虽以 system 角色落库，但它就是用户刚发出的、在等回应的动作，算 user。
+ */
+export function lastSpeakerRole(sessionId: string): ChatMessage["role"] | null {
+    const msgs = loadChatMessages(sessionId);
+    for (let i = msgs.length - 1; i >= 0; i -= 1) {
+        const msg = msgs[i];
+        if (msg.role !== "system") return msg.role;
+        if (msg.mediaType === "system_instruction") return "user";
+    }
+    return null;
 }
 
 const currentKeyboardInset = () => {
@@ -71,23 +85,6 @@ export function useKeyboardDismissAutoSend(
         }
     }, []);
 
-    /**
-     * 最后一条非 system 消息必须是 user，否则「什么都没发也收键盘」会误触发。
-     * 例外：系统指令虽以 system 角色落库，但它就是用户刚发出的、在等回应的动作。
-     */
-    const hasUnrepliedUserMessage = useCallback((sessionId: string) => {
-        const msgs = loadChatMessages(sessionId);
-        for (let i = msgs.length - 1; i >= 0; i -= 1) {
-            const msg = msgs[i];
-            if (msg.role === "system") {
-                if (msg.mediaType === "system_instruction") return true;
-                continue;
-            }
-            return msg.role === "user";
-        }
-        return false;
-    }, []);
-
     /** 防抖窗口结束：触发前把现场完整查一遍，任何一条不满足都放弃。 */
     const fire = useCallback(() => {
         waitTimerRef.current = 0;
@@ -106,9 +103,10 @@ export function useKeyboardDismissAutoSend(
         // 输入框里已有草稿 = 用户还有话没发完
         const draft = rootRef.current?.querySelector<HTMLTextAreaElement>(INPUT_SELECTOR);
         if (draft?.value.trim()) return;
-        if (!hasUnrepliedUserMessage(cur.sessionId)) return;
+        // 最后一条必须是用户说的，否则「什么都没发也收键盘」会误触发
+        if (lastSpeakerRole(cur.sessionId) !== "user") return;
         cur.onTrigger();
-    }, [rootRef, hasUnrepliedUserMessage]);
+    }, [rootRef]);
 
     /** 键盘收起 / 面板关闭 → 开一个 N 秒防抖窗口（重复调用会重置计时）。 */
     const scheduleWait = useCallback((keptFocus = false) => {
