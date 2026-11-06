@@ -5443,6 +5443,26 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         return id;
     }, []);
 
+    // {{user}}思维链不管跟着哪条消息发的，都显示在这一串连发的最上面（下标 → 这一串里所有带思维链的消息）。
+    // 一串 = 中间没有夹别人说话或系统行的连续用户消息，隔再久也算；通话折叠的和看不见的消息不算断开
+    const userThoughtsByRunStart = useMemo(() => {
+        const result = new Map<number, RenderChatMessage[]>();
+        // 上一条看得见的消息是用户的话，记它那一串从哪开始；不是就 -1
+        let openRunStart = -1;
+        projectedMessages.forEach((msg, idx) => {
+            if (voiceCallGroups.memberSet.has(idx)) return;
+            const hidden = isHiddenChatFlowMessage(msg, getMessageDisplayContent(msg));
+            if (msg.role === "user") {
+                const runStart = openRunStart >= 0 ? openRunStart : idx;
+                if (msg.userThought) result.set(runStart, [...(result.get(runStart) ?? []), msg]);
+                if (!hidden) openRunStart = runStart;
+            } else if (!hidden) {
+                openRunStart = -1;
+            }
+        });
+        return result;
+    }, [projectedMessages, voiceCallGroups.memberSet, getMessageDisplayContent]);
+
     const visibleSelectableMessageIds = useMemo(() => {
         const ids: string[] = [];
         const seen = new Set<string>();
@@ -6202,23 +6222,23 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                             )}
                             {/* {{user}}思维链：和角色的一样放在消息上面，眼睛表示角色看没看。
                                 类名不和角色的共用：「隐藏思维链」只藏模型的思考，这行要留着 */}
-                            {msg.role === "user" && msg.userThought && (
-                                <div className="chat-msg-wrapper" data-role="user" data-user-thought-row="" style={{ marginBottom: -8 }}>
+                            {userThoughtsByRunStart.get(idx)?.map((thoughtMsg) => (
+                                <div key={thoughtMsg.id} className="chat-msg-wrapper" data-role="user" data-user-thought-row="" style={{ marginBottom: -8 }}>
                                     {/* 两边都留头像那一格：美化主题把自己的消息放左边时也和气泡对齐 */}
                                     <div className="w-[40px] shrink-0" />
                                     <button
                                         type="button"
                                         className="chat-user-thought-trigger"
-                                        onClick={(e) => { e.stopPropagation(); setUserThoughtSheet(msg); }}
-                                        aria-label={`查看${thoughtLabel}，${msg.userThoughtSeen ? "角色看了" : "角色没看"}`}
+                                        onClick={(e) => { e.stopPropagation(); setUserThoughtSheet(thoughtMsg); }}
+                                        aria-label={`查看${thoughtLabel}，${thoughtMsg.userThoughtSeen ? "角色看了" : "角色没看"}`}
                                     >
-                                        {msg.userThoughtSeen ? <Eye size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" /> : <EyeOff size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />}
+                                        {thoughtMsg.userThoughtSeen ? <Eye size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" /> : <EyeOff size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />}
                                         <span className="chat-reasoning-trigger-text">{thoughtLabel}</span>
                                         <ChevronRight size={14} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />
                                     </button>
                                     <div className="w-[40px] shrink-0" />
                                 </div>
-                            )}
+                            ))}
                             <div
                                 id={`message-${msg.id}`}
                                 className="chat-msg-wrapper"
