@@ -50,7 +50,7 @@ import { generateGroupChatCompletion, generateGroupOfflineChatCompletion, parseG
 import { appendChatOfflineTurn, deleteChatOfflineTurn, deleteChatOfflineTurnsFrom, extractThinkingTag, loadChatOfflineTurns, parseOfflineResponse, saveChatOfflineTurns, updateChatOfflineTurn, type ChatOfflineTurn } from "@/lib/chat-offline-storage";
 import { applyDisplayRegex, applyEditRegex } from "@/lib/llm-prompt-assembler";
 import { scheduleFollowUp, cancelFollowUp, cancelBackgroundGeneration, isBackgroundReplyGenerating } from "@/lib/follow-up-service";
-import { useKeyboardDismissAutoSend } from "@/components/chat/use-keyboard-dismiss-auto-send";
+import { lastSpeakerRole, useKeyboardDismissAutoSend } from "@/components/chat/use-keyboard-dismiss-auto-send";
 import { cancelBailoutKey } from "@/lib/push-bailout-client";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import type { UserIdentity } from "@/components/settings/user-identity";
@@ -4088,6 +4088,21 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         if (shouldRunDeclineReply) await triggerReply();
     };
 
+    // ✨ 空着点、最后一条又已经是角色说的：没有要回的东西，多半是手滑（美化主题里这颗键紧挨着表情），
+    // 而点一下就是一次请求。第一下只提示，3 秒内再点才发。
+    // 发完消息再点、或者围观 / 禁言时（只有这颗键能推进）照旧一下生效。
+    const continueConfirmUntilRef = useRef(0);
+    const handleTriggerButton = () => {
+        const canType = !session.isGroup || (!session.isSpectator && getGroupMuteRemainingMs(session, GROUP_SELF_KEY) <= 0);
+        if (canType && lastSpeakerRole(session.id) === "assistant" && Date.now() > continueConfirmUntilRef.current) {
+            continueConfirmUntilRef.current = Date.now() + 3000;
+            showChatToast(`再点一次让${session.isGroup ? "大家" : " TA "}继续说`, 3000);
+            return;
+        }
+        continueConfirmUntilRef.current = 0;
+        void triggerAIResponse();
+    };
+
     // 收起键盘（或关掉表情/加号面板）并安静 N 秒后自动触发回复，
     // 等价于替用户点一次「触发回复」。判定全在 hook 内部，配置关掉后与手动模式一致。
     useKeyboardDismissAutoSend(wrapperRef, {
@@ -6661,7 +6676,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 onSendText={handleSendText}
                 thoughtLabel={thoughtLabel}
                 onStopGeneration={clearStuckGeneration}
-                onTriggerAIResponse={triggerAIResponse}
+                onTriggerAIResponse={handleTriggerButton}
                 onSendSticker={(name, url) => { setShowStickerPanel(false); sendRichMessage("sticker", { label: name, stickerUrl: url }); }}
             />
             ))}
