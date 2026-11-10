@@ -77,6 +77,15 @@ a {
   display: none;
 }
 
+/* 开屏第一帧的底色（lib/splash-first-paint）：自定义开屏的图还没画上时露出来的是这个颜色，不再是一片浅色。
+   :has 让它只管开屏还在的这一段 */
+html[data-splash-boot]:has(.splash-root),
+html[data-splash-boot]:has(.splash-root) body,
+html[data-splash-boot] .app-root.splash-root,
+html[data-splash-boot] .splash-phone-screen {
+  background: var(--splash-boot-bg);
+}
+
 .splash-enter-button {
   position: absolute;
   left: 50%;

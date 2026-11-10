@@ -7,12 +7,13 @@
 import { useSyncExternalStore } from "react";
 import { kvGet, kvSet, kvSetAsync } from "./kv-db";
 import { DAY_SET_ID, lookSetAtBoot } from "./night-mode";
+import { SPLASH_BOOT_PICK_GLOBAL, SPLASH_LAST_PICK_KEY, SPLASH_MIRROR_KEY, SPLASH_TONE_KEY } from "./splash-first-paint";
 import { deleteThemeAsset, getThemeAssetDataUrl } from "./theme-storage";
 import { splashUploadedFamily, type SplashMotion, type SplashStageConfig, type SplashTextLayer } from "./splash-effects";
 
 const LIBRARY_KEY = "ai_phone_splash_library_v1";
-const MIRROR_KEY = "ai_phone_splash_library_mirror_v1";
-const LAST_PICK_KEY = "ai_phone_splash_last_pick_v1";
+const MIRROR_KEY = SPLASH_MIRROR_KEY;
+const LAST_PICK_KEY = SPLASH_LAST_PICK_KEY;
 /** 存了但还没确认写进 IndexedDB：这时候 App 被杀，下次以 localStorage 那份为准 */
 const PENDING_KEY = "ai_phone_splash_library_pending_v1";
 
@@ -366,9 +367,11 @@ export function splashBootPlan(): SplashBootPlan {
     if (bootPlan) return bootPlan;
     const library = loadSplashLibrary();
     const pool = splashPool(library, lookSetAtBoot());
+    // <head> 里的脚本已经挑过了，第一帧的底色就是按它铺的：照着放，不然底色和开屏对不上
+    const preset = (window as unknown as Record<string, unknown>)[SPLASH_BOOT_PICK_GLOBAL];
     const last = readLastPick();
     const choices = pool.length > 1 ? pool.filter((id) => id !== last) : pool;
-    const picked = choices[Math.floor(Math.random() * choices.length)];
+    const picked = typeof preset === "string" && pool.includes(preset) ? preset : choices[Math.floor(Math.random() * choices.length)];
     if (picked) writeLastPick(picked);
     const config = library.splashes.find((splash) => splash.id === picked);
     bootPlan = config
@@ -377,12 +380,44 @@ export function splashBootPlan(): SplashBootPlan {
     return bootPlan;
 }
 
+/** 原图的平均色存下来，下次开屏第一帧先铺这个颜色（splash-first-paint） */
+function rememberImageTone(assetId: string, image: HTMLImageElement): void {
+    try {
+        const size = 24;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.drawImage(image, 0, 0, size, size);
+        const data = ctx.getImageData(0, 0, size, size).data;
+        let r = 0, g = 0, b = 0;
+        for (let i = 0; i < data.length; i += 4) {
+            r += data[i];
+            g += data[i + 1];
+            b += data[i + 2];
+        }
+        const n = data.length / 4;
+        const tone = `rgb(${Math.round(r / n)}, ${Math.round(g / n)}, ${Math.round(b / n)})`;
+        const saved = JSON.parse(window.localStorage.getItem(SPLASH_TONE_KEY) || "{}") as Record<string, string>;
+        if (saved[assetId] === tone) return;
+        // 只留现在还在用的图
+        const inUse = new Set(loadSplashLibrary().splashes.map((splash) => splash.imageAssetId));
+        const next: Record<string, string> = { [assetId]: tone };
+        for (const [id, color] of Object.entries(saved)) if (inUse.has(id) && id !== assetId) next[id] = color;
+        window.localStorage.setItem(SPLASH_TONE_KEY, JSON.stringify(next));
+    } catch {
+        // 算不出来就还用背景色
+    }
+}
+
 async function readBootImage(assetId: string): Promise<string | null> {
     const url = await getThemeAssetDataUrl(assetId).catch(() => null);
     if (url) {
         const image = new Image();
         image.src = url;
         await image.decode().catch(() => undefined);
+        rememberImageTone(assetId, image);
     }
     return url;
 }
