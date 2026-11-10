@@ -120,18 +120,11 @@ export function hydrateKvDb(): Promise<void> {
     if (_hydratePromise) return _hydratePromise;
     _hydratePromise = (async () => {
         // Load existing IDB data into cache
-        // 分片灌入：键值多了以后一次性同步循环是一条长任务，会顶掉开机动画的帧。
-        // 每 300 条让出一次主线程，让渲染有机会插进来。
+        // 一口气灌完，中间不让出主线程。分片让出过（每 300 条停一下）：停的空档里别的代码能读到
+        // 只灌了一半的缓存，这时候写进去的键还会挡住后面真数据（下面跳过已有的键），换来的只是开机动画顺一点
         const all = await kvDb.entries.toArray();
-        const CHUNK_SIZE = 300;
-        for (let i = 0; i < all.length; i += CHUNK_SIZE) {
-            for (let j = i; j < Math.min(i + CHUNK_SIZE, all.length); j += 1) {
-                const { key, value } = all[j];
-                if (!_cache.has(key)) _cache.set(key, value);
-            }
-            if (i + CHUNK_SIZE < all.length) {
-                await new Promise((resolve) => setTimeout(resolve, 0));
-            }
+        for (const { key, value } of all) {
+            if (!_cache.has(key)) _cache.set(key, value);
         }
 
         // Migrate from localStorage
