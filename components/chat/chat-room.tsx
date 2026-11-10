@@ -6419,6 +6419,20 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                     return <span className="chat-msg-meta-name" data-name={metaName}>{metaName}</span>;
                                                 })()}
                                                 <span className="chat-msg-meta-time">{formatChatMetaTime(msg.createdAt)}</span>
+                                                {/* {{user}}思维链的小图标（和角色思维链同一个时钟）：跟着这一行默认看不见，
+                                                    给美化主题放在「名字 时间」后面，代替消息上方那一行（data-seen：all / some / none） */}
+                                                {userThoughtRun && (
+                                                    <button
+                                                        type="button"
+                                                        className="chat-user-thought-mark"
+                                                        data-seen={userThoughtRun.seen}
+                                                        onClick={(e) => { e.stopPropagation(); setUserThoughtSheet(userThoughtRun); }}
+                                                        aria-label={`查看${thoughtLabel}，${userThoughtSeenText(userThoughtRun.seen, "角色")}`}
+                                                        title={thoughtLabel}
+                                                    >
+                                                        <Clock size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />
+                                                    </button>
+                                                )}
                                             </div>
                                             {session.isGroup && msg.role !== "user" && (
                                                 <span className="chat-group-sender-name">{msg.senderName || ""}{renderGroupRoleBadge(msg.senderCharacterId)}</span>
