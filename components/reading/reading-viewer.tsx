@@ -129,7 +129,7 @@ function getParagraphLength(text: string): number {
 }
 
 /** 一次批注请求等多久没回应就自动停（每次重试各算各的） */
-const ANNOTATION_TIMEOUT_MS = 2 * 60 * 1000;
+const ANNOTATION_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** 静默重试：生成失败时按用户配置的次数重试，重试间隔逐渐加大，全部失败后抛出最后一次错误。
  *  signal 停了（点了「停止」或超时）就不再重试 */
@@ -1399,33 +1399,33 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
             // 「本次阅读体验内不重复」由 generatedBatchesRef（内存）保证。
             const existing = await loadExistingAnnotationsForItems(request.items);
 
-            const { annotations: newAnnotations, marks: newMarks } = await withAnnotationRetry(
-                async () => {
-                    // 接口一直不回的话最长能挂 8 分多钟：2 分钟没回应就自己停
-                    const timer = setTimeout(() => {
-                        run.reason = "timeout";
-                        run.controller.abort();
-                    }, ANNOTATION_TIMEOUT_MS);
-                    try {
-                        return await generateAnnotationBatch(
-                            book,
-                            request.title,
-                            request.items.map((item) => ({
-                                chapterIndex: item.chapterIndex,
-                                paragraphIndex: item.paragraphIndex,
-                                text: item.text,
-                            })),
-                            existing,
-                            companionId,
-                            { signal: run.controller.signal },
-                        );
-                    } finally {
-                        clearTimeout(timer);
-                    }
-                },
-                readingConfig.annotationRetryCount > 0 ? readingConfig.annotationRetryCount : 0,
-                run.controller.signal,
-            );
+            // 这一批连同重试一共等这么久就自己停：单次请求自己最长能挂 8 分多钟，按次计时的话重试起来就没头了
+            const timer = setTimeout(() => {
+                run.reason = "timeout";
+                run.controller.abort();
+            }, ANNOTATION_TIMEOUT_MS);
+            let batch: Awaited<ReturnType<typeof generateAnnotationBatch>>;
+            try {
+                batch = await withAnnotationRetry(
+                    () => generateAnnotationBatch(
+                        book,
+                        request.title,
+                        request.items.map((item) => ({
+                            chapterIndex: item.chapterIndex,
+                            paragraphIndex: item.paragraphIndex,
+                            text: item.text,
+                        })),
+                        existing,
+                        companionId,
+                        { signal: run.controller.signal },
+                    ),
+                    readingConfig.annotationRetryCount > 0 ? readingConfig.annotationRetryCount : 0,
+                    run.controller.signal,
+                );
+            } finally {
+                clearTimeout(timer);
+            }
+            const { annotations: newAnnotations, marks: newMarks } = batch;
 
             generatedBatchesRef.current.add(batchKey);
 
@@ -1455,7 +1455,7 @@ export function ReadingViewer({ book, appearanceKey, onBack }: Props) {
         } catch (err) {
             if (run.controller.signal.aborted) {
                 stoppedBatchesRef.current.add(batchKey);
-                if (run.reason === "timeout") setAnnotationError("批注 2 分钟没有回应，已自动停止");
+                if (run.reason === "timeout") setAnnotationError(`批注 ${ANNOTATION_TIMEOUT_MS / 60_000} 分钟没有回应，已自动停止`);
                 return false;
             }
             console.error("[Reading] Annotation error:", err);
