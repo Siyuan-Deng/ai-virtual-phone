@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useContext, useCallback } from "react";
 import { Plus, BookOpen, Trash2, Upload, Download, ChevronLeft, AlertCircle, Maximize2, Replace, Copy, Folder, FolderPlus, FolderInput, Pencil, Check, Pin } from "lucide-react";
 import {
+    ensureSettingsStorageHydrated,
     loadWorldBooks,
     saveWorldBooks,
     createWorldBook,
@@ -64,6 +65,18 @@ export function WorldBookManager({ isActive = true }: { isActive?: boolean } = {
         setFolders(loadWorldBookFolders());
         setRootOrder(loadWorldBookRootOrder());
         setIsLoaded(true);
+    }, []);
+
+    // 数据比页面晚读完、或者上次没读出来这次重读成功了：按读到的刷新，不然一直显示 0 本
+    useEffect(() => {
+        const refreshBooks = () => {
+            const loaded = loadWorldBooks();
+            setBooks(loaded);
+            setActiveBookId(current => current && loaded.some(book => book.id === current) ? current : loaded[0]?.id || "");
+        };
+        window.addEventListener("settings-worldbooks-updated", refreshBooks);
+        void ensureSettingsStorageHydrated();
+        return () => window.removeEventListener("settings-worldbooks-updated", refreshBooks);
     }, []);
 
     const persist = useCallback((newBooks: WorldBookConfig[]) => {

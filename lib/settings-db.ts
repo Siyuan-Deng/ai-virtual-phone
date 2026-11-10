@@ -37,6 +37,7 @@ let _presets: PresetConfig[] | null = null;
 let _worldBooks: WorldBookConfig[] | null = null;
 let _regexes: RegexConfig[] | null = null;
 let _hydrated = false;
+let _hydratePromise: Promise<void> | null = null;
 let _presetsWriteQueue: Promise<void> = Promise.resolve();
 
 function safeParse<T>(raw: string | null): T[] {
@@ -44,10 +45,37 @@ function safeParse<T>(raw: string | null): T[] {
 }
 
 // ── Hydration (must be called once at startup) ──
+// 读不出来不能当成「没有」：以前读失败就把三样都当空的、还标成读完了，界面上世界书正则全是 0，
+// 这时候存任何一条，写入会先清空整张表再写——真数据就没了。现在读失败保持「没读完」：
+// 没读完时的写入只追加不清空，下次再调用会重读；iOS 后台久了连接会断，当场重开数据库再试一次。
 
-export async function hydrateSettingsDb(): Promise<void> {
-    if (_hydrated || typeof window === "undefined") return;
+export function hydrateSettingsDb(): Promise<void> {
+    if (_hydrated || typeof window === "undefined") return Promise.resolve();
+    if (_hydratePromise) return _hydratePromise;
+    _hydratePromise = loadSettingsFromDb()
+        .catch(async (err) => {
+            console.warn("[SettingsDB] Load failed, reopening the database and retrying once:", err);
+            settingsDb.close();
+            await settingsDb.open();
+            await loadSettingsFromDb();
+        })
+        .then(() => {
+            // 读完之前就打开了的页面（世界书、正则、预设）按读到的刷新一遍
+            for (const name of ["settings-presets-updated", "settings-worldbooks-updated", "settings-regexes-updated"]) {
+                window.dispatchEvent(new CustomEvent(name));
+            }
+        })
+        .catch((err) => {
+            console.error("[SettingsDB] Load failed again; leaving storage unhydrated so nothing gets overwritten:", err);
+        })
+        .finally(() => {
+            _hydratePromise = null;
+        });
+    return _hydratePromise;
+}
 
+async function loadSettingsFromDb(): Promise<void> {
+    if (_hydrated) return;
     const alreadyMigrated = window.localStorage.getItem(LS_MIGRATED_FLAG);
 
     if (!alreadyMigrated) {
@@ -76,7 +104,9 @@ export async function hydrateSettingsDb(): Promise<void> {
                 return;
             }
         } catch (err) {
+            // 查不了库里有没有东西，就不能拿 localStorage（多半是空的）去迁移盖掉它
             console.warn("[SettingsDB] Pre-migration IndexedDB check failed:", err);
+            throw err;
         }
 
         // Migrate from localStorage → IndexedDB
@@ -119,9 +149,7 @@ export async function hydrateSettingsDb(): Promise<void> {
             console.log(`[SettingsDB] Loaded: ${presets.length} presets, ${worldBooks.length} worldBooks, ${regexes.length} regexes`);
         } catch (err) {
             console.error("[SettingsDB] Failed to load from IndexedDB:", err);
-            _presets = [];
-            _worldBooks = [];
-            _regexes = [];
+            throw err;
         }
     }
     _hydrated = true;

@@ -8,6 +8,7 @@ import {
     createRegexGroup,
     parseRegexFromJson,
     UNSUPPORTED_IMPORT_FORMAT,
+    ensureSettingsStorageHydrated,
 } from "@/lib/settings-storage";
 import type { RegexConfig, RegexRule } from "@/lib/settings-types";
 import {
@@ -267,6 +268,8 @@ export function RegexManager({ isActive = true }: { isActive?: boolean } = {}) {
         };
         window.addEventListener(CUSTOM_APPS_UPDATED_EVENT, refreshCustomApps);
         window.addEventListener("settings-regexes-updated", refreshRegexes);
+        // 上次没读出来的话这里会重读，读到了上面的事件就会刷新
+        void ensureSettingsStorageHydrated();
         return () => {
             window.removeEventListener(CUSTOM_APPS_UPDATED_EVENT, refreshCustomApps);
             window.removeEventListener("settings-regexes-updated", refreshRegexes);
