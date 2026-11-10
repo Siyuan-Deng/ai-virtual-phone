@@ -65,24 +65,6 @@ export type WidgetInstance = {
   config?: Record<string, unknown>;
 };
 
-/** 有字可改的小组件：整理桌面时左上角多一个 ✎ */
-export const WIDGET_TEXT_EDIT_TYPES: ReadonlySet<WidgetType> = new Set<WidgetType>([
-  "music",
-  "kawaiiMusicPlayer",
-  "loveNote",
-  "kaomoji",
-  "mySpace",
-  "socialPost",
-  "profileCard",
-  "coupleChat",
-  "moodPill",
-  "receiptTask",
-  "ticketStub",
-  "postCard",
-]);
-/** 点了 ✎：detail 是小组件 id，对应的小组件打开自己的改字弹窗 */
-export const WIDGET_EDIT_TEXT_EVENT = "widget-edit-text";
-
 export type WidgetCatalogEntry = {
   type: WidgetType;
   name: string;

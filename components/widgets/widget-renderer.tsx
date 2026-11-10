@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { WidgetInstance, WidgetType } from "@/lib/widget-types";
-import { WIDGET_SIZE_CELLS, WIDGET_CATALOG, WIDGET_EDIT_TEXT_EVENT } from "@/lib/widget-types";
+import { WIDGET_SIZE_CELLS, WIDGET_CATALOG } from "@/lib/widget-types";
 import { useMusicPlayerOptional } from "@/lib/music-context";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { ContentDialog } from "@/components/ui/modal";
@@ -564,18 +564,15 @@ function FreestyleFrame90Widget({ config, widgetId, onConfigChange, preview }: a
 }
 
 // ----------------------------------------------------
-//   改字：整理桌面时点小组件左上角的 ✎，桌面发事件，小组件打开自己的改字弹窗
+//   改字：点一下小组件就打开改字弹窗。点到换图、按钮这些自己有用处的地方不算；
+//   弹窗挂在小组件外面，但 React 的点击照样会冒泡回来，所以只认真的点在小组件里面的
 // ----------------------------------------------------
-function useWidgetTextEdit(widgetId: string, open: () => void) {
-  const openRef = useRef(open);
-  openRef.current = open;
-  useEffect(() => {
-    const handler = (event: Event) => {
-      if ((event as CustomEvent<string>).detail === widgetId) openRef.current();
-    };
-    window.addEventListener(WIDGET_EDIT_TEXT_EVENT, handler);
-    return () => window.removeEventListener(WIDGET_EDIT_TEXT_EVENT, handler);
-  }, [widgetId]);
+function openOnWidgetTap(open: () => void) {
+  return (e: React.MouseEvent<HTMLElement>) => {
+    const target = e.target as HTMLElement;
+    if (!e.currentTarget.contains(target) || target.closest("input, button")) return;
+    open();
+  };
 }
 
 const editFieldLabel = {
@@ -606,7 +603,6 @@ function useWidgetTextFields(
   }
 
   const [draft, setDraft] = useState<Record<string, string> | null>(null);
-  useWidgetTextEdit(widgetId, () => setDraft(text));
 
   function handleSave() {
     if (!draft) return;
@@ -649,7 +645,7 @@ function useWidgetTextFields(
     document.querySelector(".phone-shell") ?? document.body,
   ) : null;
 
-  return { text, dialog };
+  return { text, dialog, open: () => setDraft(text) };
 }
 
 // ----------------------------------------------------
@@ -685,10 +681,6 @@ function ProfileCardWidget({ config, widgetId, onConfigChange, preview }: any) {
     setShowEdit(true);
   }
 
-  useWidgetTextEdit(widgetId, () => {
-    setDraft({ name, handle, motto, location });
-    setShowEdit(true);
-  });
 
   function handleSave() {
     onConfigChange?.(widgetId, {
@@ -817,10 +809,6 @@ function MySpaceWidget({ config, widgetId, onConfigChange, preview }: any) {
     setShowEdit(true);
   }
 
-  useWidgetTextEdit(widgetId, () => {
-    setEditText(username);
-    setShowEdit(true);
-  });
 
   function handleSave() {
     onConfigChange?.(widgetId, { ...config, username: editText.trim() || "OLD ORANGE" });
@@ -915,10 +903,6 @@ function SocialPostWidget({ config, widgetId, onConfigChange, preview }: any) {
     setShowEdit(true);
   }
 
-  useWidgetTextEdit(widgetId, () => {
-    setEditText(username);
-    setShowEdit(true);
-  });
 
   function handleSave() {
     onConfigChange?.(widgetId, { ...config, username: editText.trim() || "YOUR NAME" });
@@ -1095,11 +1079,6 @@ function MusicWidget({
     setShowEdit(true);
   }
 
-  useWidgetTextEdit(widgetId, () => {
-    setEditTitle(customTitle);
-    setEditArtist(customArtist);
-    setShowEdit(true);
-  });
 
   function handleSave() {
     onConfigChange?.(widgetId, {
@@ -1371,7 +1350,6 @@ function LoveNoteWidget({
     setEditLabel(customLabel);
     setShowEdit(true);
   }
-  useWidgetTextEdit(widgetId, openEdit);
 
   function handleTextClick(e: React.MouseEvent) {
     e.stopPropagation();
@@ -1551,10 +1529,6 @@ function KaomojiWidget({
     setShowEdit(true);
   }
 
-  useWidgetTextEdit(widgetId, () => {
-    setEditGreeting(customGreeting);
-    setShowEdit(true);
-  });
 
   function handleSave() {
     onConfigChange?.(widgetId, { ...config, greeting: editGreeting.trim() });
@@ -1794,13 +1768,13 @@ const KAWAII_MUSIC_TEXT: WidgetTextEntry[] = [
 function KawaiiMusicPlayerWidget({ config, widgetId, onConfigChange, preview }: any) {
   const albumUrl = typeof config?.albumUrl === "string" ? config.albumUrl : undefined;
   const { triggerUpload, input } = useImageUpload(widgetId, "albumUrl", onConfigChange);
-  const { text, dialog } = useWidgetTextFields(widgetId, config, onConfigChange, "编辑播放器文字", KAWAII_MUSIC_TEXT);
+  const { text, dialog, open } = useWidgetTextFields(widgetId, config, onConfigChange, "编辑播放器文字", KAWAII_MUSIC_TEXT);
   return (
-    <div className="wg-kw-music-player">
+    <div className="wg-kw-music-player" onClick={preview ? undefined : openOnWidgetTap(open)}>
       {input}
       {dialog}
       <div className="kwmp-header">
-        <div className="kwmp-album-art" onClick={preview ? undefined : triggerUpload} role={preview ? undefined : "button"} tabIndex={preview ? undefined : 0}>
+        <div className="kwmp-album-art" onClick={preview ? undefined : (e) => { e.stopPropagation(); triggerUpload(); }} role={preview ? undefined : "button"} tabIndex={preview ? undefined : 0}>
           {albumUrl ? <img src={albumUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:"inherit"}} /> : <span className="wg-upload-hint" style={{fontSize: "calc(8px*var(--app-text-scale,1))"}}>换图</span>}
         </div>
         <div className="kwmp-info">
@@ -1950,7 +1924,7 @@ const COUPLE_CHAT_TEXT: WidgetTextEntry[] = [
 function CoupleChatWidget({ config, widgetId, onConfigChange, preview }: any) {
   const { triggerUpload: triggerLeft, input: leftInput } = useImageUpload(widgetId, "leftAvatar", onConfigChange);
   const { triggerUpload: triggerRight, input: rightInput } = useImageUpload(widgetId, "rightAvatar", onConfigChange);
-  const { text, dialog } = useWidgetTextFields(widgetId, config, onConfigChange, "编辑悄悄话", COUPLE_CHAT_TEXT);
+  const { text, dialog, open } = useWidgetTextFields(widgetId, config, onConfigChange, "编辑悄悄话", COUPLE_CHAT_TEXT);
 
   const leftAvatar = typeof config?.leftAvatar === "string" ? config.leftAvatar : "";
   const rightAvatar = typeof config?.rightAvatar === "string" ? config.rightAvatar : "";
@@ -1988,7 +1962,7 @@ function CoupleChatWidget({ config, widgetId, onConfigChange, preview }: any) {
   ];
 
   return (
-    <div className="wg-couple-chat">
+    <div className="wg-couple-chat" onClick={preview ? undefined : openOnWidgetTap(open)}>
       {leftInput}
       {rightInput}
       {dialog}
@@ -1997,7 +1971,7 @@ function CoupleChatWidget({ config, widgetId, onConfigChange, preview }: any) {
       <div className="wg-chat-row left">
         <div 
           className="wg-chat-avatar" 
-          onClick={preview ? undefined : triggerLeft}
+          onClick={preview ? undefined : (e) => { e.stopPropagation(); triggerLeft(); }}
           style={leftAvatar ? { backgroundImage: `url(${leftAvatar})` } : {}}
           title="点击更换左侧头像"
         >
@@ -2028,7 +2002,7 @@ function CoupleChatWidget({ config, widgetId, onConfigChange, preview }: any) {
         </div>
         <div 
           className="wg-chat-avatar" 
-          onClick={preview ? undefined : triggerRight}
+          onClick={preview ? undefined : (e) => { e.stopPropagation(); triggerRight(); }}
           style={rightAvatar ? { backgroundImage: `url(${rightAvatar})` } : {}}
           title="点击更换右侧头像"
         >
@@ -2056,10 +2030,6 @@ function MoodPillWidget({ config, widgetId, onConfigChange, preview }: any) {
     setShowEdit(true);
   }
 
-  useWidgetTextEdit(widgetId, () => {
-    setEditText(text);
-    setShowEdit(true);
-  });
 
   function handleSave() {
     onConfigChange?.(widgetId, { ...config, text: editText.trim() || defaultText });
@@ -2139,7 +2109,7 @@ const RECEIPT_TEXT: WidgetTextEntry[] = [
 ];
 
 function ReceiptWidget({ config, widgetId, onConfigChange, preview }: any) {
-  const { text, dialog } = useWidgetTextFields(widgetId, config, onConfigChange, "编辑小票文字", RECEIPT_TEXT);
+  const { text, dialog, open } = useWidgetTextFields(widgetId, config, onConfigChange, "编辑小票文字", RECEIPT_TEXT);
   const items = RECEIPT_DEFAULT_ITEMS.map((_, index) => ({
     title: text[`item${index}Title`],
     qty: text[`item${index}Qty`],
@@ -2147,7 +2117,7 @@ function ReceiptWidget({ config, widgetId, onConfigChange, preview }: any) {
   }));
 
   return (
-    <div className="wg-receipt-wrapper">
+    <div className="wg-receipt-wrapper" onClick={preview ? undefined : openOnWidgetTap(open)}>
       {dialog}
       <div className="wg-receipt-paper">
         <div className="wg-receipt-meta">
@@ -2197,10 +2167,10 @@ const TICKET_TEXT: WidgetTextEntry[] = [
 function TicketStubWidget({ config, widgetId, onConfigChange, preview }: any) {
   const posterUrl = typeof config?.posterUrl === "string" ? config.posterUrl : "";
   const { triggerUpload, input } = useImageUpload(widgetId, "posterUrl", onConfigChange);
-  const { text, dialog } = useWidgetTextFields(widgetId, config, onConfigChange, "编辑票根文字", TICKET_TEXT);
+  const { text, dialog, open } = useWidgetTextFields(widgetId, config, onConfigChange, "编辑票根文字", TICKET_TEXT);
 
   return (
-    <div className="wg-ticket-paper">
+    <div className="wg-ticket-paper" onClick={preview ? undefined : openOnWidgetTap(open)}>
       {input}
       {dialog}
       <div className="wg-ticket-main">
@@ -2229,7 +2199,7 @@ function TicketStubWidget({ config, widgetId, onConfigChange, preview }: any) {
           </div>
           <div 
             className="wg-ticket-poster"
-            onClick={preview ? undefined : triggerUpload}
+            onClick={preview ? undefined : (e) => { e.stopPropagation(); triggerUpload(); }}
             style={posterUrl ? { backgroundImage: `url(${posterUrl})`, border: 'none' } : {}}
             title="点击上传海报/票面图片"
           >
@@ -2257,10 +2227,6 @@ function PostcardWidget({ config, widgetId, onConfigChange, preview }: any) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
-  useWidgetTextEdit(widgetId, () => {
-    setEditText(msg);
-    setShowEdit(true);
-  });
 
   return (
     <div 
