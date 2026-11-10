@@ -16,6 +16,7 @@
 // 自动切换：按时间点（到几点开始用哪套，可以加好几个），或者跟着手机系统的深浅色（浅色 / 深色各用哪套）。
 // 自动开着时手动点了，按时间的到下一个时间点之前听手动的；跟系统的到系统下次切换之前听手动的。
 
+import { NIGHT_STATE_MIRROR_KEY } from "./splash-first-paint";
 import { useSyncExternalStore } from "react";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
 import { findScheme } from "./css-scheme-storage";
@@ -83,7 +84,8 @@ let revision = 0;
 
 /** 状态在 localStorage 另存一份：App 刚打开、IndexedDB 还没读出来时也知道用的哪套，
  *  不会先闪一下日间再变回去 */
-const STATE_MIRROR_KEY = "ai_phone_night_mode_mirror_v1";
+// 开屏第一帧的脚本也读这份（splash-first-paint），key 放在那边
+const STATE_MIRROR_KEY = NIGHT_STATE_MIRROR_KEY;
 let mirrorCache: string | null | undefined;
 
 function readMirror(): string | null {
