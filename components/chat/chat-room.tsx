@@ -321,6 +321,13 @@ type GenerationRunGuard = {
     isActive?: () => boolean;
 };
 
+/** 一串连发消息合起来的{{user}}思维链 */
+type UserThoughtRun = { text: string; seen: "all" | "some" | "none" };
+
+function userThoughtSeenText(seen: UserThoughtRun["seen"], who: string): string {
+    return `${who}${seen === "all" ? "看了这段" : seen === "none" ? "没看这段" : "看了其中一部分"}`;
+}
+
 type AssistantMessageDraft = Omit<ChatMessage, "id" | "createdAt" | "status"> & { status?: ChatMessage["status"] };
 
 type ManagedGenerationOptions = {
@@ -1437,7 +1444,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [expandedMonologueId, setExpandedThinkingId] = useState<string | null>(null);
     // 思维链底部弹窗：存当前查看的 reasoning 文本，null = 关闭
     const [reasoningSheetText, setReasoningSheetText] = useState<string | null>(null);
-    const [userThoughtSheet, setUserThoughtSheet] = useState<ChatMessage | null>(null);
+    const [userThoughtSheet, setUserThoughtSheet] = useState<UserThoughtRun | null>(null);
     // 思维链翻译（弹窗内点击翻译按钮生成，切换弹窗内容时重置）
     const [reasoningTranslation, setReasoningTranslation] = useState<string | null>(null);
     const [reasoningTranslating, setReasoningTranslating] = useState(false);
@@ -5443,10 +5450,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         return id;
     }, []);
 
-    // {{user}}思维链不管跟着哪条消息发的，都显示在这一串连发的最上面（下标 → 这一串里所有带思维链的消息）。
-    // 一串 = 中间没有夹别人说话或系统行的连续用户消息，隔再久也算；通话折叠的和看不见的消息不算断开
-    const userThoughtsByRunStart = useMemo(() => {
-        const result = new Map<number, RenderChatMessage[]>();
+    // {{user}}思维链不管跟着哪条消息发的，都显示在这一串连发的最上面，合成一段、每条消息的换一行。
+    // 一串 = 中间没有夹别人说话或系统行的连续用户消息，隔再久也算；通话折叠的和看不见的消息不算断开（下标 = 这一串第一条）
+    const userThoughtByRunStart = useMemo(() => {
+        const byStart = new Map<number, RenderChatMessage[]>();
         // 上一条看得见的消息是用户的话，记它那一串从哪开始；不是就 -1
         let openRunStart = -1;
         projectedMessages.forEach((msg, idx) => {
@@ -5454,11 +5461,20 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             const hidden = isHiddenChatFlowMessage(msg, getMessageDisplayContent(msg));
             if (msg.role === "user") {
                 const runStart = openRunStart >= 0 ? openRunStart : idx;
-                if (msg.userThought) result.set(runStart, [...(result.get(runStart) ?? []), msg]);
+                if (msg.userThought) byStart.set(runStart, [...(byStart.get(runStart) ?? []), msg]);
                 if (!hidden) openRunStart = runStart;
             } else if (!hidden) {
                 openRunStart = -1;
             }
+        });
+        const result = new Map<number, UserThoughtRun>();
+        byStart.forEach((msgs, runStart) => {
+            // 看不看是角色上一条回复定的，一串里通常一样；中途改过规则才会一半一半
+            const seenCount = msgs.filter(msg => msg.userThoughtSeen).length;
+            result.set(runStart, {
+                text: msgs.map(msg => msg.userThought).join("\n"),
+                seen: seenCount === msgs.length ? "all" : seenCount > 0 ? "some" : "none",
+            });
         });
         return result;
     }, [projectedMessages, voiceCallGroups.memberSet, getMessageDisplayContent]);
@@ -6151,6 +6167,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     if (voiceCallGroups.memberSet.has(idx)) return null;
 
                     const renderMsg = msg;
+                    const userThoughtRun = userThoughtByRunStart.get(idx);
                     const isSystemInstruction = isSystemInstructionMessage(renderMsg);
                     const bubbleDisplayContent = getMessageDisplayContent(renderMsg);
                     let prevVisibleMsg: RenderChatMessage | null = null;
@@ -6222,23 +6239,23 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                             )}
                             {/* {{user}}思维链：和角色的一样放在消息上面，眼睛表示角色看没看。
                                 类名不和角色的共用：「隐藏思维链」只藏模型的思考，这行要留着 */}
-                            {userThoughtsByRunStart.get(idx)?.map((thoughtMsg) => (
-                                <div key={thoughtMsg.id} className="chat-msg-wrapper" data-role="user" data-user-thought-row="" style={{ marginBottom: -8 }}>
+                            {userThoughtRun && (
+                                <div className="chat-msg-wrapper" data-role="user" data-user-thought-row="" style={{ marginBottom: -8 }}>
                                     {/* 两边都留头像那一格：美化主题把自己的消息放左边时也和气泡对齐 */}
                                     <div className="w-[40px] shrink-0" />
                                     <button
                                         type="button"
                                         className="chat-user-thought-trigger"
-                                        onClick={(e) => { e.stopPropagation(); setUserThoughtSheet(thoughtMsg); }}
-                                        aria-label={`查看${thoughtLabel}，${thoughtMsg.userThoughtSeen ? "角色看了" : "角色没看"}`}
+                                        onClick={(e) => { e.stopPropagation(); setUserThoughtSheet(userThoughtRun); }}
+                                        aria-label={`查看${thoughtLabel}，${userThoughtSeenText(userThoughtRun.seen, "角色")}`}
                                     >
-                                        {thoughtMsg.userThoughtSeen ? <Eye size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" /> : <EyeOff size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />}
+                                        {userThoughtRun.seen === "none" ? <EyeOff size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" /> : <Eye size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />}
                                         <span className="chat-reasoning-trigger-text">{thoughtLabel}</span>
                                         <ChevronRight size={14} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />
                                     </button>
                                     <div className="w-[40px] shrink-0" />
                                 </div>
-                            ))}
+                            )}
                             <div
                                 id={`message-${msg.id}`}
                                 className="chat-msg-wrapper"
@@ -7022,10 +7039,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         </div>
                         <div className="chat-reasoning-sheet-body">
                             <div className="chat-user-thought-state">
-                                {userThoughtSheet.userThoughtSeen ? <Eye size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" /> : <EyeOff size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />}
-                                {character?.name || "对方"}{userThoughtSheet.userThoughtSeen ? "看了这段" : "没看这段"}
+                                {userThoughtSheet.seen === "none" ? <EyeOff size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" /> : <Eye size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />}
+                                {userThoughtSeenText(userThoughtSheet.seen, character?.name || "对方")}
                             </div>
-                            <div className="whitespace-pre-wrap">{userThoughtSheet.userThought}</div>
+                            <div className="whitespace-pre-wrap">{userThoughtSheet.text}</div>
                         </div>
                     </div>
                 </div>
