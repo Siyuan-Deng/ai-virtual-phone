@@ -152,7 +152,7 @@ const THOUGHT_VISIBILITIES: ThoughtVisibility[] = [
     field: "hideUserThought",
     controlAttr: "data-chat-user-thought-visibility-control",
     hiddenAttr: "data-chat-user-thought-hidden-by-setting",
-    selector: "[data-user-thought-row]",
+    selector: "[data-user-thought-row], .chat-user-thought-mark",
     sheetSelector: ".chat-user-thought-sheet",
     desc: "只是不显示入口，角色决定看时照样能看到",
     label: (session) => `隐藏${userThoughtLabel(resolveUserIdentity(session.contactId, "chat")?.name)}`,
