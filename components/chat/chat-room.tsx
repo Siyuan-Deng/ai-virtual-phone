@@ -6419,18 +6419,23 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                     return <span className="chat-msg-meta-name" data-name={metaName}>{metaName}</span>;
                                                 })()}
                                                 <span className="chat-msg-meta-time">{formatChatMetaTime(msg.createdAt)}</span>
-                                                {/* {{user}}思维链的小图标（和角色思维链同一个时钟）：跟着这一行默认看不见，
-                                                    给美化主题放在「名字 时间」后面，代替消息上方那一行（data-seen：all / some / none） */}
+                                                {/* {{user}}思维链的小图标：跟着这一行默认看不见，给美化主题放在「名字 时间」后面，
+                                                    代替消息上方那一行（data-seen：all / some / none）。
+                                                    就用角色状态栏那颗图标（同一个类名、同一颗心），全局 CSS 把它换成什么这里也跟着变；
+                                                    角色看了（含看了一部分）= 状态栏展开时的样子 data-active，没看 = 收着的样子 */}
                                                 {userThoughtRun && (
                                                     <button
                                                         type="button"
-                                                        className="chat-user-thought-mark"
+                                                        className="chat-monologue-heart chat-user-thought-mark"
                                                         data-seen={userThoughtRun.seen}
+                                                        {...(userThoughtRun.seen !== "none" ? { "data-active": "" } : {})}
                                                         onClick={(e) => { e.stopPropagation(); setUserThoughtSheet(userThoughtRun); }}
                                                         aria-label={`查看${thoughtLabel}，${userThoughtSeenText(userThoughtRun.seen, "角色")}`}
                                                         title={thoughtLabel}
                                                     >
-                                                        <Clock size={13} strokeWidth={1.8} className="chat-reasoning-trigger-icon" />
+                                                        <svg viewBox="0 0 16 16" width="14" height="14" style={{display:"block"}}>
+                                                            <path d="M8 14s-6-4-6-8c0-2.5 1.5-4 3.5-4 1 0 2 .5 2.5 1.5C8.5 2.5 9.5 2 10.5 2 12.5 2 14 3.5 14 6c0 4-6 8-6 8z" fill="currentColor"/>
+                                                        </svg>
                                                     </button>
                                                 )}
                                             </div>
