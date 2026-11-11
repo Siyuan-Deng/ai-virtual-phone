@@ -32,9 +32,7 @@ import { clearMusicCloudSyncData } from "@/lib/chat-engine";
 import MusicCommentsPage from "./music-comments";
 import {
     loadMusicBg, saveMusicBg, clearMusicBg, fileToCompressedDataUrl, appBgStyle,
-    MUSIC_BG_EVENT, loadMusicFloatMode, saveMusicFloatMode,
-    type MusicBgConfig, type MusicPlayerBgMode,
-    type MusicFloatMode,
+    MUSIC_BG_EVENT, type MusicBgConfig, type MusicPlayerBgMode,
 } from "@/lib/music-bg";
 
 type Props = { onClose: () => void };
@@ -1543,7 +1541,6 @@ function MusicSettingsTab({ onBack, onSaved }: { onBack: () => void; onSaved: ()
     });
     const bgFileRef = useRef<HTMLInputElement>(null);
     const playerFileRef = useRef<HTMLInputElement>(null);
-    const [floatMode, setFloatMode] = useState<MusicFloatMode>(() => loadMusicFloatMode());
 
     const applyBg = (next: MusicBgConfig) => {
         const result = saveMusicBg(next);
@@ -1687,14 +1684,6 @@ function MusicSettingsTab({ onBack, onSaved }: { onBack: () => void; onSaved: ()
             </div>
 
             <div className="music-settings-body">
-                <div className="music-settings-section">
-                    <div className="music-settings-label">后台悬浮样式</div>
-                    <div className="music-settings-hint">退出音乐 App 后，选择播放控件的显示方式</div>
-                    <div className="music-settings-actions">
-                        <button type="button" className={`music-settings-btn${floatMode === "orb" ? " music-settings-btn-primary" : ""}`} aria-pressed={floatMode === "orb"} onClick={() => { saveMusicFloatMode("orb"); setFloatMode("orb"); }}>悬浮球</button>
-                        <button type="button" className={`music-settings-btn${floatMode === "island" ? " music-settings-btn-primary" : ""}`} aria-pressed={floatMode === "island"} onClick={() => { saveMusicFloatMode("island"); setFloatMode("island"); }}>灵动岛</button>
-                    </div>
-                </div>
                 <div className="music-settings-section">
                     <div className="music-settings-label">网易云 API 地址</div>
                     <div className="music-settings-hint">默认使用公共服务，也可以改成自己的 NeteaseCloudMusicApi 地址</div>

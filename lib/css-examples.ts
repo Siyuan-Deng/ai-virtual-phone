@@ -1917,8 +1917,8 @@ export const MUSIC_CSS_EXAMPLE = `/* ══════════════�
    ══════════════════════════════════════════ */
 
 /* ━━ 全部色彩变量 ━━
-   注：桌面悬浮球(.music-float)、顶部灵动岛(.music-island-root)
-   与聊天小窗(.mini-app-window)有自己的配色，不受这里的变量影响 */
+   注：桌面悬浮球(.music-float)与聊天小窗(.mini-app-window)
+   有自己的配色，不受这里的变量影响 */
 .music-app,
 .music-player {
   /* 页面底色 */

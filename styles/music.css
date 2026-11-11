@@ -1060,7 +1060,7 @@
 
 
 /* ══════════════════════════════════════════════════
-   Floating Widget — 悬浮球 + 灵动岛面板
+   Floating Widget — 悬浮球 + 播放面板
    ══════════════════════════════════════════════════ */
 
 .music-float {
@@ -1139,97 +1139,7 @@
 }
 
 /* ── 灵动岛面板 ── */
-.music-island-root {
-    position: absolute;
-    z-index: 56;
-    inset: 0;
-    pointer-events: none;
-}
 
-.music-status-island {
-    position: absolute;
-    top: max(8px, env(safe-area-inset-top));
-    left: 50%;
-    width: min(148px, 42%);
-    height: 36px;
-    transform: translateX(-50%);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 4px 10px;
-    box-sizing: border-box;
-    border: 1px solid rgba(255,255,255,.1);
-    border-radius: 999px;
-    background: #050506;
-    box-shadow: 0 2px 10px rgba(0,0,0,.28);
-    color: white;
-    cursor: pointer;
-    pointer-events: auto;
-    z-index: 2;
-    transition: width .32s cubic-bezier(.2,.8,.2,1), height .32s, border-radius .32s;
-}
-.music-status-island-cover { width: 28px; height: 28px; overflow: hidden; border-radius: 50%; flex: 0 0 auto; }
-.music-status-island-cover img { width: 100%; height: 100%; object-fit: cover; }
-.music-status-island-wave { display:flex; align-items:center; gap:2px; height:14px; }
-.music-status-island-wave span { width:2px; height:4px; border-radius:2px; background:#8ee8ad; }
-.music-island-root[data-playing] .music-status-island-wave span { animation: music-wave .65s ease-in-out infinite alternate; }
-.music-island-root[data-playing] .music-status-island-wave span:nth-child(2) { animation-delay:.18s; }
-.music-island-root[data-playing] .music-status-island-wave span:nth-child(3) { animation-delay:.36s; }
-.music-island-root[data-playing] .music-status-island-wave span:nth-child(4) { animation-delay:.1s; }
-.music-island-root[data-dismissing] .music-status-island { transform:translateX(-50%) scale(.75); opacity:0; }
-.music-island-scrim { position:absolute; inset:0; border:0; padding:0; background:transparent; pointer-events:auto; }
-.music-island-root .music-dynamic-island-panel {
-    position: absolute;
-    z-index: 1;
-    top: max(8px, env(safe-area-inset-top));
-    left: 50%;
-    width: min(300px, calc(100% - 28px));
-    height: 128px;
-    padding: 12px 14px 10px;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    overflow: hidden;
-    border-radius: 28px;
-    color: #f5f5f7;
-    background: #050506;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-    transform: translateX(-50%);
-    transform-origin: top center;
-    animation: music-dynamic-island-expand .34s cubic-bezier(.2,.82,.25,1);
-    pointer-events: auto;
-}
-
-.music-island-root[data-closing] .music-dynamic-island-panel {
-    animation: music-dynamic-island-retract .21s ease-in forwards;
-    pointer-events: none;
-}
-
-.music-dynamic-island-panel > * {
-    animation: music-dynamic-island-content-in .18s ease-out .1s both;
-}
-
-.music-island-root[data-closing] .music-dynamic-island-panel > * {
-    animation: none;
-    opacity: 0;
-}
-
-@keyframes music-dynamic-island-expand {
-    from { width: min(148px, 42%); height: 36px; border-radius: 999px; }
-    65% { border-radius: 34px; }
-    to { width: min(300px, calc(100% - 28px)); height: 128px; border-radius: 28px; }
-}
-
-@keyframes music-dynamic-island-retract {
-    from { width: min(300px, calc(100% - 28px)); height: 128px; border-radius: 28px; }
-    to { width: min(148px, 42%); height: 36px; border-radius: 999px; }
-}
-
-@keyframes music-dynamic-island-content-in {
-    from { opacity: 0; transform: translateY(-5px); }
-    to { opacity: 1; transform: translateY(0); }
-}
 @keyframes music-wave { to { height:13px; } }
 
 .music-float-island {
@@ -1472,22 +1382,6 @@
 }
 
 /* 灵动岛大卡片把关闭按钮放在标题行右侧；顶部小胶囊只保留封面和动态波形。 */
-.music-island-root .music-dynamic-island-top .music-float-close {
-    position: static;
-    flex: 0 0 auto;
-    transform: none;
-    margin: 0 0 0 4px;
-    padding: 5px 8px;
-    border-radius: 8px;
-    font-size: 10px;
-    background: rgba(255, 255, 255, 0.12);
-    box-shadow: none;
-    animation: none;
-}
-
-.music-island-root .music-dynamic-island-top .music-float-close:active {
-    transform: scale(0.94);
-}
 
 
 

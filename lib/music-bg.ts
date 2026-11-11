@@ -122,24 +122,3 @@ export function playerBgStyle(cfg: MusicBgConfig): BgInlineStyle | undefined {
     }
     return undefined;
 }
-
-// ── 后台悬浮样式：悬浮球 / 顶部灵动岛 ──
-
-export type MusicFloatMode = "orb" | "island";
-
-const MUSIC_FLOAT_MODE_KEY = "music-float-mode-v1";
-registerKvMigration(MUSIC_FLOAT_MODE_KEY);
-
-export const MUSIC_FLOAT_MODE_EVENT = "music-float-mode-change";
-
-export function loadMusicFloatMode(): MusicFloatMode {
-    if (typeof window === "undefined") return "orb";
-    try {
-        return kvGet(MUSIC_FLOAT_MODE_KEY) === "island" ? "island" : "orb";
-    } catch { return "orb"; }
-}
-
-export function saveMusicFloatMode(mode: MusicFloatMode): void {
-    try { kvSet(MUSIC_FLOAT_MODE_KEY, mode); } catch { /* ignore */ }
-    window.dispatchEvent(new CustomEvent(MUSIC_FLOAT_MODE_EVENT));
-}
