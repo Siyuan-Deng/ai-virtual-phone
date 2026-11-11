@@ -4,7 +4,8 @@
 //   DeepSeek / OpenRouter / Kimi / 硅基流动：各有自己的余额接口
 //   中转站（大多是 one-api、new-api 搭的）：认 OpenAI 早年的 /dashboard/billing 那两个接口，余额 = 额度上限 − 已用
 //   OpenAI 官方、Anthropic、Gemini、Groq、智谱、Together：没有给 API key 用的余额接口，查不了
-// 和聊天请求一样从浏览器直连。结果在内存里留一分钟，来回进出设置页不重复查。
+//   中转站填了系统访问令牌：查整个账户的余额（/api/user/self），不限额度的 key 也能看到真余额
+// 和聊天请求一样从浏览器直连，令牌不经过别的服务器。结果在内存里留一分钟，来回进出设置页不重复查。
 
 import { determineBaseUrl } from "./api-helpers";
 import { kvGet, kvSet, registerKvMigration } from "./kv-db";
@@ -94,6 +95,39 @@ async function queryOfficial(url: URL, apiKey: string): Promise<string | null | 
     return undefined;
 }
 
+/** 站点后台怎么显示额度就怎么显示：new-api 的 /api/status 里有换算比例和币种（人民币、美元、自定义、纯额度） */
+function formatQuota(quota: number, status: Record<string, unknown>): string {
+    const perUnit = num(status.quota_per_unit);
+    const usd = quota / (perUnit && perUnit > 0 ? perUnit : 500_000);
+    const type = typeof status.quota_display_type === "string" ? status.quota_display_type : status.display_in_currency === false ? "TOKENS" : "USD";
+    if (type === "TOKENS") return `${Math.round(quota).toLocaleString()} 额度`;
+    if (type === "CNY") {
+        const rate = num(status.usd_exchange_rate) ?? num(status.price);
+        if (rate) return money(usd * rate, "CNY");
+    }
+    if (type === "CUSTOM") {
+        const symbol = typeof status.custom_currency_symbol === "string" ? status.custom_currency_symbol : "";
+        return `${symbol}${(usd * (num(status.custom_currency_exchange_rate) ?? 1)).toFixed(2)}`;
+    }
+    return money(usd, "USD");
+}
+
+/** 系统访问令牌查整个账户：new-api 还要带上用户 ID */
+async function queryAccount(origin: string, token: string, userId: string): Promise<string | null> {
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+    if (userId) headers["New-Api-User"] = userId;
+    const response = await fetch(`${origin}/api/user/self`, { headers });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const body = await response.json() as { success?: boolean; data?: { quota?: unknown } };
+    const quota = body.success === false ? null : num(body.data?.quota);
+    if (quota === null) return null;
+    // 站点信息是公开的，不带令牌；拿不到就按 one-api 默认的美元算
+    const status = await fetch(`${origin}/api/status`)
+        .then(async (res) => (res.ok ? (await res.json() as { data?: Record<string, unknown> }).data : undefined))
+        .catch(() => undefined);
+    return formatQuota(quota, status ?? {});
+}
+
 /** 中转站：额度上限 − 已用（已用是美分） */
 async function queryRelay(baseUrl: string, apiKey: string): Promise<string | null> {
     const base = baseUrl.replace(/\/$/, "").replace(/\/(chat\/completions|completions|embeddings|messages|models)$/i, "");
@@ -111,7 +145,18 @@ async function queryRelay(baseUrl: string, apiKey: string): Promise<string | nul
 async function query(config: ApiConfig): Promise<ApiBalance> {
     const baseUrl = determineBaseUrl(config);
     const url = parseUrl(baseUrl);
-    if (!url || !config.apiKey || config.provider === "Google" || NO_BALANCE_HOSTS.has(url.host)) return { kind: "unsupported" };
+    if (!url) return { kind: "unsupported" };
+    // 填了令牌就只认它：令牌填错了要显示查不到，不悄悄退回去用 API Key 查
+    const accessToken = config.balanceAccessToken?.trim();
+    if (accessToken) {
+        try {
+            const account = await queryAccount(url.origin, accessToken, config.balanceUserId?.trim() ?? "");
+            return account ? { kind: "ok", text: account } : { kind: "failed" };
+        } catch {
+            return { kind: "failed" };
+        }
+    }
+    if (!config.apiKey || config.provider === "Google" || NO_BALANCE_HOSTS.has(url.host)) return { kind: "unsupported" };
     try {
         const official = await queryOfficial(url, config.apiKey);
         if (official !== undefined) return official ? { kind: "ok", text: official } : { kind: "failed" };
@@ -128,7 +173,7 @@ async function query(config: ApiConfig): Promise<ApiBalance> {
 }
 
 function signatureOf(config: ApiConfig): string {
-    return `${config.provider}|${config.baseUrl ?? ""}|${config.apiKey}`;
+    return `${config.provider}|${config.baseUrl ?? ""}|${config.apiKey}|${config.balanceAccessToken ?? ""}|${config.balanceUserId ?? ""}`;
 }
 
 /** 查一个配置的余额；一分钟内查过、地址和 key 都没变就直接用上次的 */

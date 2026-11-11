@@ -167,6 +167,10 @@ export type ApiConfig = {
     pinned?: boolean;
     /** 所在文件夹（lib/api-config-folders）；没有或文件夹已删就是未分类 */
     folderId?: string;
+    /** 中转站后台「个人设置」里生成的系统访问令牌：填了就查整个账户的余额（new-api / one-api），不填用 API Key 查 */
+    balanceAccessToken?: string;
+    /** new-api 要和令牌一起带上的用户 ID（后台个人设置里那个数字） */
+    balanceUserId?: string;
 };
 
 // --- VoiceApiConfig (migrated from voice-settings.tsx) ---

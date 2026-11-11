@@ -678,6 +678,29 @@ export function ApiSettings() {
                                             />
                                         </div>
 
+                                        {/* 中转站才有：填了系统访问令牌，卡片上显示的是整个账户的余额 */}
+                                        {config.baseUrl?.trim() && (
+                                            <div className="flex flex-col gap-1">
+                                                <label className="menu-desc ml-1">查余额用的系统访问令牌（可选）</label>
+                                                <Input
+                                                    type="password"
+                                                    value={config.balanceAccessToken || ""}
+                                                    onChange={(e) => updateConfig(config.id, { balanceAccessToken: e.target.value || undefined })}
+                                                    placeholder="中转站后台「个人设置」里生成"
+                                                />
+                                                <Input
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    value={config.balanceUserId || ""}
+                                                    onChange={(e) => updateConfig(config.id, { balanceUserId: e.target.value.replace(/\D/g, "") || undefined })}
+                                                    placeholder="用户 ID（个人设置里那个数字，new-api 要填）"
+                                                />
+                                                <span className="menu-desc ml-1 whitespace-normal leading-[1.45]">
+                                                    填了就显示整个账户的余额，不限额度的 Key 也看得到。只用来查余额，和 API Key 一样只存在这台手机上，查的时候手机直接发给中转站。
+                                                </span>
+                                            </div>
+                                        )}
+
                                         <div className="flex flex-col gap-1">
                                             <label className="menu-desc ml-1">默认模型 (Default Model)</label>
                                             <div className="flex gap-2">
