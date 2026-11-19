@@ -14,7 +14,7 @@ import { PhotoInputModal, TextPhotoModal, VoiceRecordModal, RedPacketModal, Loca
 import { EmojiPanel, StickerPanel } from "./emoji-panel";
 import { StickerSearchSuggest } from "./sticker-search-suggest";
 import { StateValuesPanel } from "./state-values-panel";
-import { generateChatCompletion, generateOfflineChatCompletion, flattenCompletionResult, ChatEngineError } from "@/lib/chat-engine";
+import { generateChatCompletion, generateOfflineChatCompletion, generateChatFanwaiCompletion, flattenCompletionResult, ChatEngineError } from "@/lib/chat-engine";
 import { formatOfflineTurnXml as formatOfflineTurnXmlShared, buildOfflinePromptHistory as buildOfflinePromptHistoryShared } from "@/lib/offline-prompt-builder";
 import { getStatusRegionConfig, isCustomStatusRegionActive } from "@/lib/chat-status-region";
 import { CustomStatusFrame } from "@/components/chat/custom-status-frame";
@@ -47,6 +47,8 @@ import { addChatMoment, type MomentChatLineDraft } from "@/lib/moment-storage";
 import { deleteWeixinCloudMessagesFromCloud, emitWeixinSyncToast, syncAllWeixinBotRuntimesToCloud } from "@/lib/weixin-cloud-sync";
 import { loadBindingConfig, loadPresets, loadRegexes, resolveBinding, resolveUserIdentity } from "@/lib/settings-storage";
 import { generateGroupChatCompletion, generateGroupOfflineChatCompletion, parseGroupChatResponse, buildEditableGroupRoundText } from "@/lib/group-chat-engine";
+import { chatFanwaiSessionId, formatChatFanwaiEpisode, isChatFanwaiInstruction, loadChatFanwaiTemplate, parseChatFanwaiOutput, saveChatFanwaiTemplate, type ChatFanwaiItem, type ChatFanwaiTemplate } from "@/lib/chat-fanwai";
+import { ChatFanwaiTemplateSheet } from "./chat-fanwai-template-sheet";
 import { appendChatOfflineTurn, deleteChatOfflineTurn, deleteChatOfflineTurnsFrom, extractThinkingTag, loadChatOfflineTurns, parseOfflineResponse, saveChatOfflineTurns, updateChatOfflineTurn, type ChatOfflineTurn } from "@/lib/chat-offline-storage";
 import { applyDisplayRegex, applyEditRegex } from "@/lib/llm-prompt-assembler";
 import { scheduleFollowUp, cancelFollowUp, cancelBackgroundGeneration, isBackgroundReplyGenerating } from "@/lib/follow-up-service";
@@ -116,6 +118,20 @@ function canCarryFoldedPanel(part: { content?: string; mediaType?: ChatMessage["
     if (part.mediaType === "poke" || part.mediaType === "group_admin_notice") return false;
     return !CALL_SYS_RE.test(part.content || "");
 }
+/** 聊天番外里的领取 / 退还：回应的是哪种款项、改成什么状态、灰字提示怎么写（和正篇的提示同一个说法） */
+const FANWAI_MONEY_ACTIONS: Record<string, {
+    target: "red_packet" | "transfer" | "payment_request";
+    status: "opened" | "received" | "paid" | "declined";
+    text: (actor: string, owner: string) => string;
+}> = {
+    accept_red_packet: { target: "red_packet", status: "opened", text: (a, o) => `${a}领取了${o}的红包` },
+    decline_red_packet: { target: "red_packet", status: "declined", text: (a, o) => `${a}退回了${o}的红包` },
+    accept_transfer: { target: "transfer", status: "received", text: (a, o) => `${a}领取了${o}的转账` },
+    decline_transfer: { target: "transfer", status: "declined", text: (a, o) => `${a}退回了${o}的转账` },
+    accept_payment_request: { target: "payment_request", status: "paid", text: (a, o) => `${a}接受了${o}的代付请求` },
+    decline_payment_request: { target: "payment_request", status: "declined", text: (a, o) => `${a}拒绝了${o}的代付请求` },
+};
+
 function uiRole(msg: ChatMessage): string {
     if (msg.role === "system" || ACTION_MEDIA_TYPES.has(msg.mediaType || "")) return "system";
     if (isCallSysMsg(msg)) return "system";
@@ -300,7 +316,6 @@ const CHAT_BG_COMPLETE = "chat-bg-complete";
 const CHAT_CAPTURE_TOAST = "正在生成图片...";
 const CHAT_COLLECT_TOAST = "正在收进片刻纪事...";
 const CHAT_OFFLINE_MODE_PREFIX = "chat-offline-mode:";
-const CHAT_THEATER_MODE_PREFIX = "chat-theater-mode:";
 const GENERATING_LOCK_TTL_MS = 5 * 60 * 1000;
 const OFFLINE_INITIAL_LOAD = 10;
 const OFFLINE_LOAD_MORE_COUNT = 10;
@@ -581,11 +596,11 @@ function MemoryWriteRequestCard({
     );
 }
 
-function SystemInstructionCard({ content }: { content: string }) {
+function SystemInstructionCard({ content, title }: { content: string; title?: string }) {
     return (
         <>
             <div className="chat-system-instruction-head">
-                <span className="chat-system-instruction-title">系统指令</span>
+                <span className="chat-system-instruction-title">{title ?? "系统指令"}</span>
             </div>
             <div className="chat-system-instruction-body">{content}</div>
         </>
@@ -660,7 +675,8 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     isSpectator: boolean;
     muteUntilMs: number;
     isGenerating: boolean;
-    theaterMode: boolean;
+    /** 番外界面：输入框写番外指令，表情、加号这些正篇的东西先收起来 */
+    fanwaiMode: boolean;
     enterToSendEnabled: boolean;
     quotingMessage: ChatMessage | null;
     showEmojiPanel: boolean;
@@ -673,8 +689,8 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     onToggleEmojiPanel: () => void;
     onToggleStickerPanel: () => void;
     onTogglePlusMenu: () => void;
-    onToggleTheaterMode: () => void;
-    onCloseTheaterMode: () => void;
+    onToggleFanwaiMode: () => void;
+    onOpenFanwaiTemplate: () => void;
     onOpenRichModal: (modal: RichModalKind) => void;
     onOpenCustomPlusAction: (action: RegisteredCustomAppChatPlusAction) => void;
     onStartVideoCall: () => void;
@@ -693,7 +709,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     isSpectator,
     muteUntilMs,
     isGenerating,
-    theaterMode,
+    fanwaiMode,
     enterToSendEnabled,
     quotingMessage,
     showEmojiPanel,
@@ -706,8 +722,8 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     onToggleEmojiPanel,
     onToggleStickerPanel,
     onTogglePlusMenu,
-    onToggleTheaterMode,
-    onCloseTheaterMode,
+    onToggleFanwaiMode,
+    onOpenFanwaiTemplate,
     onOpenRichModal,
     onOpenCustomPlusAction,
     onStartVideoCall,
@@ -787,14 +803,14 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
         () => (isGroup ? (stickerCharacterIds || []) : characterId ? [characterId] : []),
         [isGroup, stickerCharacterIds, characterId],
     );
-    const suggestEnabled = !inputLocked && !panelOpen && !suggestClosed && inputText.trim().length > 0;
+    const suggestEnabled = !fanwaiMode && !inputLocked && !panelOpen && !suggestClosed && inputText.trim().length > 0;
     const plusMenuItems = [
         // 「表情」：默认藏着（输入栏本来就有表情按钮）；给美化主题用，比如把表情收进「更多」
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" /></svg>, label: "表情", themeOnly: true, onClick: onToggleEmojiPanel },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>, label: "照片墙", onClick: () => onOpenRichModal("photo") },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="7" y1="8" x2="17" y2="8" /><line x1="7" y1="12" x2="14" y2="12" /><line x1="7" y1="16" x2="11" y2="16" /></svg>, label: "文字图片", onClick: () => onOpenRichModal("text_photo") },
         { icon: <AlertCircle size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "系统指令", onClick: () => onOpenRichModal("system_instruction") },
-        { icon: <Clapperboard size={22} strokeWidth={1.5} color={theaterMode ? "var(--c-icon-active)" : "var(--c-text)"} />, label: "番外指令模式", active: theaterMode, onClick: onToggleTheaterMode },
+        { icon: <Clapperboard size={22} strokeWidth={1.5} color={fanwaiMode ? "var(--c-icon-active)" : "var(--c-text)"} />, label: "番外指令模式", active: fanwaiMode, onClick: onToggleFanwaiMode },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>, label: "视频通话", onClick: onStartVideoCall },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /></svg>, label: "语音通话", onClick: onStartVoiceCall },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" /></svg>, label: "红包", onClick: () => onOpenRichModal("red_packet") },
@@ -818,19 +834,22 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     ];
 
     return (
-        <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input" data-chat-name={chatTitle || characterName} {...themeMenu.barProps}>
-            {theaterMode && (
-                <div className="chat-theater-mode-strip" role="status">
+        <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input" data-chat-name={chatTitle || characterName} {...themeMenu.barProps} {...(fanwaiMode ? { "data-fanwai": "" } : {})}>
+            {fanwaiMode && (
+                <div className="chat-theater-mode-strip chat-fanwai-strip" role="status">
                     <span className="chat-theater-mode-icon" aria-hidden="true">
                         <Clapperboard size={16} strokeWidth={1.8} />
                     </span>
-                    <span className="chat-theater-mode-title">番外指令模式</span>
+                    <span className="chat-theater-mode-title">番外</span>
+                    <button type="button" className="chat-fanwai-template-open" onClick={onOpenFanwaiTemplate}>
+                        番外模板
+                    </button>
                     <button
                         type="button"
                         className="chat-theater-mode-close"
-                        onClick={onCloseTheaterMode}
-                        aria-label="关闭番外指令模式"
-                        title="关闭番外指令模式"
+                        onClick={onToggleFanwaiMode}
+                        aria-label="回到正篇聊天"
+                        title="回到正篇聊天"
                     >
                         <X size={14} strokeWidth={2} />
                     </button>
@@ -912,10 +931,11 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                 // 平时的占位是一个空格：看不见，但能让美化主题用 :placeholder-shown 判断输入框是不是空的
                 placeholder={inputLocked
                     ? (isSpectator ? "围观中，你不在这个群里" : `禁言中，剩余${Math.ceil(muteRemainingMs / 60000)}分钟`)
-                    : (theaterMode ? "写下番外指令..." : " ")}
+                    : (fanwaiMode ? "写下番外指令..." : " ")}
             />
 
             <div className="chat-input-actions">
+                {!fanwaiMode && (<>
                 <button
                     onClick={onToggleOfflineMode}
                     className="ui-bare-btn text-[var(--c-text)] chat-offline-toggle"
@@ -936,6 +956,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                 <button onClick={onTogglePlusMenu} disabled={inputLocked} className="ui-bare-btn text-[var(--c-text)]" style={inputLocked ? { opacity: 0.35 } : undefined}>
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" /></svg>
                 </button>
+                </>)}
                 <button
                     onClick={handleSubmit}
                     disabled={!isGenerating && (inputLocked || !inputText.trim())}
@@ -953,7 +974,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
                     )}
                 </button>
-                {!isGenerating && (
+                {!isGenerating && !fanwaiMode && (
                     <button
                         className="ui-bare-btn text-[var(--c-text)]"
                         title={!inputLocked && inputText.trim() ? "发送输入框内容并触发回复" : "触发 AI 主动回复"}
@@ -982,6 +1003,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
             {/* 美化主题的「+」菜单开关，和「更多」里几项的快捷按钮（照片墙、文字图片、两个指令、{{user}}思维链）：
                 默认 display:none，不改变任何人的默认样子；给美化主题用（比如收进主题自己画的加号菜单），不用先点开「更多」 */}
             <div className="chat-input-quick-actions">
+                {!fanwaiMode && (<>
                 {themeMenu.toggle}
                 <button type="button" disabled={inputLocked} aria-label="照片墙" title="照片墙" onClick={() => onOpenRichModal("photo")}>
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>
@@ -992,10 +1014,11 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                 <button type="button" disabled={inputLocked} aria-label="系统指令" title="系统指令" onClick={() => onOpenRichModal("system_instruction")}>
                     <AlertCircle size={22} strokeWidth={1.5} aria-hidden="true" />
                 </button>
-                <button type="button" disabled={inputLocked} aria-label="番外指令模式" title="番外指令模式" onClick={onToggleTheaterMode} {...(theaterMode ? { "data-active": "" } : {})}>
+                </>)}
+                <button type="button" disabled={inputLocked} aria-label="番外指令模式" title="番外指令模式" onClick={onToggleFanwaiMode} {...(fanwaiMode ? { "data-active": "" } : {})}>
                     <Clapperboard size={22} strokeWidth={1.5} aria-hidden="true" />
                 </button>
-                {!isGroup && (
+                {!isGroup && !fanwaiMode && (
                     <button type="button" className="chat-input-thought-toggle" disabled={inputLocked} aria-label={thoughtLabel} title={thoughtLabel} onClick={toggleThought} {...(thoughtOpen ? { "data-active": "" } : {})}>
                         <ThoughtBubbleIcon size={22} />
                     </button>
@@ -1219,7 +1242,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     });
     const [isGenerating, setIsGenerating] = useState(false);
     const [offlineMode, setOfflineMode] = useState(false);
-    const [theaterMode, setTheaterMode] = useState(() => kvGet(CHAT_THEATER_MODE_PREFIX + session.id) === "1");
+    // 番外：单独一个界面（像线下），消息挂在 fanwai:会话id 下，气泡、长按菜单、多选收藏都和正篇共用。
+    // 不跨次保留：每次进聊天都从正篇开始
+    const [fanwaiMode, setFanwaiMode] = useState(false);
+    const fanwaiModeRef = useRef(false);
+    const [isFanwaiGenerating, setIsFanwaiGenerating] = useState(false);
+    const [fanwaiTemplateOpen, setFanwaiTemplateOpen] = useState(false);
+    const fanwaiRunRef = useRef<AbortController | null>(null);
     const [offlineTurns, setOfflineTurns] = useState<ChatOfflineTurn[]>([]);
     const [offlineVisibleCount, setOfflineVisibleCount] = useState(OFFLINE_INITIAL_LOAD);
     const [pendingOfflineUserText, setPendingOfflineUserText] = useState("");
@@ -1309,8 +1338,16 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         return () => window.removeEventListener(CUSTOM_APPS_UPDATED_EVENT, syncCustomPlusActions);
     }, []);
 
+    // 换了聊天就回到正篇；还在写的番外停掉
     useEffect(() => {
-        setTheaterMode(kvGet(CHAT_THEATER_MODE_PREFIX + session.id) === "1");
+        fanwaiModeRef.current = false;
+        setFanwaiMode(false);
+        setFanwaiTemplateOpen(false);
+        return () => {
+            fanwaiRunRef.current?.abort();
+            fanwaiRunRef.current = null;
+            setIsFanwaiGenerating(false);
+        };
     }, [session.id]);
 
     // 聊天插件：进入聊天广播 session.opened
@@ -1360,6 +1397,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
     useEffect(() => {
         const seen = screenFxSeenRef.current;
+        // 番外是写出来的故事：不放全屏特效，也不往正篇里补骰子旁白
+        if (fanwaiModeRef.current) {
+            for (const msg of messages) seen.add(msg.id);
+            return;
+        }
         let fired = activeScreenEffect !== null;
         for (const msg of messages) {
             if (seen.has(msg.id)) continue;
@@ -1501,7 +1543,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     useChatBottomReserve(
         wrapperRef,
         scrollRef,
-        `${session.id}:${offlineMode}:${isMultiSelectMode}:${showEmojiPanel}:${showStickerPanel}:${showPlusMenu}:${theaterMode}:${!!quotingMessage}`,
+        `${session.id}:${offlineMode}:${isMultiSelectMode}:${showEmojiPanel}:${showStickerPanel}:${showPlusMenu}:${fanwaiMode}:${!!quotingMessage}`,
     );
 
     const selectStoredMessageWindow = useCallback((allMsgs: ChatMessage[]) => {
@@ -1538,9 +1580,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         setMessages(nextMessages);
     }, [selectStoredMessageWindow]);
 
+    /** 列表里现在显示的是哪个会话的消息：番外界面是 fanwai:会话id */
+    const activeMessageSessionId = useCallback(
+        () => (fanwaiModeRef.current ? chatFanwaiSessionId(session.id) : session.id),
+        [session.id],
+    );
+
     const syncMessagesFromStorage = useCallback(() => {
-        applyStoredMessageWindow(loadChatMessages(session.id));
-    }, [applyStoredMessageWindow, session.id]);
+        applyStoredMessageWindow(loadChatMessages(activeMessageSessionId()));
+    }, [applyStoredMessageWindow, activeMessageSessionId]);
 
     const closeContextMenu = () => {
         setActiveMessageId(null);
@@ -1608,7 +1656,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     useEffect(() => {
         const flushCallback = (text: string) => {
             const sysMsg = pushChatMessage({ sessionId: session.id, role: "system", content: text });
-            setMessages(prev => [...prev, sysMsg]);
+            if (!fanwaiModeRef.current) setMessages(prev => [...prev, sysMsg]);
         };
         setChatActive(true, flushCallback);
         return () => { setChatActive(false); };
@@ -1626,6 +1674,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         const onMessageSaved = (e: Event) => {
             const detail = (e as CustomEvent<{ sessionId?: string; message?: ChatMessage }>).detail;
             if (detail?.sessionId !== session.id || !detail.message) return;
+            // 在番外界面：正篇的消息先不往列表里加，回正篇时整个重读
+            if (fanwaiModeRef.current) return;
             setMessages(prev => (
                 prev.some(item => item.id === detail.message!.id)
                     ? prev
@@ -2126,7 +2176,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 scrollTop: el.scrollTop,
             };
         }
-        const allMsgs = loadChatMessages(session.id);
+        const allMsgs = loadChatMessages(activeMessageSessionId());
         const currentCount = messages.length;
         const nextCount = Math.min(currentCount + LOAD_MORE_COUNT, allMsgs.length);
         if (nextCount <= currentCount) {
@@ -2147,14 +2197,19 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     // useLayoutEffect: runs synchronously after DOM mutation, before browser paint
     // Prevents flash of wrong scroll position, works reliably under transform: scale()
     const displayMessages = useMemo(() => {
-        return [...messages, ...transientMessages]
+        // 番外和正篇各显示各的：切换的那一下、或者后台消息到得晚，都不会串到另一边
+        const fanwaiSessionId = chatFanwaiSessionId(session.id);
+        const source = fanwaiMode
+            ? messages.filter(msg => msg.sessionId === fanwaiSessionId)
+            : [...messages.filter(msg => msg.sessionId !== fanwaiSessionId), ...transientMessages];
+        return source
             .map((msg, index) => ({ msg, index }))
             .sort((a, b) => {
                 const orderDiff = compareChatMessages(a.msg, b.msg);
                 return orderDiff !== 0 ? orderDiff : a.index - b.index;
             })
             .map(item => item.msg);
-    }, [messages, transientMessages]);
+    }, [messages, transientMessages, fanwaiMode, session.id]);
 
     useLayoutEffect(() => {
         const el = scrollRef.current;
@@ -3470,7 +3525,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     },
                     {
                         signal: generationRun.controller.signal,
-                        appTags: theaterMode ? ["group_chat"] : undefined,
+                        appTags: undefined,
                     },
                 );
                 if (!isCurrentGeneration()) return;
@@ -3483,7 +3538,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     session,
                     history,
                     {
-                        appTags: theaterMode ? ["chat"] : ["chat", "text"],
+                        appTags: ["chat", "text"],
                         signal: generationRun.controller.signal,
                     },
                     {
@@ -3948,7 +4003,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     },
                 }, {
                     signal: generationRun.controller.signal,
-                    appTags: theaterMode ? ["group_chat"] : undefined,
+                    appTags: undefined,
                 });
                 if (!isCurrentGeneration()) return;
                 if (streamedImageReplacementTasks.length > 0) {
@@ -3962,7 +4017,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 let pendingReasoning: string | undefined;
 
                 const result = await generateChatCompletion(session, latestMessages, {
-                    appTags: theaterMode ? ["chat"] : ["chat", "text"],
+                    appTags: ["chat", "text"],
                     signal: generationRun.controller.signal,
                 }, {
                     onReasoning: (t) => { pendingReasoning = t; },
@@ -4347,21 +4402,287 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         });
     };
 
-    const toggleTheaterMode = () => {
+    // ── 番外：进出界面、发指令、生成、重试 ──
+
+    const enterFanwaiMode = () => {
+        // 番外是 {{user}} 和一个角色的聊天记录，群聊还没有对应的写法
+        if (session.isGroup) {
+            showChatToast("群聊暂时还不能写番外");
+            return;
+        }
+        if (isGenerating) {
+            showChatToast("请先等待对方回复");
+            return;
+        }
         setShowPlusMenu(false);
         setShowEmojiPanel(false);
         setShowStickerPanel(false);
-        setTheaterMode(prev => {
-            const next = !prev;
-            if (next) kvSet(CHAT_THEATER_MODE_PREFIX + session.id, "1");
-            else kvRemove(CHAT_THEATER_MODE_PREFIX + session.id);
-            return next;
-        });
+        setRichModal(null);
+        setQuotingMessage(null);
+        closeContextMenu();
+        setIsMultiSelectMode(false);
+        setSelectedMessageIds(new Set());
+        fanwaiModeRef.current = true;
+        setFanwaiMode(true);
+        needsInitialScrollRef.current = true;
+        prevMsgCountRef.current = 0;
+        syncMessagesFromStorage();
     };
 
-    const closeTheaterMode = () => {
-        kvRemove(CHAT_THEATER_MODE_PREFIX + session.id);
-        setTheaterMode(false);
+    const exitFanwaiMode = () => {
+        setFanwaiTemplateOpen(false);
+        closeContextMenu();
+        setIsMultiSelectMode(false);
+        setSelectedMessageIds(new Set());
+        setEditingMessageId(null);
+        setEditingContent("");
+        fanwaiModeRef.current = false;
+        setFanwaiMode(false);
+        needsInitialScrollRef.current = true;
+        prevMsgCountRef.current = 0;
+        syncMessagesFromStorage();
+    };
+
+    const toggleFanwaiMode = () => {
+        if (fanwaiModeRef.current) exitFanwaiMode();
+        else enterFanwaiMode();
+    };
+
+    const stopFanwaiGeneration = () => {
+        fanwaiRunRef.current?.abort();
+    };
+
+    const fanwaiNames = () => ({ user: userIdentity?.name || "我", char: character?.name || "对方" });
+
+    /** 一篇一篇切开：每篇从一张番外指令卡开始，到下一张卡之前 */
+    const splitFanwaiEpisodes = (list: ChatMessage[]) => {
+        const episodes: Array<{ instruction: ChatMessage; messages: ChatMessage[] }> = [];
+        for (const msg of list) {
+            if (isChatFanwaiInstruction(msg)) episodes.push({ instruction: msg, messages: [] });
+            else if (episodes.length > 0) episodes[episodes.length - 1].messages.push(msg);
+        }
+        return episodes;
+    };
+
+    /** 番外里打电话、自动放歌这类动作不做（歌变成分享卡）。红包、转账、代付照模型写的来，领取、退还也照常改状态，只是不动钱包 */
+    const toFanwaiPart = (part: ParsedMessagePart): ParsedMessagePart | null => {
+        switch (part.mediaType) {
+            case "voice_call":
+            case "video_call":
+                return null;
+            case "music":
+                return { ...part, mediaType: "music_share" };
+            default:
+                return part;
+        }
+    };
+
+    const runFanwaiGeneration = async (instructionId: string, options?: { keep?: ChatMessage[] }) => {
+        const fanwaiSessionId = chatFanwaiSessionId(session.id);
+        const all = loadChatMessages(fanwaiSessionId);
+        const instructionIndex = all.findIndex(m => m.id === instructionId);
+        const instruction = all[instructionIndex];
+        if (!instruction?.fanwai) return;
+        const meta = instruction.fanwai;
+        const names = fanwaiNames();
+        const keep = options?.keep ?? [];
+        const previous = meta.includePrevious
+            ? splitFanwaiEpisodes(all.slice(0, instructionIndex))
+                .filter(episode => episode.messages.length > 0)
+                .map(episode => ({
+                    instruction: episode.instruction.content,
+                    chatlog: formatChatFanwaiEpisode(episode.instruction.fanwai?.title, episode.messages, names),
+                }))
+            : [];
+
+        const controller = new AbortController();
+        fanwaiRunRef.current?.abort();
+        fanwaiRunRef.current = controller;
+        setIsFanwaiGenerating(true);
+
+        // 时间：模型标了 time 就放在那一天的那个点（比上一条早就算第二天），没标就紧跟上一条，不出时间条
+        const responseBatchId = createResponseBatchId();
+        const lastKept = keep[keep.length - 1];
+        let started = !!lastKept;
+        let cursorMs = new Date(lastKept?.createdAt ?? instruction.createdAt).getTime();
+        const createdAtFor = (time?: string): string => {
+            if (time) {
+                const [hour, minute] = time.split(":").map(Number);
+                const base = new Date(cursorMs);
+                let at = new Date(base.getFullYear(), base.getMonth(), base.getDate(), hour, minute).getTime();
+                while (started && at < cursorMs) at += 24 * 60 * 60 * 1000;
+                cursorMs = at;
+            } else {
+                cursorMs += 20 * 1000;
+            }
+            started = true;
+            return new Date(cursorMs).toISOString();
+        };
+        let pushedItems = 0;
+        // 这一篇到目前为止的消息：领取 / 退还要找它回应的那个红包、转账
+        const episodeMessages: ChatMessage[] = [...keep];
+        const appendItems = (items: ChatFanwaiItem[]) => {
+            if (fanwaiRunRef.current !== controller) return;
+            const fresh: ChatMessage[] = [];
+            const patched = new Map<string, ChatMessage["mediaData"]>();
+            for (const item of items.slice(pushedItems)) {
+                const createdAt = createdAtFor(item.time);
+                const role = item.from === "user" ? "user" as const : "assistant" as const;
+                const parts = stripInvalidStickerParts(parseAIResponse(item.content, []).parts)
+                    .map(toFanwaiPart)
+                    .filter((part): part is ParsedMessagePart => !!part && (!!part.content.trim() || !!part.mediaType));
+                for (const part of parts) {
+                    const action = part.mediaType ? FANWAI_MONEY_ACTIONS[part.mediaType] : undefined;
+                    if (action) {
+                        // 对方发的、还没领的那一笔：改成领了 / 退了，不动钱包
+                        const target = [...episodeMessages].reverse().find(m => (
+                            m.role !== role && m.mediaType === action.target
+                            && (!m.mediaData?.status || m.mediaData.status === "pending")
+                        ));
+                        if (target) {
+                            const nextData = { ...target.mediaData, status: action.status };
+                            updateMessageMediaData(target.id, nextData);
+                            target.mediaData = nextData;
+                            patched.set(target.id, nextData);
+                        }
+                        const actor = role === "user" ? names.user : names.char;
+                        const owner = role === "user" ? names.char : names.user;
+                        const notice = pushChatMessage({
+                            sessionId: fanwaiSessionId,
+                            role,
+                            content: action.text(actor, owner),
+                            mediaType: part.mediaType,
+                            responseBatchId,
+                            createdAt,
+                        });
+                        fresh.push(notice);
+                        episodeMessages.push(notice);
+                        continue;
+                    }
+                    const saved = pushChatMessage({
+                        sessionId: fanwaiSessionId,
+                        role,
+                        content: part.content,
+                        ...(part.mediaType ? { mediaType: part.mediaType, mediaData: part.mediaData } : {}),
+                        responseBatchId,
+                        createdAt,
+                        ...(item.recalled ? { isRetracted: true } : {}),
+                    });
+                    fresh.push(saved);
+                    episodeMessages.push(saved);
+                }
+            }
+            pushedItems = items.length;
+            if ((fresh.length > 0 || patched.size > 0) && fanwaiModeRef.current) {
+                setMessages(prev => [
+                    ...prev.map(m => (patched.has(m.id) ? { ...m, mediaData: patched.get(m.id) } : m)),
+                    ...fresh.map(m => (patched.has(m.id) ? { ...m, mediaData: patched.get(m.id) } : m)),
+                ]);
+            }
+        };
+
+        let streamed = "";
+        try {
+            const result = await generateChatFanwaiCompletion(session, {
+                mainHistory: meta.includeMain ? loadChatMessages(session.id) : [],
+                previous,
+                instruction: instruction.content,
+                includePrevious: meta.includePrevious,
+                continueChatlog: keep.length > 0 ? formatChatFanwaiEpisode(meta.title, keep, names) : undefined,
+            }, {
+                signal: controller.signal,
+                // 边写边出：每写完一条 <msg> 就落一个气泡
+                onStreamDelta: (delta) => {
+                    if (fanwaiRunRef.current !== controller) return;
+                    streamed += delta;
+                    appendItems(parseChatFanwaiOutput(streamed, names, { partial: true }).items);
+                },
+            });
+            if (fanwaiRunRef.current !== controller) return;
+            const parsed = parseChatFanwaiOutput(result.rawText, names);
+            if (parsed.malformed && pushedItems > 0) {
+                // 流式时已经出了几条，最后整段又认不出来：保留已经出的，不再补一整段
+            } else {
+                appendItems(parsed.items);
+            }
+            if (parsed.items.length === 0 && pushedItems === 0) showChatToast("番外没有写出内容，可以长按指令卡重试");
+            const title = parsed.title || meta.title;
+            if (title && title !== meta.title) {
+                const nextMeta = { ...meta, title };
+                updateChatMessage(instruction.id, { fanwai: nextMeta });
+                if (fanwaiModeRef.current) setMessages(prev => prev.map(m => (m.id === instruction.id ? { ...m, fanwai: nextMeta } : m)));
+            }
+        } catch (error: any) {
+            if (fanwaiRunRef.current !== controller || isAbortLikeError(error)) return;
+            showChatToast(`番外生成失败: ${error?.message || String(error)}`, 3000);
+        } finally {
+            if (fanwaiRunRef.current === controller) {
+                fanwaiRunRef.current = null;
+                setIsFanwaiGenerating(false);
+            }
+        }
+    };
+
+    /** 发一条番外指令：输入框里写的直接当指令，模板面板拼好的也走这里；两个「带上」开关跟着模板存的走 */
+    const handleFanwaiSend = (text: string, template?: ChatFanwaiTemplate): boolean => {
+        const instruction = text.trim();
+        if (!instruction) return false;
+        if (isFanwaiGenerating) {
+            showChatToast("番外还在写，先停下再发");
+            return false;
+        }
+        const settings = template ?? loadChatFanwaiTemplate(session.id);
+        const card = pushChatMessage({
+            sessionId: chatFanwaiSessionId(session.id),
+            role: "system",
+            mediaType: "system_instruction",
+            content: instruction,
+            fanwai: { includeMain: settings.includeMain, includePrevious: settings.includePrevious },
+        });
+        if (fanwaiModeRef.current) setMessages(prev => [...prev, card]);
+        void runFanwaiGeneration(card.id);
+        return true;
+    };
+
+    /** 「重试以下」：点在指令卡上就整篇重写；点在中间某条上，前面的留着，从这条开始接着写。下面的（包括后面几篇）都删掉 */
+    const handleFanwaiRetry = (msgId: string) => {
+        setActiveMessageId(null);
+        if (isFanwaiGenerating) {
+            showChatToast("番外还在写，先停下再重试");
+            return;
+        }
+        const fanwaiSessionId = chatFanwaiSessionId(session.id);
+        const all = loadChatMessages(fanwaiSessionId);
+        const index = all.findIndex(m => m.id === msgId);
+        if (index < 0) return;
+        let instructionIndex = index;
+        while (instructionIndex >= 0 && !isChatFanwaiInstruction(all[instructionIndex])) instructionIndex -= 1;
+        if (instructionIndex < 0) {
+            showChatToast("找不到这段番外的指令");
+            return;
+        }
+        const fromIndex = index === instructionIndex ? instructionIndex + 1 : index;
+        const keep = all.slice(instructionIndex + 1, fromIndex);
+        const removeIds = all.slice(fromIndex).map(m => m.id);
+        if (removeIds.length > 0) deleteChatMessagesByIds(fanwaiSessionId, removeIds);
+        syncMessagesFromStorage();
+        void runFanwaiGeneration(all[instructionIndex].id, { keep });
+    };
+
+    /** 指令卡上的「删除整段」：卡和这一篇的消息一起删，不然这篇的消息会算到上一篇里 */
+    const handleFanwaiDeleteEpisode = (instructionId: string) => {
+        if (isFanwaiGenerating) {
+            showChatToast("番外还在写，先停下再删");
+            return;
+        }
+        const fanwaiSessionId = chatFanwaiSessionId(session.id);
+        const all = loadChatMessages(fanwaiSessionId);
+        const start = all.findIndex(m => m.id === instructionId);
+        if (start < 0) return;
+        let end = start + 1;
+        while (end < all.length && !isChatFanwaiInstruction(all[end])) end += 1;
+        deleteChatMessagesByIds(fanwaiSessionId, all.slice(start, end).map(m => m.id));
+        syncMessagesFromStorage();
     };
 
     const handleOfflineSend = (inputText: string): boolean => {
@@ -4638,7 +4959,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             return;
         }
 
-        const originalMessage = messages.find(m => m.id === editingMessageId) || loadChatMessages(session.id).find(m => m.id === editingMessageId);
+        const originalMessage = messages.find(m => m.id === editingMessageId) || loadChatMessages(activeMessageSessionId()).find(m => m.id === editingMessageId);
         const isEditingSystemInstruction = originalMessage ? isSystemInstructionMessage(originalMessage) : false;
         const placement = originalMessage?.role === "user" ? 1 : 2;
         const nextContent = isEditingSystemInstruction
@@ -5047,7 +5368,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             return;
         }
         setActiveMessageId(null);
-        const targetMsg = loadChatMessages(session.id).find(m => m.id === msgId);
+        const targetMsg = loadChatMessages(activeMessageSessionId()).find(m => m.id === msgId);
         if (!targetMsg) return;
         void deleteWeixinCloudBeforeLocal([targetMsg], () => {
             deleteChatMessage(msgId);
@@ -5065,11 +5386,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             return;
         }
         setActiveMessageId(null);
-        const storedMessages = loadChatMessages(session.id);
+        const messageSessionId = activeMessageSessionId();
+        const storedMessages = loadChatMessages(messageSessionId);
         const targetMsg = storedMessages.find(m => m.id === msgId);
         if (!targetMsg) return;
         const targetMessages = storedMessages.filter(m => (
-            m.sessionId === session.id && compareChatMessages(m, targetMsg) >= 0
+            m.sessionId === messageSessionId && compareChatMessages(m, targetMsg) >= 0
         ));
         void deleteWeixinCloudBeforeLocal(targetMessages, () => {
             deleteChatMessagesFrom(msgId);
@@ -5135,8 +5457,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         }
                         setActiveMessageId(null);
                     }} className="ctx-menu-btn">复制</button>
-                    <button onClick={() => (m.role === "assistant" ? handleEditResponseStart(m) : handleEditMessageStart(m))} className="ctx-menu-btn">
-                        {m.role === "assistant" && (m.rawResponseText || m.editableResponseText) ? "编辑回复" : "编辑"}
+                    {/* 番外的一段是双方的消息混在一起写出来的，没有「整段回复」可改：只改这一条 */}
+                    <button onClick={() => (m.role === "assistant" && !fanwaiMode ? handleEditResponseStart(m) : handleEditMessageStart(m))} className="ctx-menu-btn">
+                        {m.role === "assistant" && !fanwaiMode && (m.rawResponseText || m.editableResponseText) ? "编辑回复" : "编辑"}
                     </button>
                     {m.mediaType === "audio" && m.mediaData?.label && (
                         <button onClick={() => { setVoiceTextIds(prev => { const next = new Set(prev); if (next.has(m.id)) next.delete(m.id); else next.add(m.id); return next; }); setActiveMessageId(null); }} className="ctx-menu-btn">转文字</button>
@@ -5144,12 +5467,14 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     {m.role === "user" && (
                         <button onClick={() => handleRetractMessage(storedMessageId)} className="ctx-menu-btn">撤回消息</button>
                     )}
-                    {m.role === "assistant" && (
-                        <button onClick={() => handleRetry(storedMessageId)} className="ctx-menu-btn ctx-menu-btn-danger">重试以下</button>
+                    {(m.role === "assistant" || fanwaiMode) && (
+                        <button onClick={() => (fanwaiMode ? handleFanwaiRetry(storedMessageId) : handleRetry(storedMessageId))} className="ctx-menu-btn ctx-menu-btn-danger">重试以下</button>
                     )}
                 </div>
                 <div className="flex">
-                    <button onClick={() => { setQuotingMessage(m); setActiveMessageId(null); }} className="ctx-menu-btn">引用</button>
+                    {!fanwaiMode && (
+                        <button onClick={() => { setQuotingMessage(m); setActiveMessageId(null); }} className="ctx-menu-btn">引用</button>
+                    )}
                     {options?.allowMultiSelect !== false && (
                         <button onClick={() => startMultiSelectFromMessage(m)} className="ctx-menu-btn">多选</button>
                     )}
@@ -5235,13 +5560,32 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         }}
                         className="ctx-menu-btn"
                     >编辑</button>
-                    <button
-                        onClick={() => {
-                            handleDeleteMessage(storedMessageId);
-                            closeContextMenu();
-                        }}
-                        className="ctx-menu-btn ctx-menu-btn-danger"
-                    >删除</button>
+                    {fanwaiMode && isChatFanwaiInstruction(msg) ? (
+                        <>
+                            <button
+                                onClick={() => {
+                                    closeContextMenu();
+                                    handleFanwaiRetry(storedMessageId);
+                                }}
+                                className="ctx-menu-btn ctx-menu-btn-danger"
+                            >重试以下</button>
+                            <button
+                                onClick={() => {
+                                    closeContextMenu();
+                                    handleFanwaiDeleteEpisode(storedMessageId);
+                                }}
+                                className="ctx-menu-btn ctx-menu-btn-danger"
+                            >删除整段</button>
+                        </>
+                    ) : (
+                        <button
+                            onClick={() => {
+                                handleDeleteMessage(storedMessageId);
+                                closeContextMenu();
+                            }}
+                            className="ctx-menu-btn ctx-menu-btn-danger"
+                        >删除</button>
+                    )}
                     <div data-menu-triangle className="ctx-menu-triangle absolute -top-[6px] w-0 h-0" />
                 </div>
             );
@@ -5496,7 +5840,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
     const multiDeleteTargetIds = useMemo(() => {
         if (selectedMessageIds.size === 0) return [];
-        const storedMessages = loadChatMessages(session.id);
+        const storedMessages = loadChatMessages(activeMessageSessionId());
         const storedIndexById = new Map(storedMessages.map((msg, index) => [msg.id, index]));
         const targets = new Set<string>();
 
@@ -5684,10 +6028,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
     const handleMultiDeleteConfirmed = () => {
         const targetIds = new Set(multiDeleteTargetIds);
-        const targetMessages = loadChatMessages(session.id).filter(msg => targetIds.has(msg.id));
+        const messageSessionId = activeMessageSessionId();
+        const targetMessages = loadChatMessages(messageSessionId).filter(msg => targetIds.has(msg.id));
         setShowConfirmMultiDelete(false);
         void deleteWeixinCloudBeforeLocal(targetMessages, () => {
-            const deletedCount = deleteChatMessagesByIds(session.id, multiDeleteTargetIds);
+            const deletedCount = deleteChatMessagesByIds(messageSessionId, multiDeleteTargetIds);
             syncMessagesFromStorage();
             cancelMultiSelect();
             if (deletedCount > 0) showChatToast(`已删除 ${deletedCount} 条历史`);
@@ -5805,17 +6150,17 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             <header className="page-header chat-room-main-pane" data-ui="header">
                 <div className="page-header-safe-area" />
                 <div className="page-header-content">
-                    <button className="page-back-btn" type="button" onClick={onBack} aria-label="返回">
+                    <button className="page-back-btn" type="button" onClick={fanwaiMode ? exitFanwaiMode : onBack} aria-label="返回">
                         <ChevronLeft size={24} strokeWidth={1.5} />
                     </button>
                     <span className="page-title" style={{ position: 'relative' }}>
-                        {offlineMode ? "线下 · " : ""}
+                        {offlineMode ? "线下 · " : fanwaiMode ? "番外 · " : ""}
                         {session.isGroup
                             ? `${session.groupName || "群聊"}(${(session.participantIds?.length || 0) + (session.isSpectator ? 0 : 1)})`
                             : (session.alias || character?.name || `User_${session.contactId.slice(-4)}`)}
-                        {(isGenerating || isOfflineGenerating) && (
+                        {(fanwaiMode ? isFanwaiGenerating : (isGenerating || isOfflineGenerating)) && (
                             <span className="chat-typing-indicator">
-                                {offlineMode ? "线下生成中" : "对方正在输入"}<span className="chat-typing-dots"><i/><i/><i/></span>
+                                {offlineMode ? "线下生成中" : fanwaiMode ? "番外生成中" : "对方正在输入"}<span className="chat-typing-dots"><i/><i/><i/></span>
                             </span>
                         )}
                     </span>
@@ -6179,7 +6524,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         prevVisibleMsg = candidate;
                         break;
                     }
-                    const showTime = shouldShowTimestamp(msg.createdAt, prevVisibleMsg?.createdAt ?? null);
+                    // 番外指令卡后面第一条总是标时间：故事里的时间和发指令的时间没关系
+                    const showTime = shouldShowTimestamp(msg.createdAt, prevVisibleMsg?.createdAt ?? null)
+                        || (fanwaiMode && !!prevVisibleMsg?.fanwai && uiRole(msg) !== "system");
                     const isConsecutive = prevVisibleMsg && !showTime && uiRole(prevVisibleMsg) === uiRole(msg) && uiRole(msg) !== "system"
                         && (!session.isGroup || prevVisibleMsg.senderCharacterId === msg.senderCharacterId);
                     // Hide bubbles with no visible content (empty text, stripped music tags, etc.)
@@ -6294,9 +6641,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                     : ""
                                             }`}
                                         {...(activeMessageId === msg.id ? { "data-active": "" } : {})}
+                                        {...(msg.fanwai ? { "data-fanwai": "" } : {})}
                                     >
                                         {isSystemInstruction ? (
-                                            <SystemInstructionCard content={msg.content} />
+                                            <SystemInstructionCard
+                                                content={msg.content}
+                                                title={msg.fanwai ? (msg.fanwai.title ? `番外 · ${msg.fanwai.title}` : "番外") : undefined}
+                                            />
                                         ) : msg.mediaType === "memory_write_request" ? (
                                             <MemoryWriteRequestCard
                                                 msg={msg}
@@ -6709,8 +7060,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 	                isGroup={!!session.isGroup}
 	                isSpectator={!!session.isGroup && !!session.isSpectator}
 	                muteUntilMs={session.isGroup && session.groupMutes?.[GROUP_SELF_KEY] ? new Date(session.groupMutes[GROUP_SELF_KEY]).getTime() : 0}
-	                isGenerating={isGenerating}
-	                theaterMode={theaterMode}
+	                isGenerating={fanwaiMode ? isFanwaiGenerating : isGenerating}
+	                fanwaiMode={fanwaiMode}
 	                enterToSendEnabled={enterToSendEnabled}
 	                quotingMessage={quotingMessage}
                 showEmojiPanel={showEmojiPanel}
@@ -6723,15 +7074,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 	                onToggleEmojiPanel={() => { setShowEmojiPanel(!showEmojiPanel); setShowStickerPanel(false); setShowPlusMenu(false); }}
 	                onToggleStickerPanel={() => { setShowStickerPanel(!showStickerPanel); setShowEmojiPanel(false); setShowPlusMenu(false); }}
 	                onTogglePlusMenu={() => { setShowPlusMenu(!showPlusMenu); setShowEmojiPanel(false); setShowStickerPanel(false); }}
-	                onToggleTheaterMode={toggleTheaterMode}
-	                onCloseTheaterMode={closeTheaterMode}
+	                onToggleFanwaiMode={toggleFanwaiMode}
+	                onOpenFanwaiTemplate={() => setFanwaiTemplateOpen(true)}
 	                onOpenRichModal={(modal) => { setShowPlusMenu(false); setRichModal(modal); }}
                 onOpenCustomPlusAction={handleOpenCustomPlusAction}
                 onStartVideoCall={() => { cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVideoCall(true); }}
                 onStartVoiceCall={() => { cancelFollowUp(session.id); setShowPlusMenu(false); setCallInitiator("user"); setShowVoiceCall(true); }}
-                onSendText={handleSendText}
+                onSendText={fanwaiMode ? (text) => handleFanwaiSend(text) : handleSendText}
                 thoughtLabel={thoughtLabel}
-                onStopGeneration={clearStuckGeneration}
+                onStopGeneration={fanwaiMode ? stopFanwaiGeneration : clearStuckGeneration}
                 onTriggerAIResponse={handleTriggerButton}
                 onSendSticker={(name, url) => { setShowStickerPanel(false); sendRichMessage("sticker", { label: name, stickerUrl: url }); }}
             />
@@ -6958,6 +7309,18 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     onClose={() => setRichModal(null)}
                 />
             )}
+            {fanwaiTemplateOpen && (
+                <ChatFanwaiTemplateSheet
+                    initial={loadChatFanwaiTemplate(session.id)}
+                    sending={isFanwaiGenerating}
+                    onSave={(template) => saveChatFanwaiTemplate(session.id, template)}
+                    onSend={(instruction, template) => {
+                        saveChatFanwaiTemplate(session.id, template);
+                        if (handleFanwaiSend(instruction, template)) setFanwaiTemplateOpen(false);
+                    }}
+                    onClose={() => setFanwaiTemplateOpen(false)}
+                />
+            )}
             {richModal === "system_instruction" && (
                 <SystemInstructionModal
                     onSend={(text) => {
@@ -7073,8 +7436,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     msg={mediaDetailMsg}
                     userName={userIdentity?.name || "你"}
                     groupSize={session.isGroup ? (session.participantIds?.length || 0) + (session.isSpectator ? 0 : 1) : undefined}
+                    walletless={fanwaiMode}
                     onAccept={(updatedMsg, sysText, actionType) => {
-                        const walletUpdatedMsg = updatedMsg.role === "assistant"
+                        // 番外里领了也不进钱包，领取提示记在番外里
+                        const walletUpdatedMsg = updatedMsg.role === "assistant" && !fanwaiModeRef.current
                             ? creditIncomingMoneyMessage(updatedMsg, actionType)
                             : updatedMsg;
                         setMessages(prev => prev.map(m => m.id === walletUpdatedMsg.id ? walletUpdatedMsg : m));
@@ -7082,7 +7447,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         const claimerN = userIdentity?.name || "你";
                         const ownerN = walletUpdatedMsg.senderName || (walletUpdatedMsg.role === "assistant" ? (character?.name || "对方") : claimerN);
                         const sysMsg = pushChatMessage({
-                            sessionId: session.id, role: "user", content: sysText,
+                            sessionId: activeMessageSessionId(), role: "user", content: sysText,
                             mediaType: actionType as ChatMessage["mediaType"],
                             ...(session.isGroup ? { mediaData: { claimer: claimerN, owner: ownerN }, senderName: claimerN } : {}),
                         });

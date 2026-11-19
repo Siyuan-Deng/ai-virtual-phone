@@ -110,6 +110,13 @@ export type ChatMessage = {
     isRetracted?: boolean;
     userThought?: string; // {{user}}思维链：这条消息没说出口的想法
     userThoughtSeen?: boolean; // 角色看没看；没看的不进提示词和记忆
+    /** 聊天番外的指令卡（mediaType 是 system_instruction）：这一篇的标题、开关和模型原文 */
+    fanwai?: {
+        title?: string;
+        includeMain: boolean;
+        includePrevious: boolean;
+        raw?: string;
+    };
     mediaType?: "image" | "audio" | "video"
         | "red_packet" | "transfer" | "location"
         | "poke" | "sticker" | "quote" | "dice"
@@ -1110,12 +1117,18 @@ export function createGroupSession(groupName: string, participantIds: string[], 
     return newSession;
 }
 
+/** 聊天番外的消息挂在「fanwai:正篇会话id」下：不在会话列表里，正篇删掉时一起删 */
+export const CHAT_FANWAI_SESSION_PREFIX = "fanwai:";
+
 export function deleteChatSession(sessionId: string) {
     const sessions = loadChatSessions();
     const filtered = sessions.filter(s => s.id !== sessionId);
     saveChatSessions(filtered);
     dbDeleteSession(sessionId);
     clearChatSessionMessages(sessionId); // Cleanup associated messages
+    if (_messagesCache.some(m => m.sessionId === CHAT_FANWAI_SESSION_PREFIX + sessionId)) {
+        clearChatSessionMessages(CHAT_FANWAI_SESSION_PREFIX + sessionId);
+    }
 }
 
 // 把一个会话的全部消息挪到另一个会话名下（重复会话合并用）。
@@ -1123,7 +1136,15 @@ export function deleteChatSession(sessionId: string) {
 export function reassignChatSessionMessages(fromSessionId: string, toSessionId: string): number {
     if (fromSessionId === toSessionId) return 0;
     const changed: ChatMessage[] = [];
+    const fromFanwai = CHAT_FANWAI_SESSION_PREFIX + fromSessionId;
+    const toFanwai = CHAT_FANWAI_SESSION_PREFIX + toSessionId;
     _messagesCache = _messagesCache.map(message => {
+        // 番外跟着正篇一起挪
+        if (message.sessionId === fromFanwai) {
+            const updated = { ...message, sessionId: toFanwai };
+            changed.push(updated);
+            return updated;
+        }
         if (message.sessionId !== fromSessionId) return message;
         const updated = { ...message, sessionId: toSessionId };
         changed.push(updated);
@@ -1847,7 +1868,7 @@ export async function persistMessageVoiceAudio(
 
 export function updateChatMessage(
     messageId: string,
-    patch: Partial<Pick<ChatMessage, "content" | "mediaType" | "mediaUrl" | "mediaData">>,
+    patch: Partial<Pick<ChatMessage, "content" | "mediaType" | "mediaUrl" | "mediaData" | "fanwai">>,
 ): ChatMessage | null {
     const idx = _messagesCache.findIndex(m => m.id === messageId);
     if (idx === -1) return null;

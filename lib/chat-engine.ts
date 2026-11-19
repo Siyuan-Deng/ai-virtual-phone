@@ -89,6 +89,7 @@ import {
     resolveBilingualPrompt,
 } from "./bilingual-prompt-defaults";
 import { parseOfflineResponse, extractThinkingTag, type ParsedOfflineResponse } from "./chat-offline-storage";
+import { buildChatFanwaiRequestText, CHAT_FANWAI_CONTINUE_TEXT } from "./chat-fanwai";
 import { throwIfAborted } from "./abort-utils";
 import { armShortcutContinuation, SHORTCUT_VISION_OFF_NOTE, type ShortcutContinuationHandle, type ShortcutContinuationStyle } from "./shortcut-continuation-client";
 
@@ -2178,6 +2179,80 @@ export async function generateOfflineChatCompletion(
         presetName: preset?.name || "默认预设",
         reasoning: reasoning || undefined,
     };
+}
+
+/** 聊天番外：正篇的提示词（人设、世界书、记忆、预设照正篇的绑定走）+ 正篇最近的聊天（可关）
+ *  + 之前的番外（可选）+ 这次的番外指令和格式说明，一次写完一整段聊天记录。不调工具、不写记忆 */
+export async function generateChatFanwaiCompletion(
+    session: ChatSession,
+    input: {
+        mainHistory: ChatMessage[];
+        /** 之前的番外：指令 + 那一篇的聊天记录 */
+        previous: Array<{ instruction: string; chatlog: string }>;
+        instruction: string;
+        includePrevious: boolean;
+        /** 从一篇的中间接着写：这篇已经留下的部分（聊天记录格式） */
+        continueChatlog?: string;
+    },
+    options?: { signal?: AbortSignal; onStreamDelta?: (delta: string) => void },
+): Promise<{ rawText: string; reasoning?: string }> {
+    const character = loadCharacters().find(c => c.id === session.contactId);
+    if (!character) throw new ChatEngineError(`Character not found: ${session.contactId}`);
+    const identity = resolveUserIdentity(character.id, "chat");
+    const names = { user: identity?.name || "用户", char: character.name };
+    const now = Date.now();
+    const synthetic = (role: "user" | "assistant", content: string, offset: number): ChatMessage => ({
+        id: `fanwai_prompt_${now}_${offset}`,
+        sessionId: session.id,
+        role,
+        content,
+        status: "sent",
+        createdAt: new Date(now + offset).toISOString(),
+    });
+    const history: ChatMessage[] = [...input.mainHistory];
+    let offset = 0;
+    for (const episode of input.previous) {
+        history.push(synthetic("user", `（$系统指令：番外。${episode.instruction}）`, offset++));
+        history.push(synthetic("assistant", episode.chatlog, offset++));
+    }
+    history.push(synthetic("user", buildChatFanwaiRequestText(input.instruction, {
+        includePrevious: input.includePrevious && input.previous.length > 0,
+        userName: names.user,
+        charName: names.char,
+    }), offset++));
+    if (input.continueChatlog?.trim()) {
+        history.push(synthetic("assistant", input.continueChatlog, offset++));
+        history.push(synthetic("user", CHAT_FANWAI_CONTINUE_TEXT, offset++));
+    }
+
+    const { llmMessages, config, preset, regexes } = await buildChatPromptMessages(session, history, {
+        appTags: ["chat"],
+        toolsAllowed: false,
+        skipEmptyGenerateGuard: true,
+    });
+    let reasoning = "";
+    const meta = { characterName: character.name, userName: identity?.name };
+    let rawOutput: string;
+    if (isSessionStreamingEnabled(session, true) && options?.onStreamDelta) {
+        const streamResult = await sendLLMStreamRequest(config, preset, llmMessages, regexes, meta, {
+            appId: "chat",
+            appTags: ["chat"],
+            debugSessionId: session.id,
+            signal: options?.signal,
+        }, {
+            onDelta: (text) => options.onStreamDelta?.(text),
+            onReasoningDelta: (t) => { reasoning += t; },
+        });
+        rawOutput = streamResult.content;
+    } else {
+        rawOutput = await sendLLMRequest(config, preset, llmMessages, regexes, meta, {
+            appTags: ["chat"],
+            debugSessionId: session.id,
+            signal: options?.signal,
+            onReasoning: (t: string) => { reasoning = t; },
+        });
+    }
+    return { rawText: stripPresetTexts(rawOutput, preset), reasoning: reasoning || undefined };
 }
 
 async function generateNativeChatCompletion(
