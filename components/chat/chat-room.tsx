@@ -835,26 +835,6 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
 
     return (
         <div className="chat-input-bar chat-room-main-pane flex flex-col" data-ui="input" data-chat-name={chatTitle || characterName} {...themeMenu.barProps} {...(fanwaiMode ? { "data-fanwai": "" } : {})}>
-            {fanwaiMode && (
-                <div className="chat-theater-mode-strip chat-fanwai-strip" role="status">
-                    <span className="chat-theater-mode-icon" aria-hidden="true">
-                        <Clapperboard size={16} strokeWidth={1.8} />
-                    </span>
-                    <span className="chat-theater-mode-title">番外</span>
-                    <button type="button" className="chat-fanwai-template-open" onClick={onOpenFanwaiTemplate}>
-                        番外模板
-                    </button>
-                    <button
-                        type="button"
-                        className="chat-theater-mode-close"
-                        onClick={onToggleFanwaiMode}
-                        aria-label="回到正篇聊天"
-                        title="回到正篇聊天"
-                    >
-                        <X size={14} strokeWidth={2} />
-                    </button>
-                </div>
-            )}
             {quotingMessage && (
                 <div className="chat-quote-bar">
                     <div className="flex-1 ts-12 text-[var(--c-icon)] overflow-hidden text-ellipsis whitespace-nowrap">
@@ -894,6 +874,12 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                     }}
                     onClose={() => setSuggestClosed(true)}
                 />
+            )}
+            {/* 番外：输入框左边一个「模板」，和剧情 App 番外的输入栏一样；回正篇用标题栏的返回 */}
+            {fanwaiMode && (
+                <button type="button" className="chat-fanwai-template-open" onClick={onOpenFanwaiTemplate}>
+                    模板
+                </button>
             )}
             <textarea
                 ref={textareaRef}
@@ -4581,6 +4567,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             }
         };
 
+        // 和正篇一样：失败留一条「⚠️ …」在聊天里（长按可以删），不只是一闪而过的提示
+        const pushFanwaiError = (reason: string) => {
+            const errorMsg = pushChatMessage({
+                sessionId: fanwaiSessionId,
+                role: "system",
+                content: `⚠️ 番外生成失败: ${reason}`,
+            });
+            if (fanwaiModeRef.current) setMessages(prev => [...prev, errorMsg]);
+        };
         let streamed = "";
         try {
             const result = await generateChatFanwaiCompletion(session, {
@@ -4605,7 +4600,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             } else {
                 appendItems(parsed.items);
             }
-            if (parsed.items.length === 0 && pushedItems === 0) showChatToast("番外没有写出内容，可以长按指令卡重试");
+            if (parsed.items.length === 0 && pushedItems === 0) pushFanwaiError("模型没有写出内容");
             const title = parsed.title || meta.title;
             if (title && title !== meta.title) {
                 const nextMeta = { ...meta, title };
@@ -4614,7 +4609,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             }
         } catch (error: any) {
             if (fanwaiRunRef.current !== controller || isAbortLikeError(error)) return;
-            showChatToast(`番外生成失败: ${error?.message || String(error)}`, 3000);
+            pushFanwaiError(error?.message || String(error));
         } finally {
             if (fanwaiRunRef.current === controller) {
                 fanwaiRunRef.current = null;

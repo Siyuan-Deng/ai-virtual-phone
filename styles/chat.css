@@ -722,21 +722,15 @@
   transform: scale(0.96);
 }
 
-/* 番外界面：输入栏上面那条多一个「番外模板」按钮，叉号回正篇 */
-.chat-fanwai-strip {
-  grid-template-columns: 32px 1fr auto 32px;
-  column-gap: 6px;
-}
+/* 番外界面：输入框左边的「模板」，样子跟着输入框走 */
 .chat-fanwai-template-open {
-  position: relative;
-  z-index: 1;
-  height: 30px;
-  padding: 0 10px;
-  border: none;
-  border-radius: 8px;
-  color: #fff8f2;
-  background: rgba(255,255,255,0.08);
-  font-size: calc(12px*var(--app-text-scale,1));
+  height: 34px;
+  padding: 0 12px;
+  border: 0.5px solid var(--c-input-border);
+  border-radius: 17px;
+  color: var(--c-text-title);
+  background: color-mix(in srgb, var(--c-card) 60%, transparent);
+  font-size: calc(13px*var(--app-text-scale,1));
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
@@ -744,7 +738,7 @@
 .chat-fanwai-template-open:active {
   transform: scale(0.96);
 }
-/* 番外界面没有表情、加号这些，只剩发送键：和输入框放在同一行的右边 */
+/* 番外界面没有表情、加号这些：「模板」、输入框、发送键排成一行，都垂直居中 */
 .chat-input-bar[data-fanwai] {
   flex-direction: row;
   flex-wrap: wrap;
@@ -753,6 +747,9 @@
 }
 .chat-input-bar[data-fanwai] > * {
   flex: 0 0 100%;
+}
+.chat-input-bar[data-fanwai] > .chat-fanwai-template-open {
+  flex: 0 0 auto;
 }
 .chat-input-bar[data-fanwai] > .chat-input-textarea {
   flex: 1 1 0;
