@@ -80,7 +80,7 @@ export const CHAT_SESSION_CSS_EXAMPLE = `/* ═══ 单独聊天室 CSS 示例
 }
 
 /* 番外：指令卡多一个 data-fanwai，可以和系统指令卡分开美化（可选项）。
-   番外界面的气泡和正篇是同一套类名；输入栏上面那条是 .chat-fanwai-strip，模板面板是 .chat-fanwai-template */
+   番外界面的气泡和正篇是同一套类名；输入栏带 data-fanwai，左边的「模板」按钮是 .chat-fanwai-template-open，模板面板是 .chat-fanwai-template */
 /*
 .chat-system-instruction-card[data-fanwai] {
   border-style: dashed;

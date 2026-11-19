@@ -2225,8 +2225,10 @@ export async function generateChatFanwaiCompletion(
         history.push(synthetic("user", CHAT_FANWAI_CONTINUE_TEXT, offset++));
     }
 
+    // 和正篇线上聊天同一组标签：预设里「聊天·文字」的条目（照片、语音条、表情包这些消息格式写在那里）要带上，
+    // 不然模型不知道正常的图片怎么写，只能用文字气泡假装；分条、状态栏这些在番外指令里说不用管
     const { llmMessages, config, preset, regexes } = await buildChatPromptMessages(session, history, {
-        appTags: ["chat"],
+        appTags: ["chat", "text"],
         toolsAllowed: false,
         skipEmptyGenerateGuard: true,
     });
@@ -2236,7 +2238,7 @@ export async function generateChatFanwaiCompletion(
     if (isSessionStreamingEnabled(session, true) && options?.onStreamDelta) {
         const streamResult = await sendLLMStreamRequest(config, preset, llmMessages, regexes, meta, {
             appId: "chat",
-            appTags: ["chat"],
+            appTags: ["chat", "text"],
             debugSessionId: session.id,
             signal: options?.signal,
         }, {
@@ -2246,7 +2248,7 @@ export async function generateChatFanwaiCompletion(
         rawOutput = streamResult.content;
     } else {
         rawOutput = await sendLLMRequest(config, preset, llmMessages, regexes, meta, {
-            appTags: ["chat"],
+            appTags: ["chat", "text"],
             debugSessionId: session.id,
             signal: options?.signal,
             onReasoning: (t: string) => { reasoning = t; },
