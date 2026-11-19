@@ -1640,11 +1640,13 @@ interface MediaDetailModalProps {
     msg: ChatMessage;
     userName: string;
     groupSize?: number;
+    /** 聊天番外里的红包、转账、代付只是故事：领取、退还、代付照常改状态，不动钱包 */
+    walletless?: boolean;
     onAccept: (updatedMsg: ChatMessage, sysText: string, actionType: string) => void;
     onClose: () => void;
 }
 
-export function MediaDetailModal({ msg, userName, groupSize, onAccept, onClose }: MediaDetailModalProps) {
+export function MediaDetailModal({ msg, userName, groupSize, walletless, onAccept, onClose }: MediaDetailModalProps) {
     const d = msg.mediaData;
     const isRedPacket = msg.mediaType === "red_packet";
     const isTransfer = msg.mediaType === "transfer";
@@ -1722,6 +1724,17 @@ export function MediaDetailModal({ msg, userName, groupSize, onAccept, onClose }
         const safeAmount = Number.isFinite(amount) ? Math.max(0, Math.round(amount * 100) / 100) : 0;
         if (safeAmount <= 0) {
             setPaymentError("金额无效，无法代付。");
+            return;
+        }
+        if (walletless) {
+            const storyData = {
+                ...d,
+                status: "paid" as const,
+                paymentResolvedAt: new Date().toISOString(),
+                paymentPayerName: userName,
+            };
+            updateMessageMediaData(msg.id, storyData);
+            onAccept({ ...msg, mediaData: storyData }, `${userName}接受了${senderDisplay}的代付请求`, "accept_payment_request");
             return;
         }
         const result = payWithWalletBalance({

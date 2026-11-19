@@ -722,6 +722,184 @@
   transform: scale(0.96);
 }
 
+/* 番外界面：输入栏上面那条多一个「番外模板」按钮，叉号回正篇 */
+.chat-fanwai-strip {
+  grid-template-columns: 32px 1fr auto 32px;
+  column-gap: 6px;
+}
+.chat-fanwai-template-open {
+  position: relative;
+  z-index: 1;
+  height: 30px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  color: #fff8f2;
+  background: rgba(255,255,255,0.08);
+  font-size: calc(12px*var(--app-text-scale,1));
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.chat-fanwai-template-open:active {
+  transform: scale(0.96);
+}
+/* 番外界面没有表情、加号这些，只剩发送键：和输入框放在同一行的右边 */
+.chat-input-bar[data-fanwai] {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+}
+.chat-input-bar[data-fanwai] > * {
+  flex: 0 0 100%;
+}
+.chat-input-bar[data-fanwai] > .chat-input-textarea {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}
+.chat-input-bar[data-fanwai] > .chat-input-actions {
+  flex: 0 0 auto;
+  align-self: center;
+  align-items: center;
+  padding: 0;
+}
+
+/* 番外模板（底部面板） */
+.chat-fanwai-template {
+  max-width: 560px;
+  margin: 0 auto;
+}
+.chat-fanwai-template-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 52px 6px;
+}
+.chat-fanwai-template-title {
+  color: var(--c-text-title);
+  font-size: calc(16px*var(--app-text-scale,1));
+  font-weight: 600;
+}
+.chat-fanwai-template-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  color: var(--c-icon);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.chat-fanwai-template-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.chat-fanwai-template-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.chat-fanwai-template-field .ui-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.chat-fanwai-template-field textarea.ui-input {
+  resize: none;
+  line-height: 1.6;
+}
+.chat-fanwai-template-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.chat-fanwai-template-tabs,
+.chat-fanwai-template-label-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.chat-fanwai-template-tabs button[role="tab"] {
+  height: 30px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  color: var(--c-text);
+  background: transparent;
+  font-size: calc(13px*var(--app-text-scale,1));
+  cursor: pointer;
+}
+.chat-fanwai-template-tabs button[data-active] {
+  color: var(--c-text-title);
+  background: var(--c-input);
+  font-weight: 600;
+}
+.chat-fanwai-template-clear {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 30px;
+  padding: 0 6px;
+  border: none;
+  color: var(--c-icon);
+  background: transparent;
+  font-size: calc(12px*var(--app-text-scale,1));
+  cursor: pointer;
+}
+.chat-fanwai-template-clear:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.chat-fanwai-template-switches {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--c-card-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.chat-fanwai-template-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.chat-fanwai-template-switch + .chat-fanwai-template-switch {
+  border-top: 1px solid var(--c-card-border);
+}
+.chat-fanwai-template-switch-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--c-text-title);
+  font-size: calc(14px*var(--app-text-scale,1));
+}
+.chat-fanwai-template-switch-text small {
+  color: var(--c-text);
+  font-size: calc(12px*var(--app-text-scale,1));
+}
+.chat-fanwai-template-foot {
+  padding: 10px 16px calc(14px + env(safe-area-inset-bottom));
+}
+.chat-fanwai-template-send {
+  width: 100%;
+}
+
 .chat-input-bar .chat-input-actions {
   display: flex;
   justify-content: center;
