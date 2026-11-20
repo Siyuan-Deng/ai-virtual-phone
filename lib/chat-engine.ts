@@ -361,6 +361,8 @@ type ChatPromptBuildOptions = {
     promptProfile?: CustomAppPromptProfile;
     extraWorldBookIds?: string[];
     worldBookActivationContext?: string;
+    /** 不在聊天记录里、但也该拿来触发世界书和找记忆的文字（聊天番外的指令和之前的番外） */
+    extraActivationText?: string;
     activateAllWorldBooks?: boolean;
     toolsAllowed?: boolean;
     forceEnableTools?: boolean;
@@ -1925,13 +1927,16 @@ export async function buildChatPromptMessages(
     const toolsEnabled = enabledTools.length > 0
         && (options?.forceEnableTools === true || presetIncludesToolsMacro(preset, resolvedAppId, effectiveAppTags));
     const usesNativeActions = Boolean(toolsEnabled && nativeToolProtocolForConfig(config));
-    const { recentBlocks, truncatedHistory, wbActivationContext, unifiedRecentItems } = prepareShortTermContext(character.id, resolvedAppId, {
+    const { recentBlocks, truncatedHistory, wbActivationContext: historyActivationContext, unifiedRecentItems } = prepareShortTermContext(character.id, resolvedAppId, {
         history: historyForPrompt,
         includeDirectChatEntries: isOfflineMode,
         includeNativeToolHistory: usesNativeActions,
         excludeOfflineSessionId: options?.excludeOfflineSessionId,
         promptTimestampOptions,
     });
+    const wbActivationContext = options?.extraActivationText?.trim()
+        ? [historyActivationContext, options.extraActivationText.trim()].filter(Boolean).join("\n")
+        : historyActivationContext;
     const userThoughtPrefix = new MacroEngine(character.name, userIdentity?.name || "用户").expand(loadUserThoughtPrompts().prefix).trim();
     const promptHistory = applyVisionImagePromptLimit(
         truncatedHistory.map(msg => ({ ...msg, content: withSeenUserThought(msg, msg.content, userThoughtPrefix) })),
@@ -2200,38 +2205,38 @@ export async function generateChatFanwaiCompletion(
     if (!character) throw new ChatEngineError(`Character not found: ${session.contactId}`);
     const identity = resolveUserIdentity(character.id, "chat");
     const names = { user: identity?.name || "用户", char: character.name };
-    const now = Date.now();
-    const synthetic = (role: "user" | "assistant", content: string, offset: number): ChatMessage => ({
-        id: `fanwai_prompt_${now}_${offset}`,
-        sessionId: session.id,
-        role,
-        content,
-        status: "sent",
-        createdAt: new Date(now + offset).toISOString(),
-    });
-    const history: ChatMessage[] = [...input.mainHistory];
-    let offset = 0;
+    // 番外这部分（之前的番外、这次的指令和格式、接着写）不放进聊天记录，接在整份提示词的最后：
+    // 放在记录里的话，它会被包进短期记忆、带上时间戳，像是 {{user}} 在聊天里发的一句话，
+    // 后面还跟着预设里「怎么以角色身份回这条消息」的一大段（微信体、分条、性格连贯……），模型就会写得不像番外
+    const tail: LLMMessage[] = [];
     for (const episode of input.previous) {
-        history.push(synthetic("user", `（$系统指令：番外。${episode.instruction}）`, offset++));
-        history.push(synthetic("assistant", episode.chatlog, offset++));
+        tail.push({ role: "user", content: `（$系统指令：番外。${episode.instruction}）` });
+        tail.push({ role: "assistant", content: episode.chatlog });
     }
-    history.push(synthetic("user", buildChatFanwaiRequestText(input.instruction, {
-        includePrevious: input.includePrevious && input.previous.length > 0,
-        userName: names.user,
-        charName: names.char,
-    }), offset++));
+    tail.push({
+        role: "user",
+        content: buildChatFanwaiRequestText(input.instruction, {
+            includePrevious: input.includePrevious && input.previous.length > 0,
+            userName: names.user,
+            charName: names.char,
+        }),
+    });
     if (input.continueChatlog?.trim()) {
-        history.push(synthetic("assistant", input.continueChatlog, offset++));
-        history.push(synthetic("user", CHAT_FANWAI_CONTINUE_TEXT, offset++));
+        tail.push({ role: "assistant", content: input.continueChatlog });
+        tail.push({ role: "user", content: CHAT_FANWAI_CONTINUE_TEXT });
     }
 
     // 和正篇线上聊天同一组标签：预设里「聊天·文字」的条目（照片、语音条、表情包这些消息格式写在那里）要带上，
     // 不然模型不知道正常的图片怎么写，只能用文字气泡假装；分条、状态栏这些在番外指令里说不用管
-    const { llmMessages, config, preset, regexes } = await buildChatPromptMessages(session, history, {
+    const built = await buildChatPromptMessages(session, input.mainHistory, {
         appTags: ["chat", "text"],
         toolsAllowed: false,
         skipEmptyGenerateGuard: true,
+        // 指令和之前的番外不在记录里了，世界书关键词和记忆检索还是要看得到它们
+        extraActivationText: [...input.previous.map(e => `${e.instruction}\n${e.chatlog}`), input.instruction].join("\n"),
     });
+    const { config, preset, regexes } = built;
+    const llmMessages = [...built.llmMessages, ...tail];
     let reasoning = "";
     const meta = { characterName: character.name, userName: identity?.name };
     let rawOutput: string;
