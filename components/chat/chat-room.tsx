@@ -340,7 +340,7 @@ type GenerationRunGuard = {
 type UserThoughtRun = { text: string; seen: "all" | "some" | "none" };
 
 function userThoughtSeenText(seen: UserThoughtRun["seen"], who: string): string {
-    return `${who}${seen === "all" ? "看了这段" : seen === "none" ? "没看这段" : "看了其中一部分"}`;
+    return `${who}${seen === "all" ? "已读" : seen === "none" ? "未读" : "部分已读"}`;
 }
 
 type AssistantMessageDraft = Omit<ChatMessage, "id" | "createdAt" | "status"> & { status?: ChatMessage["status"] };
