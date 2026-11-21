@@ -7124,6 +7124,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     className="chat-round-jump"
                     buttonClassName="chat-round-jump-btn"
                     flashClassName="chat-round-flash"
+                    menuToggleClassName="chat-round-jump-menu-toggle"
                 />
             )}
             {!isMultiSelectMode && (offlineMode ? (

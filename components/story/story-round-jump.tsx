@@ -32,6 +32,9 @@ type Props = {
   buttonClassName?: string;
   /** 跳到的那一轮闪一下用的类名 */
   flashClassName?: string;
+  /** 给美化用的开关键：给了类名才画（样式默认藏着）。点一下在外壳上切 data-menu-open，
+   *  美化可以把两颗键做成「点开才弹出来」的菜单；开着的时候不淡出，点外面收起 */
+  menuToggleClassName?: string;
 };
 
 export function StoryRoundJump({
@@ -44,10 +47,12 @@ export function StoryRoundJump({
   className = "story-round-jump",
   buttonClassName = "story-top-btn story-round-jump-btn",
   flashClassName = "story-round-flash",
+  menuToggleClassName,
 }: Props) {
   const [canPrev, setCanPrev] = useState(false);
   const [canNext, setCanNext] = useState(false);
   const [awake, setAwake] = useState(!AUTO_HIDE);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [bottom, setBottom] = useState(70);
   const navRef = useRef<HTMLDivElement | null>(null);
   // 平滑滚动还没停时连点：以正要去的位置为准，不然会一直跳回同一轮
@@ -225,12 +230,25 @@ export function StoryRoundJump({
     if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current);
   }, []);
 
+  // 菜单开着：点外面（包括手指开始滑）就收起，收起后照常 1.5 秒淡出
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (navRef.current?.contains(event.target as Node)) return;
+      setMenuOpen(false);
+      wake();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [menuOpen, wake]);
+
   return (
     <div
       ref={navRef}
       className={className}
       style={{ bottom }}
-      data-asleep={awake ? undefined : "true"}
+      data-asleep={awake || menuOpen ? undefined : "true"}
+      data-menu-open={menuOpen ? "true" : undefined}
     >
       <button
         type="button"
@@ -250,6 +268,24 @@ export function StoryRoundJump({
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
       </button>
+      {menuToggleClassName && (
+        <button
+          type="button"
+          className={menuToggleClassName}
+          aria-label="上一轮 / 下一轮"
+          aria-expanded={menuOpen}
+          onClick={() => {
+            if (menuOpen) {
+              setMenuOpen(false);
+              wake();
+            } else {
+              setMenuOpen(true);
+            }
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="square" aria-hidden="true"><polyline points="7 9 12 4 17 9" /><polyline points="7 15 12 20 17 15" /></svg>
+        </button>
+      )}
     </div>
   );
 }
