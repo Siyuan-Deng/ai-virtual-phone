@@ -49,6 +49,7 @@ import { loadBindingConfig, loadPresets, loadRegexes, resolveBinding, resolveUse
 import { generateGroupChatCompletion, generateGroupOfflineChatCompletion, parseGroupChatResponse, buildEditableGroupRoundText } from "@/lib/group-chat-engine";
 import { chatFanwaiSessionId, formatChatFanwaiEpisode, isChatFanwaiInstruction, loadChatFanwaiTemplate, parseChatFanwaiOutput, saveChatFanwaiTemplate, type ChatFanwaiItem, type ChatFanwaiTemplate } from "@/lib/chat-fanwai";
 import { ChatFanwaiTemplateSheet } from "./chat-fanwai-template-sheet";
+import { StoryRoundJump } from "@/components/story/story-round-jump";
 import { appendChatOfflineTurn, deleteChatOfflineTurn, deleteChatOfflineTurnsFrom, extractThinkingTag, loadChatOfflineTurns, parseOfflineResponse, saveChatOfflineTurns, updateChatOfflineTurn, type ChatOfflineTurn } from "@/lib/chat-offline-storage";
 import { applyDisplayRegex, applyEditRegex } from "@/lib/llm-prompt-assembler";
 import { scheduleFollowUp, cancelFollowUp, cancelBackgroundGeneration, isBackgroundReplyGenerating } from "@/lib/follow-up-service";
@@ -1521,6 +1522,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [expandedVoiceCallIds, setExpandedVoiceCallIds] = useState<Set<string>>(new Set());
     const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
     const [hasMore, setHasMore] = useState(false);
+    // 番外的「上一轮」：还没加载出来的更早消息里有没有番外指令卡（有就先加载再跳）
+    const fanwaiHiddenHasRound = useMemo(() => {
+        if (!fanwaiMode || !hasMore) return false;
+        const all = loadChatMessages(chatFanwaiSessionId(session.id));
+        return all.slice(0, Math.max(0, all.length - messages.length)).some(isChatFanwaiInstruction);
+    }, [fanwaiMode, hasMore, messages.length, session.id]);
     const INITIAL_LOAD = CHAT_INITIAL_VISIBLE_MESSAGE_COUNT;
     const LOAD_MORE_COUNT = CHAT_LOAD_MORE_MESSAGE_COUNT;
 
@@ -6650,7 +6657,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                     : ""
                                             }`}
                                         {...(activeMessageId === msg.id ? { "data-active": "" } : {})}
-                                        {...(msg.fanwai ? { "data-fanwai": "" } : {})}
+                                        {...(msg.fanwai ? { "data-fanwai": "", "data-chat-round": "" } : {})}
                                     >
                                         {isSystemInstruction ? (
                                             <SystemInstructionCard
@@ -6771,7 +6778,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                             <div className="chat-msg-meta" aria-hidden="true">
                                                 {(() => {
                                                     const metaName = msg.role === "user"
-                                                        ? (userIdentity?.name || "你")
+                                                        ? (session.userNickname?.trim() || userIdentity?.name || "你")
                                                         : session.isGroup
                                                             ? (msg.senderName || (msg.senderCharacterId ? groupCharMap.get(msg.senderCharacterId)?.name : "") || "群成员")
                                                             : (session.alias || character?.name || "TA");
@@ -6831,6 +6838,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 displayContent={msg.displayProjected ? undefined : bubbleDisplayContent}
                                                 charName={character?.name}
                                                 charDisplayName={session.isGroup ? undefined : session.alias}
+                                                userDisplayName={session.userNickname?.trim() || undefined}
                                                 userName={userIdentity?.name || "你"}
                                                 groupSize={session.isGroup ? (session.participantIds?.length || 0) + (session.isSpectator ? 0 : 1) : undefined}
                                                 onShowDetail={setMediaDetailMsg}
@@ -7049,6 +7057,21 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                         删除
                     </button>
                 </div>
+            )}
+            {/* 番外：右下角「上一轮 / 下一轮」，一篇番外算一轮（从它的指令卡开始），和剧情 App 同一个组件 */}
+            {fanwaiMode && messages.length > 0 && (
+                <StoryRoundJump
+                    key={`fanwai:${session.id}`}
+                    scrollRef={scrollRef}
+                    revision={`${session.id}:${messages.length}:${messages[messages.length - 1]?.id ?? ""}`}
+                    hiddenHasRound={fanwaiHiddenHasRound}
+                    onLoadMore={loadMore}
+                    roundSelector="[data-chat-round]"
+                    composerSelector=".chat-input-bar"
+                    className="chat-round-jump"
+                    buttonClassName="chat-round-jump-btn"
+                    flashClassName="chat-round-flash"
+                />
             )}
             {!isMultiSelectMode && (offlineMode ? (
                 <OfflineTextInputBar

@@ -44,7 +44,7 @@ import { downloadFile } from "@/lib/download-utils";
 import { getSchemes, saveScheme, deleteScheme, type CSSScheme } from "@/lib/css-scheme-storage";
 import { CustomStatusFrame } from "@/components/chat/custom-status-frame";
 import { KeyboardAutoSendDebounceItem } from "@/components/chat/keyboard-auto-send-debounce-item";
-import { BookOpen, ChevronRight, Image as ImageIcon, Video, Mic, UserMinus, UserPlus, Users, Pin, MessageSquare, Search, AlertCircle, Code, Laptop, Trash2, Smile, Sparkles, X, Play, Upload, Download, Save, FolderOpen, type LucideIcon } from "lucide-react";
+import { BookOpen, ChevronRight, Image as ImageIcon, Video, Mic, User, UserMinus, UserPlus, Users, Pin, MessageSquare, Search, AlertCircle, Code, Laptop, Trash2, Smile, Sparkles, X, Play, Upload, Download, Save, FolderOpen, type LucideIcon } from "lucide-react";
 import { BINDING_ACCENTS, CONTENT_APP_ACCENTS } from "@/lib/ui-accent-colors";
 import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { ConfirmDialog } from "@/components/ui/modal";
@@ -463,6 +463,9 @@ export function ChatSettingsPanel({
     const [showConfirmDeleteSession, setShowConfirmDeleteSession] = useState(false);
     const [showConfirmDelete, setShowConfirmDelete] = useState(false);
     const [editingAlias, setEditingAlias] = useState(false);
+    // 我的网名：这个聊天里显示的我的名字，空着就用人设名
+    const [userNickname, setUserNickname] = useState(session.userNickname || "");
+    const [userNicknameDraft, setUserNicknameDraft] = useState<string | null>(null);
     const [editingBilingualPrompt, setEditingBilingualPrompt] = useState(false);
     const [editingCSS, setEditingCSS] = useState(false);
     const [showScreenEffects, setShowScreenEffects] = useState(false);
@@ -573,6 +576,8 @@ export function ChatSettingsPanel({
         ? (session.participantIds || []).map(id => characters.find(c => c.id === id)).filter(Boolean)
         : [];
     const userIdentity = resolveUserIdentity(undefined, session.isGroup ? "group_chat" : "chat");
+    // 聊天窗口里用的人设（按这个角色的绑定），网名没填时显示它的名字
+    const chatUserName = resolveUserIdentity(session.contactId, "chat")?.name || userIdentity?.name || "我";
 
     // ── Group member management ──
     const [, setRosterVersion] = useState(0); // bump to re-render after admin actions
@@ -849,6 +854,7 @@ export function ChatSettingsPanel({
                                     msg={msg}
                                     charName={senderChar?.name}
                                     userName={userIdentity?.name || "你"}
+                                    userDisplayName={userNickname.trim() || undefined}
                                     groupSize={session.isGroup ? (session.participantIds?.length || 0) + (session.isSpectator ? 0 : 1) : undefined}
                                     characterId={msg.senderCharacterId || session.contactId}
                                     defaultTranslationExpanded={session.collapseBilingualTranslation !== false ? false : true}
@@ -883,6 +889,14 @@ export function ChatSettingsPanel({
                         <div className="menu-label-group"><span className="menu-label">{session.isGroup ? "群聊名称" : "设置备注"}</span></div>
                         <div className="menu-right">
                             <span className="menu-desc mr-1">{session.isGroup ? (groupName || "未设置") : (alias || "无备注")}</span>
+                            <ChevronRight size={16} />
+                        </div>
+                    </button>
+                    <button className="menu-item" onClick={() => setUserNicknameDraft(userNickname)}>
+                        <ChatInfoIcon icon={User} color={BINDING_ACCENTS.identity} />
+                        <div className="menu-label-group"><span className="menu-label">{session.isGroup ? "我在群里的昵称" : "我的网名"}</span></div>
+                        <div className="menu-right">
+                            <span className="menu-desc mr-1">{userNickname || "未设置"}</span>
                             <ChevronRight size={16} />
                         </div>
                     </button>
@@ -1523,6 +1537,31 @@ export function ChatSettingsPanel({
                                     updateSession({ alias });
                                 }
                                 setEditingAlias(false);
+                            }} className="ui-btn ui-btn-success flex-1">保存</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal: 我的网名 */}
+            {userNicknameDraft !== null && (
+                <div className="modal-overlay">
+                    <div className="modal-dialog">
+                        <div className="ts-17 font-semibold text-center text-[var(--c-text)]">{session.isGroup ? "我在群里的昵称" : "我的网名"}</div>
+                        <Input
+                            type="text"
+                            value={userNicknameDraft}
+                            onChange={e => setUserNicknameDraft(e.target.value)}
+                            placeholder={chatUserName}
+                        />
+                        <div className="menu-desc text-center">引用和名字里显示这个；不填就用「{chatUserName}」</div>
+                        <div className="flex gap-3 w-full">
+                            <button onClick={() => setUserNicknameDraft(null)} className="ui-btn ui-btn-ghost flex-1">取消</button>
+                            <button onClick={() => {
+                                const next = userNicknameDraft.trim();
+                                setUserNickname(next);
+                                updateSession({ userNickname: next || undefined });
+                                setUserNicknameDraft(null);
                             }} className="ui-btn ui-btn-success flex-1">保存</button>
                         </div>
                     </div>

@@ -14,6 +14,7 @@ import {
     deleteMomentCommentThread,
 } from "@/lib/moments-storage";
 import { loadCharacters } from "@/lib/character-storage";
+import { loadMomentsCharacterAliases, loadMomentsUserNicknames, momentsUserNameForPost } from "@/lib/moments-display-name";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { buildTwoLevelMomentThreads } from "@/lib/moments-comment-threading";
 import { getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
@@ -96,12 +97,15 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
     }, [post.id, post.photoUrl, post.photoGenerationStatus, photoRegenerating]);
 
     const chars = loadCharacters();
+    const charAliases = loadMomentsCharacterAliases();
     // 角色帖子下，用户名用该角色绑定的用户人设；用户自己的帖子用默认人设
     const contextCharId = post.authorType === "character" ? post.authorId : undefined;
     const userIdentity = resolveUserIdentity(contextCharId, "chat");
+    // 这条帖子下面我叫什么（开了「朋友圈显示网名」才换成网名）
+    const userDisplayName = momentsUserNameForPost(loadMomentsUserNicknames(), post, userIdentity?.name ?? "我");
 
     const getCharName = (charId: string): string => {
-        return chars.find(c => c.id === charId)?.name ?? "未知";
+        return charAliases.get(charId) ?? chars.find(c => c.id === charId)?.name ?? "未知";
     };
 
     const getCharAvatar = (charId: string): string | null => {
@@ -110,7 +114,7 @@ export function MomentPostCard({ post, onUpdate, onRequestDelete, onOpenCommentC
 
     const getAuthorName = (authorType: "user" | "character" | "npc", authorId: string, authorName?: string): string => {
         if (authorType === "npc") return authorName!;
-        return authorType === "user" ? (userIdentity?.name ?? "我") : getCharName(authorId);
+        return authorType === "user" ? userDisplayName : getCharName(authorId);
     };
 
     const getAuthorAvatar = (authorType: "user" | "character" | "npc", authorId: string): string | null => {

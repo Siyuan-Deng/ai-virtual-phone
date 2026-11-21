@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { loadCharacters } from "@/lib/character-storage";
 import { loadChatContacts } from "@/lib/chat-storage";
 import { addMomentPost } from "@/lib/moments-storage";
+import { loadMomentsCharacterAliases, loadMomentsUserNicknames, momentsNicknameChoices } from "@/lib/moments-display-name";
 import { onUserPost } from "@/lib/moments-engine";
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { saveChatImageToIndexedDB, getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
@@ -27,6 +28,14 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
     const [showMention, setShowMention] = useState(false);
     const [showLocation, setShowLocation] = useState(false);
     const [showVisibility, setShowVisibility] = useState(false);
+    // 开了「朋友圈显示网名」：这条用哪个网名发（只改显示）
+    const [nicknameSetup] = useState(() => {
+        const nicknames = loadMomentsUserNicknames();
+        const identityName = resolveUserIdentity(undefined, "chat")?.name || "我";
+        const choices = nicknames.enabled ? momentsNicknameChoices(nicknames, identityName) : [];
+        return { enabled: nicknames.enabled, choices, initial: nicknames.home || identityName };
+    });
+    const [authorNickname, setAuthorNickname] = useState(nicknameSetup.initial);
 
     const [visibility, setVisibility] = useState<Record<string, boolean>>(() => {
         const contacts = loadChatContacts();
@@ -48,6 +57,9 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
     const enrichedContacts = contacts
         .map(c => ({ ...c, char: chars.find(ch => ch.id === c.characterId) }))
         .filter(c => c.char);
+    // 选人列表里显示的名字（开了「显示角色备注」用备注）；@提醒写进帖子的还是原名
+    const charAliases = loadMomentsCharacterAliases();
+    const displayCharName = (charId: string, name: string) => charAliases.get(charId) ?? name;
 
     const visibleCount = Object.values(visibility).filter(Boolean).length;
     const isAllSelected = enrichedContacts.length > 0 && enrichedContacts.every(c => visibility[c.characterId]);
@@ -174,6 +186,7 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
             photoDescription: photoDesc.trim() || undefined,
             visibility: visibleCharIds,
             location: location || undefined,
+            ...(nicknameSetup.enabled && authorNickname ? { authorNickname } : {}),
         });
 
         if (post) {
@@ -185,7 +198,7 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
     const canPublish = text.trim().length > 0;
 
     // Get char name/avatar helpers
-    const getCharName = (charId: string) => chars.find(c => c.id === charId)?.name ?? "未知";
+    const getCharName = (charId: string) => charAliases.get(charId) ?? chars.find(c => c.id === charId)?.name ?? "未知";
 
     return (
         <div className="modal-overlay" data-ui="modal" role="presentation" onClick={onClose}>
@@ -280,6 +293,34 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
                         </div>
                     )}
 
+                    {/* 用哪个网名发：开了「朋友圈显示网名」才有，右边是下拉菜单 */}
+                    {nicknameSetup.enabled && nicknameSetup.choices.length > 1 && (
+                        <label className="compose-nav-row compose-nickname-row">
+                            <div className="compose-nav-left">
+                                <svg className="compose-nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <circle cx="12" cy="8" r="4" />
+                                    <path d="M4 21a8 8 0 0 1 16 0" />
+                                </svg>
+                                <span className="compose-nav-label">显示网名</span>
+                            </div>
+                            <div className="compose-nav-right">
+                                <select
+                                    className="compose-nickname-select"
+                                    value={authorNickname}
+                                    onChange={e => setAuthorNickname(e.target.value)}
+                                    aria-label="显示网名"
+                                >
+                                    {nicknameSetup.choices.map(choice => (
+                                        <option key={choice} value={choice}>{choice}</option>
+                                    ))}
+                                </select>
+                                <svg className="compose-nav-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                    <polyline points="6 9 12 15 18 9" />
+                                </svg>
+                            </div>
+                        </label>
+                    )}
+
                     {/* Mentions Section */}
                     <div className="compose-nav-row" onClick={() => setShowMention(!showMention)}>
                         <div className="compose-nav-left">
@@ -309,7 +350,7 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
                                                 <ChatFallbackAvatar />
                                             )}
                                         </div>
-                                        <span className="chat-contact-name">{c.char!.name}</span>
+                                        <span className="chat-contact-name">{displayCharName(c.characterId, c.char!.name)}</span>
                                     </div>
                                 ))}
                             </div>
@@ -363,7 +404,7 @@ export function MomentsCompose({ onClose, onPublished }: Props) {
                                                 <ChatFallbackAvatar />
                                             )}
                                         </div>
-                                        <span className="chat-contact-name">{c.char!.name}</span>
+                                        <span className="chat-contact-name">{displayCharName(c.characterId, c.char!.name)}</span>
                                     </div>
                                 ))}
                             </div>

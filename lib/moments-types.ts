@@ -16,6 +16,7 @@ export type MomentPost = {
     photoCleanedAt?: string;
     visibility: string[];           // characterId[] of who can see this post
     location?: string;              // 用户添加的地点
+    authorNickname?: string;        // 我发的帖子：发的时候选的网名（开了「朋友圈显示网名」才显示；只改显示）
     likes: MomentLike[];
     createdAt: string;              // ISO date string
 };
