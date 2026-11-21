@@ -48,6 +48,12 @@ interface MessageBubbleProps {
     onActionSelect?: (text: string) => void;
     displayContent?: string;
     defaultTranslationExpanded?: boolean;
+    /** 语音条：给了就是「单击转文字」，单击语音条调这个，不播放 */
+    onVoiceTap?: () => void;
+    /** 语音条：这个数一变就播放一次（正在播就停），长按菜单里的「播放」用 */
+    voicePlayNonce?: number;
+    /** 语音条开始 / 停止播放时告诉外面，长按菜单好显示「播放」还是「停止播放」 */
+    onVoicePlayingChange?: (playing: boolean) => void;
 }
 
 /** 聊天插件自定义消息气泡：把裸 DOM 容器交给注册了该 kind 的插件渲染 */
@@ -91,7 +97,7 @@ function PluginKindBubble({ msg, kind }: { msg: ChatMessage; kind: string }) {
  * Renders a message bubble based on its mediaType.
  * Falls back to ReactMarkdown for plain text messages.
  */
-export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charName, charDisplayName, userName, onSystemMessage, groupSize, onShowDetail, characterId, onMusicPlay, onActionSelect, displayContent, defaultTranslationExpanded = false }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charName, charDisplayName, userName, onSystemMessage, groupSize, onShowDetail, characterId, onMusicPlay, onActionSelect, displayContent, defaultTranslationExpanded = false, onVoiceTap, voicePlayNonce, onVoicePlayingChange }: MessageBubbleProps) {
     switch (msg.mediaType) {
         case "red_packet":
             return <RedPacketBubble msg={msg} charName={charName} userName={userName} groupSize={groupSize} onShowDetail={onShowDetail} />;
@@ -124,7 +130,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
         case "xiaohongshu_note_share":
             return <XiaohongshuShareBubble msg={msg} />;
         case "audio":
-            return <VoiceMessageBubble msg={msg} characterId={characterId} onUpdate={onUpdate} defaultTranslationExpanded={defaultTranslationExpanded} />;
+            return <VoiceMessageBubble msg={msg} characterId={characterId} onUpdate={onUpdate} defaultTranslationExpanded={defaultTranslationExpanded} onTap={onVoiceTap} playNonce={voicePlayNonce} onPlayingChange={onVoicePlayingChange} />;
         default: {
             // 聊天插件自定义消息类型：mediaType = "plugin:<kind>"，由注册插件渲染
             if (msg.mediaType?.startsWith("plugin:")) {
@@ -166,6 +172,10 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
     if (prev.characterId !== next.characterId) return false;
     if (prev.displayContent !== next.displayContent) return false;
     if (prev.defaultTranslationExpanded !== next.defaultTranslationExpanded) return false;
+    // 语音条单击方式切换、长按菜单点了播放：这几个变了要重画（函数本身每次都是新的，只看有没有）
+    if (!!prev.onVoiceTap !== !!next.onVoiceTap) return false;
+    if (!!prev.onVoicePlayingChange !== !!next.onVoicePlayingChange) return false;
+    if (prev.voicePlayNonce !== next.voicePlayNonce) return false;
     return true;
 });
 
@@ -2363,7 +2373,7 @@ function synthesizeVoiceForMessage(msgId: string, characterId: string, speechTex
     return task;
 }
 
-function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpanded = false }: { msg: ChatMessage; characterId?: string; onUpdate?: (m: ChatMessage) => void; defaultTranslationExpanded?: boolean }) {
+function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpanded = false, onTap, playNonce, onPlayingChange }: { msg: ChatMessage; characterId?: string; onUpdate?: (m: ChatMessage) => void; defaultTranslationExpanded?: boolean; onTap?: () => void; playNonce?: number; onPlayingChange?: (playing: boolean) => void }) {
     const [playing, setPlaying] = useState(false);
     const [synthesizing, setSynthesizing] = useState(false);
     const [synthFailed, setSynthFailed] = useState(false);
@@ -2440,6 +2450,20 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
 
     useEffect(() => () => { audioRef.current?.pause(); }, []);
 
+    // 单击转文字时，播放从长按菜单来：数一变就当成点了一下播放键
+    const handlePlayRef = useRef(handlePlay);
+    handlePlayRef.current = handlePlay;
+    const lastPlayNonceRef = useRef(playNonce);
+    useEffect(() => {
+        if (playNonce === undefined || playNonce === lastPlayNonceRef.current) return;
+        lastPlayNonceRef.current = playNonce;
+        handlePlayRef.current();
+    }, [playNonce]);
+    const onPlayingChangeRef = useRef(onPlayingChange);
+    onPlayingChangeRef.current = onPlayingChange;
+    useEffect(() => { onPlayingChangeRef.current?.(playing || synthesizing); }, [playing, synthesizing]);
+    useEffect(() => () => { onPlayingChangeRef.current?.(false); }, []);
+
     // Wave bars — slightly irregular heights so the idle state already looks intentional.
     const barCount = Math.min(Math.max(4, Math.round(duration / 2)), 9);
     const barHeights = Array.from({ length: barCount }, (_, i) => {
@@ -2449,7 +2473,7 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
     });
 
     return (
-        <div className="voice-msg-bubble" onClick={handlePlay}
+        <div className="voice-msg-bubble" onClick={onTap ?? handlePlay}
             style={{ minWidth: `${Math.min(60 + duration * 8, 220)}px` }}
         >
             <div className="voice-msg-icon-shell">
@@ -2472,7 +2496,7 @@ function VoiceMessageBubble({ msg, characterId, onUpdate, defaultTranslationExpa
                     />
                 ))}
             </div>
-            <span className="voice-msg-dur">{synthesizing ? "合成中…" : synthFailed ? "合成失败·点击重试" : `${duration}"`}</span>
+            <span className="voice-msg-dur">{synthesizing ? "合成中…" : synthFailed ? (onTap ? "合成失败·长按重试" : "合成失败·点击重试") : `${duration}"`}</span>
         </div>
     );
 }

@@ -1499,6 +1499,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
     // Message Actions state
     const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
+    // 气泡的 memo 不看函数 props，单击语音条的回调可能是早先那次渲染的：要读最新的菜单状态就从这里读
+    const activeMessageIdRef = useRef(activeMessageId);
+    activeMessageIdRef.current = activeMessageId;
     const [contextMenuAnchor, setContextMenuAnchor] = useState<ContextMenuAnchor | null>(null);
     const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
     const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
@@ -1535,6 +1538,15 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         }
     };
     const [voiceTextIds, setVoiceTextIds] = useState<Set<string>>(new Set());
+    const toggleVoiceText = (id: string) => setVoiceTextIds(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+    });
+    // 聊天信息里的「语音条单击转文字」：开了就单击出文字，播放挪到长按菜单（id + 次数，点一次加一）
+    const voiceTapToText = session.voiceTapToText === true;
+    const [voicePlayRequest, setVoicePlayRequest] = useState<{ id: string; nonce: number } | null>(null);
+    const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [editingContent, setEditingContent] = useState("");
     const [editingResponseBatchId, setEditingResponseBatchId] = useState<string | null>(null);
@@ -5490,9 +5502,11 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     <button onClick={() => (m.role === "assistant" && !fanwaiMode ? handleEditResponseStart(m) : handleEditMessageStart(m))} className="ctx-menu-btn">
                         {m.role === "assistant" && !fanwaiMode && (m.rawResponseText || m.editableResponseText) ? "编辑回复" : "编辑"}
                     </button>
-                    {m.mediaType === "audio" && m.mediaData?.label && (
-                        <button onClick={() => { setVoiceTextIds(prev => { const next = new Set(prev); if (next.has(m.id)) next.delete(m.id); else next.add(m.id); return next; }); setActiveMessageId(null); }} className="ctx-menu-btn">转文字</button>
-                    )}
+                    {m.mediaType === "audio" && m.mediaData?.label && (voiceTapToText ? (
+                        <button onClick={() => { setVoicePlayRequest(prev => ({ id: m.id, nonce: (prev?.nonce ?? 0) + 1 })); setActiveMessageId(null); }} className="ctx-menu-btn">{playingVoiceId === m.id ? "停止播放" : "播放"}</button>
+                    ) : (
+                        <button onClick={() => { toggleVoiceText(m.id); setActiveMessageId(null); }} className="ctx-menu-btn">转文字</button>
+                    ))}
                     {m.role === "user" && (
                         <button onClick={() => handleRetractMessage(storedMessageId)} className="ctx-menu-btn">撤回消息</button>
                     )}
@@ -6886,6 +6900,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                                                 onMusicPlay={handleMusicCardPlay}
                                                 onActionSelect={(text) => chatTextInputRef.current?.appendText(text)}
                                                 defaultTranslationExpanded={session.collapseBilingualTranslation !== false ? false : true}
+                                                {...(voiceTapToText && renderMsg.mediaType === "audio" && renderMsg.mediaData?.label ? {
+                                                    // 长按松手那一下不算单击（这条的菜单已经打开了）
+                                                    onVoiceTap: () => { if (activeMessageIdRef.current !== msg.id) toggleVoiceText(msg.id); },
+                                                    voicePlayNonce: voicePlayRequest?.id === msg.id ? voicePlayRequest.nonce : undefined,
+                                                    onVoicePlayingChange: (playing: boolean) => setPlayingVoiceId(prev => (playing ? msg.id : prev === msg.id ? null : prev)),
+                                                } : {})}
                                             />
                                         </div>
                                         </div>}
