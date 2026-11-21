@@ -36,7 +36,7 @@ import {
 } from "./settings-storage";
 import { assemblePromptPayload, applyOutputRegex, type LLMMessage, type LLMContentPart } from "./llm-prompt-assembler";
 import { MacroEngine, postProcessTrim } from "./macro-engine";
-import { loadUserThoughtPrompts, withSeenUserThought } from "./user-thought";
+import { createUserThoughtRunAttacher, loadUserThoughtPrompts } from "./user-thought";
 import { getStatusRegionConfig, resolveStatusRegionSection, resolveStatusRegionExampleLine, resolveStatusRegionComposition, resolveStatusRegionFullExample } from "./chat-status-region";
 import {
     buildProviderDebugMessages,
@@ -1938,8 +1938,9 @@ export async function buildChatPromptMessages(
         ? [historyActivationContext, options.extraActivationText.trim()].filter(Boolean).join("\n")
         : historyActivationContext;
     const userThoughtPrefix = new MacroEngine(character.name, userIdentity?.name || "用户").expand(loadUserThoughtPrompts().prefix).trim();
+    const attachUserThought = createUserThoughtRunAttacher(truncatedHistory, userThoughtPrefix);
     const promptHistory = applyVisionImagePromptLimit(
-        truncatedHistory.map(msg => ({ ...msg, content: withSeenUserThought(msg, msg.content, userThoughtPrefix) })),
+        truncatedHistory.map(msg => ({ ...msg, content: attachUserThought(msg, msg.content) })),
         session.visionImagePromptLimit,
     );
 

@@ -50,8 +50,36 @@ export function formatUserThought(thought: string, content: string, prefix = "")
     return [prefix, USER_THOUGHT_OPEN, thought, USER_THOUGHT_CLOSE, content].filter(Boolean).join("\n");
 }
 
-/** 角色看了的才带上，没看的原样返回 */
-export function withSeenUserThought(msg: Pick<ChatMessage, "userThought" | "userThoughtSeen">, content: string, prefix = ""): string {
-    const thought = msg.userThoughtSeen ? msg.userThought?.trim() : "";
-    return thought ? formatUserThought(thought, content, prefix) : content;
+/**
+ * 和聊天界面一样按「一串」给：连着发的几条用户消息算一串，这一串里角色看了的想法合在一起（一条一行），
+ * 只放在这一串第一条前面，不标哪个想法是跟着哪句话的。没看的不带。
+ * 按顺序把要进提示词的消息一条条交给返回的函数；不是用户的消息就把这一串断开。
+ */
+export function createUserThoughtRunAttacher(
+    messages: ReadonlyArray<Pick<ChatMessage, "id" | "role" | "userThought" | "userThoughtSeen">>,
+    prefix = "",
+): (msg: Pick<ChatMessage, "id">, content: string) => string {
+    const runOf = new Map<string, number>();
+    const thoughts: string[][] = [];
+    let run = -1;
+    for (const msg of messages) {
+        if (msg.role !== "user") {
+            run = -1;
+            continue;
+        }
+        if (run < 0) {
+            run = thoughts.length;
+            thoughts.push([]);
+        }
+        runOf.set(msg.id, run);
+        const thought = msg.userThoughtSeen ? msg.userThought?.trim() : "";
+        if (thought) thoughts[run].push(thought);
+    }
+    const attached = new Set<number>();
+    return (msg, content) => {
+        const index = runOf.get(msg.id);
+        if (index === undefined || attached.has(index)) return content;
+        attached.add(index);
+        return thoughts[index].length > 0 ? formatUserThought(thoughts[index].join("\n"), content, prefix) : content;
+    };
 }

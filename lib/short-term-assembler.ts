@@ -25,7 +25,7 @@ import { loadBlackMarketTheaterProjectionEntries } from "./black-market-storage"
 import { loadInterviewMagazineProjectionEntries } from "./interview-magazine-memory";
 import { loadCoCreateProjectionEntries } from "./cocreate-memory";
 import { stripStateAndInnerForPrompt } from "./prompt-sanitizer";
-import { withSeenUserThought } from "./user-thought";
+import { createUserThoughtRunAttacher } from "./user-thought";
 import { renderUserNameMacro } from "./user-macro";
 import { loadChatOfflineProjectionEntries } from "./chat-offline-storage";
 import { loadCheckPhoneProjectionEntries } from "./checkphone-storage";
@@ -283,6 +283,10 @@ export function loadNativeTimeline(
 
     if (session) {
         const messages = loadChatMessages(session.id);
+        // 思维链按「一串」合在一起：串只在真的会进提示词的消息里算（撤回的、隐藏的、更早的不算）
+        const attachUserThought = createUserThoughtRunAttacher(messages.filter(msg => !msg.isRetracted
+            && !isPromptHiddenChatMessage(msg)
+            && !(options?.afterTimestamp && msg.createdAt <= options.afterTimestamp)));
         for (const msg of messages) {
             if (msg.isRetracted) continue;
             if (isPromptHiddenChatMessage(msg)) continue;
@@ -387,7 +391,7 @@ export function loadNativeTimeline(
                 }
             }
 
-            content = withSeenUserThought(msg, content);
+            content = attachUserThought(msg, content);
             if (!content.trim()) continue;
 
             entries.push({
