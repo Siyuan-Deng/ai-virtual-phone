@@ -8336,6 +8336,11 @@
   opacity: 0.4;
   cursor: default;
 }
+/* 给美化用的开关键：平时不显示。美化把它露出来，就能做成「点开才弹出上一轮 / 下一轮」的菜单
+   （点它在 .chat-round-jump 上切 data-menu-open，开着不淡出，点外面收起） */
+.chat-round-jump-menu-toggle {
+  display: none;
+}
 /* 跳到的那篇番外：指令卡外面亮一圈再淡掉（卡片自己有底色，不动底色） */
 .chat-round-flash {
   animation: chat-round-flash 1.1s ease;
