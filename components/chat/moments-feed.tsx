@@ -7,6 +7,7 @@ import { resolveUserIdentity } from "@/lib/settings-storage";
 import { saveChatImageToIndexedDB, getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
 import type { MomentComment, MomentPost } from "@/lib/moments-types";
 import { MomentPostCard } from "./moment-post-card";
+import { loadMomentsUserNicknames } from "@/lib/moments-display-name";
 import { MomentsCompose } from "./moments-compose";
 import { ConfirmDialog } from "@/components/ui/modal";
 import { PageShell } from "@/components/ui/page-shell";
@@ -51,6 +52,9 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
     const coverInputRef = useRef<HTMLInputElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const userIdentity = resolveUserIdentity(undefined, "chat");
+    // 朋友圈顶上的名字：开了「朋友圈显示网名」用主页网名
+    const momentsNicknames = loadMomentsUserNicknames();
+    const profileName = (momentsNicknames.enabled && momentsNicknames.home) || userIdentity?.name || "我";
     const [signature, setSignature] = useState(() => {
         if (typeof window !== "undefined") {
             return kvGet("moments_signature") || "make every day count (●ˇ∀ˇ●)";
@@ -502,7 +506,7 @@ export function MomentsFeed({ onCloseApp }: MomentsFeedProps) {
                         
                         {/* Name and Flex Data */}
                         <div className="feed-profile-info flex flex-col gap-1 mt-3 ml-[6px] pointer-events-auto">
-                            <span className="feed-profile-name ts-20 font-bold text-[var(--c-text-title)]">{userIdentity?.name ?? "我"}</span>
+                            <span className="feed-profile-name ts-20 font-bold text-[var(--c-text-title)]">{profileName}</span>
                             <div className="feed-profile-stats flex gap-4 ts-13 text-[var(--c-icon)] font-medium mt-[2px]">
                                 <span className="feed-profile-stat"><strong className="feed-profile-stat-value text-[var(--c-text-title)]">128</strong> 关注</span>
                                 <span className="feed-profile-stat"><strong className="feed-profile-stat-value text-[var(--c-text-title)]">12.4K</strong> 粉丝</span>

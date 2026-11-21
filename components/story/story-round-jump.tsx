@@ -5,6 +5,7 @@
 // 点一下把那条的开头滑到屏幕上方 1/3 处，下面能接着看它回的内容；
 // 往回翻到还没加载的地方，先加载再跳；下面没有下一轮了，「↓」就回到最底部。
 // 平时藏着，手指 / 滚轮滑动时才出现，停下 1.5 秒后淡出。
+// 聊天番外也用这一个：换成聊天自己的类名、按番外指令卡分轮（见 chat-room）。
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
@@ -23,9 +24,27 @@ type Props = {
   /** 还没加载出来的更早消息里有没有一轮的开头 */
   hiddenHasRound: boolean;
   onLoadMore: () => void;
+  /** 哪些元素算一轮的开头（默认剧情的 data-story-round） */
+  roundSelector?: string;
+  /** 输入栏：两个键跟着它的高度往上让 */
+  composerSelector?: string;
+  className?: string;
+  buttonClassName?: string;
+  /** 跳到的那一轮闪一下用的类名 */
+  flashClassName?: string;
 };
 
-export function StoryRoundJump({ scrollRef, revision, hiddenHasRound, onLoadMore }: Props) {
+export function StoryRoundJump({
+  scrollRef,
+  revision,
+  hiddenHasRound,
+  onLoadMore,
+  roundSelector = "[data-story-round]",
+  composerSelector = ".story-composer",
+  className = "story-round-jump",
+  buttonClassName = "story-top-btn story-round-jump-btn",
+  flashClassName = "story-round-flash",
+}: Props) {
   const [canPrev, setCanPrev] = useState(false);
   const [canNext, setCanNext] = useState(false);
   const [awake, setAwake] = useState(!AUTO_HIDE);
@@ -46,11 +65,11 @@ export function StoryRoundJump({ scrollRef, revision, hiddenHasRound, onLoadMore
     if (!stage) return [];
     const stageTop = stage.getBoundingClientRect().top;
     const maxScroll = Math.max(0, stage.scrollHeight - stage.clientHeight);
-    return Array.from(stage.querySelectorAll<HTMLElement>("[data-story-round]")).map((el) => {
+    return Array.from(stage.querySelectorAll<HTMLElement>(roundSelector)).map((el) => {
       const top = el.getBoundingClientRect().top - stageTop + stage.scrollTop;
       return { el, want: Math.min(maxScroll, Math.max(0, top - stage.clientHeight * LINE)) };
     });
-  }, [scrollRef]);
+  }, [roundSelector, scrollRef]);
 
   /** 还在往某一轮滑（没到、没超时、手指也没接管）就以那一轮为准，否则就是现在的位置 */
   const currentTop = useCallback(() => {
@@ -88,10 +107,10 @@ export function StoryRoundJump({ scrollRef, revision, hiddenHasRound, onLoadMore
     // 跳过去的这一路也算在滑：滑到停下再过 1.5 秒才淡出，方便接着点
     userScrollUntilRef.current = performance.now() + 1000;
     stage.scrollTo({ top: stop.want, behavior: "smooth" });
-    stop.el.classList.remove("story-round-flash");
+    stop.el.classList.remove(flashClassName);
     void stop.el.offsetWidth;
-    stop.el.classList.add("story-round-flash");
-  }, [scrollRef]);
+    stop.el.classList.add(flashClassName);
+  }, [flashClassName, scrollRef]);
 
   /** from：从哪个滚动位置往上找；不给就是现在的位置 */
   const goPrev = useCallback((from?: number) => {
@@ -193,14 +212,14 @@ export function StoryRoundJump({ scrollRef, revision, hiddenHasRound, onLoadMore
 
   // 跟着输入栏的高度走：多行输入时输入栏变高，两个键往上让
   useEffect(() => {
-    const composer = navRef.current?.parentElement?.querySelector<HTMLElement>(".story-composer");
+    const composer = navRef.current?.parentElement?.querySelector<HTMLElement>(composerSelector);
     if (!composer) return;
     const update = () => setBottom(composer.offsetHeight + 10);
     update();
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
     observer?.observe(composer);
     return () => observer?.disconnect();
-  }, []);
+  }, [composerSelector]);
 
   useEffect(() => () => {
     if (sleepTimerRef.current) clearTimeout(sleepTimerRef.current);
@@ -209,13 +228,13 @@ export function StoryRoundJump({ scrollRef, revision, hiddenHasRound, onLoadMore
   return (
     <div
       ref={navRef}
-      className="story-round-jump"
+      className={className}
       style={{ bottom }}
       data-asleep={awake ? undefined : "true"}
     >
       <button
         type="button"
-        className="story-top-btn story-round-jump-btn"
+        className={buttonClassName}
         aria-label="上一轮"
         disabled={!canPrev}
         onClick={() => { goPrev(); wake(); }}
@@ -224,7 +243,7 @@ export function StoryRoundJump({ scrollRef, revision, hiddenHasRound, onLoadMore
       </button>
       <button
         type="button"
-        className="story-top-btn story-round-jump-btn"
+        className={buttonClassName}
         aria-label="下一轮"
         disabled={!canNext}
         onClick={() => { goNext(); wake(); }}

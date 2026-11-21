@@ -352,6 +352,10 @@ export type MomentsInteractionConfig = {
     bilingualTranslationEnabled: boolean;   // 朋友圈外语正文自动附简中译文
     collapseBilingualTranslation: boolean;  // 默认折叠中文译文
     bilingualTranslationPrompt: string;
+    /** 朋友圈里我的名字显示成网名：顶上用主页网名，角色帖子下用那个聊天里的网名，自己的帖子用发的时候选的；只改显示 */
+    showUserNickname: boolean;
+    /** 朋友圈里角色的名字显示成私聊里给 TA 的备注（没备注的还是原名）；只改显示 */
+    showCharacterAlias: boolean;
     // 禁止自动发帖的角色（只关调度发帖；评论/点赞/手动立即发帖不受影响）
     autoPostDisabledCharacterIds: string[];
 };
@@ -368,6 +372,8 @@ export const DEFAULT_MOMENTS_CONFIG: MomentsInteractionConfig = {
     bilingualTranslationEnabled: true,
     collapseBilingualTranslation: true,
     bilingualTranslationPrompt: DEFAULT_MOMENTS_BILINGUAL_PROMPT,
+    showUserNickname: false,
+    showCharacterAlias: false,
     autoPostDisabledCharacterIds: [],
 };
 

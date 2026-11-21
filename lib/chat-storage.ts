@@ -61,6 +61,8 @@ export type ChatSession = {
     discardInvalidStickers?: boolean;
     /** 灰色系统提示（拍一拍、转账、改日历……）里对方的名字显示成备注；默认关 = 显示大名。只改显示，存的和进提示词的还是大名 */
     sysNoticeUseAlias?: boolean;
+    /** 我的网名：这个聊天里显示的我的名字（引用里的 @名字、美化主题的「名字 时间」）；空 = 用户人设的名字。只改显示 */
+    userNickname?: string;
     /** 语音条单击转文字：开了 = 单击显示文字、长按菜单里播放；默认关 = 单击播放、长按菜单里转文字 */
     voiceTapToText?: boolean;
     bilingualTranslationPrompt?: string;

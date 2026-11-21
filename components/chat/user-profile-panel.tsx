@@ -16,7 +16,7 @@ import { getApiLogs, clearApiLogs, type DebugInfo } from "@/lib/chat-engine";
 import type { FollowUpConfig } from "@/lib/settings-storage";
 import { PageShell } from "@/components/ui/page-shell";
 import { CHAT_APP_CSS_EXAMPLE } from "@/lib/css-examples";
-import { Toggle } from "@/components/ui/form";
+import { Input, Toggle } from "@/components/ui/form";
 import { StickerManager } from "./sticker-manager";
 import { ChatPluginManager } from "./chat-plugin-manager";
 import { ChatPluginPageBoundary } from "./chat-plugin-page-boundary";
@@ -38,6 +38,7 @@ import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
 import { USER_THOUGHT_PEEK_TAG, formatUserThought, loadUserThoughtPrompts, saveUserThoughtPrompts, userThoughtLabel } from "@/lib/user-thought";
 import { formatWalletAmount, getWalletBalance, loadWalletState, WALLET_UPDATED_EVENT } from "@/lib/wallet-storage";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
+import { loadChatHomeNickname, saveChatHomeNickname } from "@/lib/moments-display-name";
 import { ThoughtBubbleIcon } from "./thought-bubble-icon";
 import {
     Loader2,
@@ -162,6 +163,9 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
     const [showMomentsSettings, setShowMomentsSettings] = useState(false);
     const [showWalletPanel, setShowWalletPanel] = useState(false);
     const [identity, setIdentity] = useState<UserIdentity | null>(null);
+    // 主页网名：点名字设置；设了就在这里显示它，朋友圈开了「朋友圈显示网名」时顶上也用它
+    const [homeNickname, setHomeNickname] = useState(() => loadChatHomeNickname());
+    const [homeNicknameDraft, setHomeNicknameDraft] = useState<string | null>(null);
     const [notifEnabled, setNotifEnabled] = useState(false);
     const [notifHint, setNotifHint] = useState<string | null>(null);
     const [notifChecking, setNotifChecking] = useState(false);
@@ -348,7 +352,14 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
                         <div className="flex flex-col flex-1 justify-center gap-2">
                             {/* Top Row: Name and Identity Badge */}
                             <div className="flex items-center justify-between w-full mb-0.5">
-                                <div className="ts-22 font-bold text-[var(--c-text-title)] leading-none truncate">{identity?.name || "未设置身份"}</div>
+                                <button
+                                    type="button"
+                                    className="user-profile-name ts-22 font-bold text-[var(--c-text-title)] leading-none truncate bg-transparent border-0 p-0 text-left cursor-pointer"
+                                    onClick={() => setHomeNicknameDraft(homeNickname)}
+                                    aria-label="设置主页网名"
+                                >
+                                    {homeNickname || identity?.name || "未设置身份"}
+                                </button>
                                 <div className="flex items-center gap-1.5 ts-11 font-medium bg-black/5 dark:bg-white/10 px-2 py-0.5 rounded-full shrink-0 text-[var(--c-text)] opacity-80">
                                     <span className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block" />
                                     手机在线
@@ -496,6 +507,29 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
                     </div>
                 </div>
             </PageShell>
+
+            {/* 主页网名：点上面的名字打开 */}
+            {homeNicknameDraft !== null && (
+                <div className="modal-overlay">
+                    <div className="modal-dialog">
+                        <div className="ts-17 font-semibold text-center text-[var(--c-text)]">主页网名</div>
+                        <Input
+                            type="text"
+                            value={homeNicknameDraft}
+                            onChange={e => setHomeNicknameDraft(e.target.value)}
+                            placeholder={identity?.name || "网名"}
+                        />
+                        <div className="flex gap-3 w-full">
+                            <button onClick={() => setHomeNicknameDraft(null)} className="ui-btn ui-btn-ghost flex-1">取消</button>
+                            <button onClick={() => {
+                                saveChatHomeNickname(homeNicknameDraft);
+                                setHomeNickname(homeNicknameDraft.trim());
+                                setHomeNicknameDraft(null);
+                            }} className="ui-btn ui-btn-success flex-1">保存</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </>
     );
 }
@@ -1091,6 +1125,32 @@ function InlineMomentsSettings({ onBack }: { onBack: () => void }) {
                 </div>
 
                 <div className="menu-group">
+                    <div className="menu-item">
+                        <ProfileSettingsIcon icon={User} color={CONTENT_APP_ACCENTS.chat} />
+                        <div className="menu-label-group">
+                            <span className="menu-label">朋友圈显示网名</span>
+                            <span className="menu-desc">顶上用主页网名；在角色帖子下用那个聊天里的网名；自己发的可以选用哪个</span>
+                        </div>
+                        <div className="menu-right">
+                            <Toggle
+                                checked={config.showUserNickname}
+                                onChange={checked => update({ showUserNickname: checked })}
+                            />
+                        </div>
+                    </div>
+                    <div className="menu-item">
+                        <ProfileSettingsIcon icon={User} color={BINDING_ACCENTS.identity} />
+                        <div className="menu-label-group">
+                            <span className="menu-label">显示角色备注</span>
+                            <span className="menu-desc">朋友圈里角色的名字显示成聊天里给 TA 的备注；没备注的还是原名</span>
+                        </div>
+                        <div className="menu-right">
+                            <Toggle
+                                checked={config.showCharacterAlias}
+                                onChange={checked => update({ showCharacterAlias: checked })}
+                            />
+                        </div>
+                    </div>
                     <div className="menu-item">
                         <ProfileSettingsIcon icon={MessageSquare} color={CONTENT_APP_ACCENTS.moments} />
                         <div className="menu-label-group">
