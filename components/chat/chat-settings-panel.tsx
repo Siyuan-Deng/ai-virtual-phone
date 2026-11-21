@@ -432,6 +432,7 @@ export function ChatSettingsPanel({
     const [collapseBilingualTranslation, setCollapseBilingualTranslation] = useState(session.collapseBilingualTranslation !== false);
     const [discardInvalidStickers, setDiscardInvalidStickers] = useState(session.discardInvalidStickers === true);
     const [sysNoticeUseAlias, setSysNoticeUseAlias] = useState(session.sysNoticeUseAlias === true);
+    const [voiceTapToText, setVoiceTapToText] = useState(session.voiceTapToText === true);
     // 流式生成：按会话区分（线上/线下），存 ChatSession 字段，默认关
     const [streamOnline, setStreamOnline] = useState(session.streamOnline === true);
     const [streamOffline, setStreamOffline] = useState(session.streamOffline === true);
@@ -1143,6 +1144,22 @@ export function ChatSettingsPanel({
                                 </button>
                             </>
                         )}
+                        <div className="menu-item">
+                            <ChatInfoIcon icon={Mic} color={BINDING_ACCENTS.voice} />
+                            <div className="menu-label-group">
+                                <span className="menu-label">语音条单击转文字</span>
+                                <span className="menu-desc">开启：单击转文字，长按菜单里播放；关闭：单击播放，长按菜单里转文字</span>
+                            </div>
+                            <div className="menu-right">
+                                <Toggle
+                                    checked={voiceTapToText}
+                                    onChange={c => {
+                                        setVoiceTapToText(c);
+                                        updateSession({ voiceTapToText: c });
+                                    }}
+                                />
+                            </div>
+                        </div>
                         <div className="menu-item">
                             <ChatInfoIcon icon={Smile} color={BINDING_ACCENTS.preset} />
                             <div className="menu-label-group">
