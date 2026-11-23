@@ -686,17 +686,11 @@ export function ApiSettings() {
                                                     type="password"
                                                     value={config.balanceAccessToken || ""}
                                                     onChange={(e) => updateConfig(config.id, { balanceAccessToken: e.target.value || undefined })}
-                                                    placeholder="中转站后台「个人设置」里生成"
+                                                    placeholder="中转站后台「安全设置」里生成"
                                                 />
-                                                <Input
-                                                    type="text"
-                                                    inputMode="numeric"
-                                                    value={config.balanceUserId || ""}
-                                                    onChange={(e) => updateConfig(config.id, { balanceUserId: e.target.value.replace(/\D/g, "") || undefined })}
-                                                    placeholder="用户 ID（个人设置里那个数字，new-api 要填）"
-                                                />
+                                                {/* 新版 new-api 的令牌（nap_ 开头）自带是谁，不用再填用户 ID，这一格就不放了 */}
                                                 <span className="menu-desc ml-1 whitespace-normal leading-[1.45]">
-                                                    填了就显示整个账户的余额，不限额度的 Key 也看得到。只用来查余额，和 API Key 一样只存在这台手机上，查的时候手机直接发给中转站。
+                                                    在中转站后台「安全设置」里生成，要有读资料的权限。只勾选资料权限，不要勾选管理 API Key、钱包、账户安全设置等权限。
                                                 </span>
                                             </div>
                                         )}
