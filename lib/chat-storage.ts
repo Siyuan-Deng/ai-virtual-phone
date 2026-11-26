@@ -1475,6 +1475,54 @@ function syncDeletedResponseBatchMetadata(deletedMessages: ChatMessage[]): void 
     dbPutMessages([...changed.values()]);
 }
 
+// 通话留痕（「[我发起了语音通话]」这类）渲染成灰色系统小字
+export const CALL_SYSTEM_TEXT_RE = /\[我(?:向.+)?(?:发起了|挂断了|拒绝了|取消了)(?:群?(?:语音|视频)通话)/;
+
+/** 拍一拍/群管理通知/通话留痕渲染成灰色系统小字，没有 💭 面板入口——
+ *  状态栏/内心独白/状态值挂上去会被显示层吞掉，挂载时必须跳过它们 */
+export function canCarryFoldedPanel(part: { content?: string; mediaType?: ChatMessage["mediaType"] }): boolean {
+    if (part.mediaType === "poke" || part.mediaType === "group_admin_notice") return false;
+    return !CALL_SYSTEM_TEXT_RE.test(part.content || "");
+}
+
+/** 状态栏、内心独白、状态值、思维链只挂在一次回复的第一条气泡上。删掉驮着它们的那条时，
+ *  顺延到这次回复剩下的第一条能显示面板的消息上，不跟着一起没了；整次回复都删光就不管。
+ *  要在 syncDeletedResponseBatchMetadata 之前跑：那边重建原文时按剩下的消息找状态栏。 */
+function carryFoldedPanelToRemainingBatch(deletedMessages: ChatMessage[]): void {
+    const changed = new Map<string, ChatMessage>();
+    for (const deleted of [...deletedMessages].sort(compareChatMessages)) {
+        if (deleted.role !== "assistant" || !deleted.responseBatchId) continue;
+        const hasState = !!(deleted.stateValues && deleted.stateValues.length > 0);
+        if (!deleted.statusPanel && !deleted.innerMonologue && !deleted.reasoningText && !hasState) continue;
+        const target = _messagesCache
+            .filter(message =>
+                message.sessionId === deleted.sessionId
+                && message.responseBatchId === deleted.responseBatchId
+                && message.role === "assistant"
+                && message.mediaType !== "tool_notice"
+                && message.mediaType !== "tool_result"
+                && canCarryFoldedPanel(message)
+            )
+            .sort(compareChatMessages)[0];
+        if (!target) continue;
+        const next = { ...(changed.get(target.id) || target) };
+        if (!next.statusPanel && deleted.statusPanel) {
+            next.statusPanel = deleted.statusPanel;
+            next.statusRegionMode = deleted.statusRegionMode;
+        }
+        if (!next.innerMonologue && deleted.innerMonologue) next.innerMonologue = deleted.innerMonologue;
+        if (!next.reasoningText && deleted.reasoningText) next.reasoningText = deleted.reasoningText;
+        if (hasState && !(next.stateValues && next.stateValues.length > 0)) {
+            next.stateValues = deleted.stateValues;
+            next.freshStateValues = deleted.freshStateValues;
+        }
+        changed.set(target.id, next);
+    }
+    if (changed.size === 0) return;
+    _messagesCache = _messagesCache.map(message => changed.get(message.id) || message);
+    dbPutMessages([...changed.values()]);
+}
+
 function expandToolExecutionDeleteSet(messages: ChatMessage[]): ChatMessage[] {
     const toolExecutionIds = new Set(
         messages
@@ -1507,6 +1555,7 @@ export function deleteChatMessage(messageId: string) {
     const deletedMessages = expandToolExecutionDeleteSet([targetMsg]);
     const deletedIds = new Set(deletedMessages.map(message => message.id));
     _messagesCache = _messagesCache.filter(message => !deletedIds.has(message.id));
+    carryFoldedPanelToRemainingBatch(deletedMessages);
     syncDeletedResponseBatchMetadata(deletedMessages);
     dbDeleteMessagesByIds([...deletedIds]);
 
@@ -1577,6 +1626,7 @@ export function deleteChatMessagesByIds(sessionId: string, messageIds: string[])
 
     const deletedIdSet = new Set(deletedIds);
     _messagesCache = _messagesCache.filter(m => m.sessionId !== sessionId || !deletedIdSet.has(m.id));
+    carryFoldedPanelToRemainingBatch(deletedMessages);
     syncDeletedResponseBatchMetadata(deletedMessages);
     dbDeleteMessagesByIds(deletedIds);
     reindexSessionMessageOrders(sessionId);
